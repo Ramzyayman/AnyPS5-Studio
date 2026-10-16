@@ -15,20 +15,40 @@ import { audioService } from '../services/audioService';
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
+  showAdvancedNav: boolean;
+  onToggleAdvancedNav: (enabled: boolean) => void;
 }
 
-export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
+export const SettingsModal: React.FC<SettingsModalProps> = ({ 
+  isOpen, 
+  onClose,
+  showAdvancedNav,
+  onToggleAdvancedNav
+}) => {
   const [relinkerPath, setRelinkerPath] = useState<string>('C:/Users/PC/.gemini/antigravity/scratch/AnyPS5/build/relinker.exe');
   const [prxPath, setPrxPath] = useState<string>('C:/Users/PC/.gemini/antigravity/scratch/AnyPS5/libs');
   const [defaultTarget, setDefaultTarget] = useState<string>('windows');
   const [cpuFix, setCpuFix] = useState<string>('intel');
   const [soundEnabled, setSoundEnabled] = useState<boolean>(audioService.enabled);
   const [hapticsEnabled, setHapticsEnabled] = useState<boolean>(true);
+  const [advanced, setAdvanced] = useState<boolean>(showAdvancedNav);
+
+  React.useEffect(() => {
+    if (isOpen) {
+      setAdvanced(showAdvancedNav);
+    }
+  }, [isOpen, showAdvancedNav]);
 
   if (!isOpen) return null;
 
+  const handleAdvancedChange = (checked: boolean) => {
+    setAdvanced(checked);
+    onToggleAdvancedNav(checked);
+  };
+
   const handleSave = () => {
     audioService.playConfirm();
+    onToggleAdvancedNav(advanced);
     onClose();
   };
 
@@ -121,6 +141,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
               />
               <span>DualSense controller adaptive trigger & vibration emulation</span>
             </label>
+
+            <div className="pt-1.5 border-t border-white/5">
+              <label className="flex items-start space-x-2.5 text-xs text-white/90 cursor-pointer group">
+                <input
+                  type="checkbox"
+                  checked={advanced}
+                  onChange={(e) => handleAdvancedChange(e.target.checked)}
+                  className="rounded bg-white/10 border-white/20 text-[#0070d1] focus:ring-0 mt-0.5"
+                />
+                <div className="flex flex-col">
+                  <span className="font-medium text-white group-hover:text-white transition-colors">Advanced</span>
+                  <span className="text-[11px] text-white/50 leading-normal mt-0.5">Show advanced developer tools in the main navigation.</span>
+                </div>
+              </label>
+            </div>
           </div>
 
           <div className="pt-4 flex items-center justify-end space-x-3 border-t border-white/10">

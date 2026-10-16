@@ -23,6 +23,29 @@ export const App: React.FC = () => {
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [gamepadConnected, setGamepadConnected] = useState<boolean>(false);
 
+  // Advanced navbar items setting (persisted in localStorage, default OFF)
+  const [showAdvancedNav, setShowAdvancedNav] = useState<boolean>(() => {
+    try {
+      const stored = localStorage.getItem('anyps5_show_advanced_nav');
+      return stored === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const handleToggleAdvancedNav = (enabled: boolean) => {
+    setShowAdvancedNav(enabled);
+    try {
+      localStorage.setItem('anyps5_show_advanced_nav', enabled ? 'true' : 'false');
+    } catch (err) {
+      console.error('Failed to save advanced nav preference:', err);
+    }
+    // If user is currently viewing an advanced section and disables Advanced, navigate safely to Games
+    if (!enabled && ['nid', 'prx', 'telemetry'].includes(activeTab)) {
+      setActiveTab('games');
+    }
+  };
+
   // Load games from apiBridge
   useEffect(() => {
     apiBridge.getGames().then((loaded) => {
@@ -30,13 +53,9 @@ export const App: React.FC = () => {
     });
   }, []);
 
-  const TAB_ORDER: ('games' | 'relinker' | 'nid' | 'prx' | 'telemetry')[] = [
-    'games',
-    'relinker',
-    'nid',
-    'prx',
-    'telemetry'
-  ];
+  const availableTabs: ('games' | 'relinker' | 'nid' | 'prx' | 'telemetry')[] = showAdvancedNav
+    ? ['games', 'relinker', 'nid', 'prx', 'telemetry']
+    : ['games', 'relinker'];
 
   // Keyboard navigation for authentic console feel
   useEffect(() => {
@@ -46,8 +65,9 @@ export const App: React.FC = () => {
       // Tab switching via Q/E or [ / ]
       if ((e.key === 'q' || e.key === 'Q' || e.key === '[') && !['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) {
         setActiveTab((prev) => {
-          const idx = TAB_ORDER.indexOf(prev);
-          const next = TAB_ORDER[(idx - 1 + TAB_ORDER.length) % TAB_ORDER.length];
+          const idx = availableTabs.indexOf(prev);
+          const currentIdx = idx === -1 ? 0 : idx;
+          const next = availableTabs[(currentIdx - 1 + availableTabs.length) % availableTabs.length];
           audioService.playNavTick();
           return next;
         });
@@ -56,8 +76,9 @@ export const App: React.FC = () => {
 
       if ((e.key === 'e' || e.key === 'E' || e.key === ']') && !['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) {
         setActiveTab((prev) => {
-          const idx = TAB_ORDER.indexOf(prev);
-          const next = TAB_ORDER[(idx + 1) % TAB_ORDER.length];
+          const idx = availableTabs.indexOf(prev);
+          const currentIdx = idx === -1 ? 0 : idx;
+          const next = availableTabs[(currentIdx + 1) % availableTabs.length];
           audioService.playNavTick();
           return next;
         });
@@ -99,7 +120,7 @@ export const App: React.FC = () => {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [games, selectedGameIndex, activeTab, isAddGameOpen, isSettingsOpen, activeRunningGame]);
+  }, [games, selectedGameIndex, activeTab, isAddGameOpen, isSettingsOpen, activeRunningGame, availableTabs]);
 
   // Gamepad API Polling
   useEffect(() => {
@@ -120,16 +141,18 @@ export const App: React.FC = () => {
         if (l1Pressed && !lastBumperState) {
           lastBumperState = true;
           setActiveTab((prev) => {
-            const idx = TAB_ORDER.indexOf(prev);
-            const next = TAB_ORDER[(idx - 1 + TAB_ORDER.length) % TAB_ORDER.length];
+            const idx = availableTabs.indexOf(prev);
+            const currentIdx = idx === -1 ? 0 : idx;
+            const next = availableTabs[(currentIdx - 1 + availableTabs.length) % availableTabs.length];
             audioService.playNavTick();
             return next;
           });
         } else if (r1Pressed && !lastBumperState) {
           lastBumperState = true;
           setActiveTab((prev) => {
-            const idx = TAB_ORDER.indexOf(prev);
-            const next = TAB_ORDER[(idx + 1) % TAB_ORDER.length];
+            const idx = availableTabs.indexOf(prev);
+            const currentIdx = idx === -1 ? 0 : idx;
+            const next = availableTabs[(currentIdx + 1) % availableTabs.length];
             audioService.playNavTick();
             return next;
           });
@@ -180,7 +203,7 @@ export const App: React.FC = () => {
 
     animationFrameId = requestAnimationFrame(pollGamepads);
     return () => cancelAnimationFrame(animationFrameId);
-  }, [games, selectedGameIndex, activeTab, isAddGameOpen, isSettingsOpen, activeRunningGame]);
+  }, [games, selectedGameIndex, activeTab, isAddGameOpen, isSettingsOpen, activeRunningGame, availableTabs]);
 
   const handleUpdateGameStatus = (gameId: string, status: 'ported', updatedGame?: GameItem) => {
     setGames((prev) => {
@@ -243,6 +266,7 @@ export const App: React.FC = () => {
           onOpenAddGame={() => setIsAddGameOpen(true)}
           onOpenSettings={() => setIsSettingsOpen(true)}
           gamepadConnected={gamepadConnected}
+          showAdvancedNav={showAdvancedNav}
         />
       </div>
 
@@ -323,6 +347,8 @@ export const App: React.FC = () => {
       <SettingsModal
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
+        showAdvancedNav={showAdvancedNav}
+        onToggleAdvancedNav={handleToggleAdvancedNav}
       />
     </div>
   );

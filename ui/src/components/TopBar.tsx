@@ -12,14 +12,15 @@ interface TopBarProps {
   onOpenAddGame: () => void;
   onOpenSettings: () => void;
   gamepadConnected: boolean;
+  showAdvancedNav?: boolean;
 }
 
-const NAV_ITEMS: { key: 'games' | 'relinker' | 'nid' | 'prx' | 'telemetry'; label: string }[] = [
+const ALL_NAV_ITEMS: { key: 'games' | 'relinker' | 'nid' | 'prx' | 'telemetry'; label: string; advanced?: boolean }[] = [
   { key: 'games', label: 'Games' },
   { key: 'relinker', label: 'Relinker Studio' },
-  { key: 'nid', label: 'NID Inspector' },
-  { key: 'prx', label: 'PRX Libraries' },
-  { key: 'telemetry', label: 'System Status' },
+  { key: 'nid', label: 'NID Inspector', advanced: true },
+  { key: 'prx', label: 'PRX Libraries', advanced: true },
+  { key: 'telemetry', label: 'System Status', advanced: true },
 ];
 
 export const TopBar: React.FC<TopBarProps> = ({
@@ -28,8 +29,13 @@ export const TopBar: React.FC<TopBarProps> = ({
   onOpenAddGame,
   onOpenSettings,
   gamepadConnected,
+  showAdvancedNav = false,
 }) => {
   const [time, setTime] = useState<string>('');
+
+  const navItems = showAdvancedNav 
+    ? ALL_NAV_ITEMS 
+    : ALL_NAV_ITEMS.filter((item) => !item.advanced);
 
   useEffect(() => {
     const updateTime = () => {
@@ -69,7 +75,7 @@ export const TopBar: React.FC<TopBarProps> = ({
 
         {/* PS5 Typography-Driven Navigation (no underlines, no boxes, purely typography-differentiated) */}
         <nav className="flex items-baseline space-x-6 md:space-x-8" role="tablist">
-          {NAV_ITEMS.map((item) => {
+          {navItems.map((item) => {
             const isSelected = activeTab === item.key;
             return (
               <button
