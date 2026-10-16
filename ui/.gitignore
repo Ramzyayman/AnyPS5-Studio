@@ -8,3 +8,5 @@ dist-installer
 # Whitelist JSON files in ui (overriding root *.json ignore)
 !*.json
 !**/*.json
+!public/icon.png
+!public/icon.ico

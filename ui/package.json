@@ -1,9 +1,9 @@
 {
   "name": "anyps5-ui",
-  "version": "1.0.1",
+  "version": "1.0.0",
   "type": "module",
   "description": "PlayStation 5 styled Launcher and Relinker Studio for AnyPS5",
-  "author": "Ramzy Ayman",
+  "author": "RamsMadeUI",
   "main": "dist-electron/main.cjs",
   "scripts": {
     "dev": "vite",
@@ -17,7 +17,7 @@
   "build": {
     "appId": "com.anyps5.studio",
     "productName": "AnyPS5 Studio",
-    "copyright": "Copyright © 2026 AnyPS5",
+    "copyright": "Copyright © 2026 RamsMadeUI",
     "directories": {
       "output": "dist-installer"
     },
@@ -52,14 +52,21 @@
           "arch": ["x64"]
         }
       ],
+      "icon": "public/icon.ico",
       "artifactName": "AnyPS5-Studio-Setup-${version}.${ext}"
     },
     "nsis": {
       "oneClick": false,
+      "perMachine": true,
+      "allowElevation": true,
       "allowToChangeInstallationDirectory": true,
+      "installerIcon": "public/icon.ico",
+      "uninstallerIcon": "public/icon.ico",
+      "installerHeaderIcon": "public/icon.ico",
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "AnyPS5 Studio"
+      "shortcutName": "AnyPS5 Studio",
+      "uninstallDisplayName": "AnyPS5 Studio"
     }
   },
   "dependencies": {

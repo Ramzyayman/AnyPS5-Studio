@@ -7,7 +7,23 @@ import { autoUpdater } from 'electron-updater';
 
 let mainWindow: BrowserWindow | null = null;
 
+function getWindowIconPath(): string {
+  const candidates = [
+    path.join(__dirname, '../dist/icon.ico'),
+    path.join(__dirname, '../public/icon.ico'),
+    path.join(__dirname, '../dist/icon.png'),
+    path.join(__dirname, '../public/icon.png'),
+    path.join(process.resourcesPath, 'icon.ico'),
+    path.join(process.resourcesPath, 'icon.png'),
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return c;
+  }
+  return '';
+}
+
 function createWindow() {
+  const windowIcon = getWindowIconPath();
   mainWindow = new BrowserWindow({
     width: 1366,
     height: 820,
@@ -17,6 +33,7 @@ function createWindow() {
     autoHideMenuBar: true,
     backgroundColor: '#04060a',
     title: 'AnyPS5 · PlayStation 5 Studio',
+    icon: windowIcon || undefined,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       nodeIntegration: false,
