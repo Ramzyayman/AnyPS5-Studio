@@ -9,7 +9,7 @@
     "build": "tsc && vite build",
     "build:electron": "esbuild electron/main.ts --bundle --platform=node --target=node18 --outfile=dist-electron/main.cjs --external:electron && esbuild electron/preload.ts --bundle --platform=node --target=node18 --outfile=dist-electron/preload.cjs --external:electron",
     "build:all": "npm run build && npm run build:electron",
-    "electron": "npm run build:electron && electron .",
+    "electron": "npm run build:all && electron .",
     "preview": "vite preview"
   },
   "dependencies": {

@@ -23,11 +23,18 @@ function createWindow() {
     show: true,
   });
 
-  // Try loading live Vite dev server first, fallback to static dist
-  const devUrl = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173';
-  mainWindow.loadURL(devUrl).catch(() => {
-    mainWindow?.loadFile(path.join(__dirname, '../dist/index.html'));
-  });
+  const distPath = path.join(__dirname, '../dist/index.html');
+  if (process.env.VITE_DEV_SERVER_URL) {
+    mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL).catch(() => {
+      if (fs.existsSync(distPath)) mainWindow?.loadFile(distPath);
+    });
+  } else if (fs.existsSync(distPath)) {
+    mainWindow.loadFile(distPath);
+  } else {
+    mainWindow.loadURL('http://localhost:5173').catch(() => {
+      if (fs.existsSync(distPath)) mainWindow?.loadFile(distPath);
+    });
+  }
 
   mainWindow.show();
   mainWindow.focus();
@@ -37,13 +44,25 @@ function createWindow() {
   });
 }
 
-app.whenReady().then(() => {
-  createWindow();
-
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
   });
-});
+
+  app.whenReady().then(() => {
+    createWindow();
+
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    });
+  });
+}
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
