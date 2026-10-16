@@ -109,3 +109,6 @@ cookies.txt
 
 .env
 .env.local
+
+libs/
+relinked-games/

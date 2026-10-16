@@ -1,0 +1,9 @@
+node_modules
+dist
+dist-electron
+.DS_Store
+*.local
+
+# Whitelist JSON files in ui (overriding root *.json ignore)
+!*.json
+!**/*.json
