@@ -28,7 +28,7 @@ export const TelemetryPanel: React.FC = () => {
   ];
 
   return (
-    <div className="relative w-full h-[calc(100vh-56px)] flex flex-col p-8 overflow-y-auto select-none">
+    <div className="relative w-full h-full flex flex-col pt-20 px-8 pb-8 overflow-y-auto select-none">
       {/* Header */}
       <div className="mb-6 pb-4 border-b border-white/5">
         <span className="text-[11px] font-medium text-neutral-400 uppercase tracking-wider block mb-1">

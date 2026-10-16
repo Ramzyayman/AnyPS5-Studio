@@ -139,8 +139,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   }
 
   return (
-    <div className="relative w-full h-[calc(100vh-56px)] flex flex-col justify-between overflow-hidden select-none">
-      {/* Full-viewport Dynamic Background Hero Artwork */}
+    <div className="relative w-full h-full flex flex-col justify-between overflow-hidden select-none">
+      {/* Full-viewport Dynamic Background Hero Artwork - Extends to the very top behind floating navbar */}
       <div className="absolute inset-0 z-0 pointer-events-none transition-all duration-500 ease-out">
         {selectedGame?.backdropUrl && (
           <img
@@ -150,14 +150,14 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             className="w-full h-full object-cover object-top opacity-65 scale-100 transition-opacity duration-700 ease-in-out"
           />
         )}
-        {/* Layered cinematic masks: refined to keep center & upper-right visible while lower-left is readable */}
+        {/* Layered cinematic masks on the artwork layer itself: subtle top fade for navbar text legibility, zero horizontal seam */}
+        <div className="absolute inset-x-0 top-0 h-32 bg-gradient-to-b from-[#04060a]/80 via-[#04060a]/30 to-transparent pointer-events-none" />
         <div className="absolute inset-0 bg-gradient-to-r from-[#04060a] via-[#04060a]/80 via-35% to-transparent w-full md:w-3/4" />
         <div className="absolute inset-x-0 bottom-0 h-48 bg-gradient-to-t from-[#04060a] via-[#04060a]/50 to-transparent" />
-        <div className="absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-[#04060a]/70 to-transparent" />
       </div>
 
-      {/* Top Section: Game Carousel Shelf */}
-      <div className="relative z-10 pt-3 px-10">
+      {/* Top Section: Game Carousel Shelf (Positioned naturally below floating navbar) */}
+      <div className="relative z-10 pt-20 px-10">
         <div className="flex items-center justify-between text-xs font-medium text-neutral-400 mb-2.5">
           <div className="flex items-center space-x-2">
             <span className="text-white font-semibold text-sm">Your Games</span>

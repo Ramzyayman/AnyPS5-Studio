@@ -176,18 +176,20 @@ export const App: React.FC = () => {
   const selectedGame = games[selectedGameIndex] || games[0];
 
   return (
-    <div className="relative w-screen h-screen bg-[#04060a] text-slate-100 flex flex-col overflow-hidden select-none">
-      {/* Top PlayStation Header */}
-      <TopBar
-        activeTab={activeTab}
-        onTabChange={setActiveTab}
-        onOpenAddGame={() => setIsAddGameOpen(true)}
-        onOpenSettings={() => setIsSettingsOpen(true)}
-        gamepadConnected={gamepadConnected}
-      />
+    <div className="relative w-screen h-screen bg-[#04060a] text-slate-100 overflow-hidden select-none">
+      {/* Top PlayStation Header - Floats transparently over the artwork */}
+      <div className="absolute top-0 left-0 right-0 z-30 pointer-events-auto bg-transparent">
+        <TopBar
+          activeTab={activeTab}
+          onTabChange={setActiveTab}
+          onOpenAddGame={() => setIsAddGameOpen(true)}
+          onOpenSettings={() => setIsSettingsOpen(true)}
+          gamepadConnected={gamepadConnected}
+        />
+      </div>
 
-      {/* Main Tab Screen */}
-      <main className="relative z-10 flex-1 flex flex-col min-h-0 overflow-hidden">
+      {/* Main Tab Screen - Extends full viewport from y = 0 */}
+      <main className="relative z-10 w-full h-full min-h-0 overflow-hidden">
         {activeTab === 'games' && (
           <HomeScreen
             games={games}
@@ -211,7 +213,7 @@ export const App: React.FC = () => {
               onUpdateGameStatus={handleUpdateGameStatus}
             />
           ) : (
-            <div className="flex-1 flex flex-col items-center justify-center p-8 text-center animate-fade-in">
+            <div className="flex-1 h-full flex flex-col items-center justify-center p-8 pt-20 text-center animate-fade-in">
               <p className="text-neutral-400 text-sm mb-4">No title selected for relinking.</p>
               <button
                 onClick={() => setIsAddGameOpen(true)}
@@ -227,7 +229,7 @@ export const App: React.FC = () => {
           selectedGame ? (
             <NidInspector game={selectedGame} />
           ) : (
-            <div className="flex-1 flex flex-col items-center justify-center p-8 text-center animate-fade-in">
+            <div className="flex-1 h-full flex flex-col items-center justify-center p-8 pt-20 text-center animate-fade-in">
               <p className="text-neutral-400 text-sm mb-4">No title selected for NID audit.</p>
               <button
                 onClick={() => setIsAddGameOpen(true)}

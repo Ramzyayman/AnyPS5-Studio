@@ -34,7 +34,7 @@ export const PrxManager: React.FC = () => {
   };
 
   return (
-    <div className="relative w-full h-[calc(100vh-56px)] flex flex-col p-8 overflow-y-auto select-none">
+    <div className="relative w-full h-full flex flex-col pt-20 px-8 pb-8 overflow-y-auto select-none">
       {/* Header */}
       <div className="flex items-center justify-between mb-6 pb-4 border-b border-white/5">
         <div>

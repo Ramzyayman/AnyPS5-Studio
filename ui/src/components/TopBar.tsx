@@ -51,7 +51,10 @@ export const TopBar: React.FC<TopBarProps> = ({
   };
 
   return (
-    <header className="relative z-30 h-14 flex items-center justify-between px-10 bg-gradient-to-b from-[#04060a]/60 via-[#04060a]/20 to-transparent select-none">
+    <header 
+      className="relative z-30 h-16 flex items-center justify-between px-10 bg-transparent select-none"
+      style={{ backgroundColor: 'transparent' }}
+    >
       {/* Left: Compact AnyPS5 Console Identity & PS5 Typography Navigation */}
       <div className="flex items-center space-x-10">
         {/* Compact Console Brand Mark */}
