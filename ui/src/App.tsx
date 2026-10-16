@@ -247,7 +247,7 @@ export const App: React.FC = () => {
       </div>
 
       {/* Main Tab Screen - Extends full viewport from y = 0 */}
-      <main className="relative z-10 w-full h-full min-h-0 overflow-hidden">
+      <main className="w-full h-full min-h-0 overflow-hidden">
         {activeTab === 'games' && (
           <HomeScreen
             games={games}

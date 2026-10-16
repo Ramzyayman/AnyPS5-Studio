@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { 
   Play, 
   Sparkles, 
@@ -61,6 +62,23 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
       });
     }
   }, [selectedGameIndex]);
+
+  // Handle Escape key to dismiss drawer or notice modal
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (showTechnicalDrawer) {
+          audioService.playCancel();
+          setShowTechnicalDrawer(false);
+        } else if (sampleNoticeGame) {
+          audioService.playCancel();
+          setSampleNoticeGame(null);
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showTechnicalDrawer, sampleNoticeGame]);
 
   const handleTileClick = (index: number) => {
     if (index !== selectedGameIndex) {
@@ -329,134 +347,151 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
       )}
 
       {/* Contextual Technical Specs Drawer (Sliding Console Panel) */}
-      {showTechnicalDrawer && selectedGame && (
-        <div className="absolute right-0 top-0 bottom-0 w-96 ps-panel z-40 p-6 flex flex-col justify-between border-l border-white/10 animate-fade-in shadow-2xl">
-          <div className="space-y-6 overflow-y-auto pr-1">
-            <div className="flex items-center justify-between pb-3 border-b border-white/10">
-              <div className="flex items-center space-x-2 text-white font-semibold text-sm">
-                <Info className="w-4 h-4 text-neutral-400" />
-                <span>Technical Specifications</span>
+      {showTechnicalDrawer && selectedGame && typeof document !== 'undefined' && createPortal(
+        <div className="fixed inset-0 z-50 flex justify-end select-none animate-fade-in">
+          {/* Dimmed backdrop for focus and easy outside click to close */}
+          <div
+            onClick={() => {
+              audioService.playCancel();
+              setShowTechnicalDrawer(false);
+            }}
+            className="fixed inset-0 bg-black/60 backdrop-blur-xs transition-opacity"
+          />
+
+          {/* Drawer panel */}
+          <div className="relative w-96 max-w-[90vw] h-full ps-panel p-6 flex flex-col justify-between border-l border-white/10 shadow-2xl z-10 bg-[#080b11]/95">
+            <div className="space-y-6 overflow-y-auto pr-1">
+              <div className="flex items-center justify-between pb-3 border-b border-white/10">
+                <div className="flex items-center space-x-2 text-white font-semibold text-sm">
+                  <Info className="w-4 h-4 text-neutral-400" />
+                  <span>Technical Specifications</span>
+                </div>
+                <button
+                  onClick={() => {
+                    audioService.playCancel();
+                    setShowTechnicalDrawer(false);
+                  }}
+                  className="p-1.5 rounded-full hover:bg-white/10 text-neutral-400 hover:text-white transition-colors"
+                  title="Close (Esc)"
+                >
+                  <X className="w-4 h-4" />
+                </button>
               </div>
-              <button
-                onClick={() => setShowTechnicalDrawer(false)}
-                className="p-1 rounded-full hover:bg-white/10 text-neutral-400 hover:text-white"
-              >
-                <X className="w-4 h-4" />
-              </button>
+
+              {selectedGame.isSample && (
+                <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-200/90 text-xs leading-relaxed">
+                  <p className="font-semibold text-amber-300 mb-0.5">Demo Title Preset</p>
+                  This entry is bundled for UI layout demonstration. No files exist on disk at <code className="text-white font-mono text-[11px] block mt-1">{selectedGame.path}</code>
+                </div>
+              )}
+
+              {/* Spec items */}
+              <div className="space-y-4 text-xs">
+                <div>
+                  <span className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold block mb-0.5">Porting Architecture</span>
+                  <p className="text-neutral-300 text-xs leading-relaxed">
+                    Native 64-bit Windows PE port utilizing AnyPS5 clean-room PRX system libraries with Vulkan/SPIR-V graphics pipeline translation.
+                  </p>
+                </div>
+
+                <div>
+                  <span className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold block mb-0.5">Title & Path</span>
+                  <p className="text-white font-medium">{selectedGame.title}</p>
+                  <p className="text-neutral-400 font-mono text-[11px] truncate">{selectedGame.path}</p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <span className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold block mb-0.5">Executable</span>
+                    <p className="text-white font-mono">{selectedGame.executableName}</p>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold block mb-0.5">Binary Size</span>
+                    <p className="text-white font-mono">{formatSize(selectedGame.sizeBytes)}</p>
+                  </div>
+                </div>
+
+                <div>
+                  <span className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold block mb-0.5">PS5 SDK Target</span>
+                  <p className="text-white font-mono">{selectedGame.sdkVersion}</p>
+                </div>
+
+                <div>
+                  <span className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold block mb-0.5">Host CPU Requirements</span>
+                  <p className="text-white">{selectedGame.minHostCpu}</p>
+                  <p className="text-[10px] text-neutral-400 mt-0.5">Requires Zen2 AVX2, FMA, F16C, BMI1, BMI2, LZCNT, MOVBE.</p>
+                </div>
+
+                <div>
+                  <span className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold block mb-0.5">NID Import Coverage</span>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-white font-mono font-bold">{selectedGame.compatibility.score}%</span>
+                    <span className="text-neutral-400 font-mono text-[11px]">
+                      {selectedGame.compatibility.resolvedNids} / {selectedGame.compatibility.totalNids} functions
+                    </span>
+                  </div>
+                  <div className="w-full bg-white/10 rounded-full h-1.5 overflow-hidden">
+                    <div 
+                      className="bg-emerald-400 h-full rounded-full"
+                      style={{ width: `${selectedGame.compatibility.score}%` }}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <span className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold block mb-0.5">PRX System Dependencies</span>
+                  {selectedGame.compatibility.unresolvedModules.length > 0 ? (
+                    <p className="text-amber-300 font-mono text-[11px]">
+                      Missing: {selectedGame.compatibility.unresolvedModules.join(', ')}
+                    </p>
+                  ) : (
+                    <p className="text-emerald-400 text-[11px] flex items-center space-x-1">
+                      <CheckCircle2 className="w-3.5 h-3.5 inline mr-1" />
+                      <span>All core runtime dependencies resolved</span>
+                    </p>
+                  )}
+                </div>
+
+                <div>
+                  <span className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold block mb-0.5">Play Statistics</span>
+                  <p className="text-white">{selectedGame.playTime || '0 hrs'} total playtime</p>
+                  <p className="text-neutral-400 text-[11px]">Last session: {selectedGame.lastPlayed || 'Never'}</p>
+                </div>
+              </div>
             </div>
 
-            {selectedGame.isSample && (
-              <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-200/90 text-xs leading-relaxed">
-                <p className="font-semibold text-amber-300 mb-0.5">Demo Title Preset</p>
-                This entry is bundled for UI layout demonstration. No files exist on disk at <code className="text-white font-mono text-[11px] block mt-1">{selectedGame.path}</code>
-              </div>
-            )}
-
-            {/* Spec items */}
-            <div className="space-y-4 text-xs">
-              <div>
-                <span className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold block mb-0.5">Porting Architecture</span>
-                <p className="text-neutral-300 text-xs leading-relaxed">
-                  Native 64-bit Windows PE port utilizing AnyPS5 clean-room PRX system libraries with Vulkan/SPIR-V graphics pipeline translation.
-                </p>
-              </div>
-
-              <div>
-                <span className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold block mb-0.5">Title & Path</span>
-                <p className="text-white font-medium">{selectedGame.title}</p>
-                <p className="text-neutral-400 font-mono text-[11px] truncate">{selectedGame.path}</p>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <span className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold block mb-0.5">Executable</span>
-                  <p className="text-white font-mono">{selectedGame.executableName}</p>
-                </div>
-                <div>
-                  <span className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold block mb-0.5">Binary Size</span>
-                  <p className="text-white font-mono">{formatSize(selectedGame.sizeBytes)}</p>
-                </div>
-              </div>
-
-              <div>
-                <span className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold block mb-0.5">PS5 SDK Target</span>
-                <p className="text-white font-mono">{selectedGame.sdkVersion}</p>
-              </div>
-
-              <div>
-                <span className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold block mb-0.5">Host CPU Requirements</span>
-                <p className="text-white">{selectedGame.minHostCpu}</p>
-                <p className="text-[10px] text-neutral-400 mt-0.5">Requires Zen2 AVX2, FMA, F16C, BMI1, BMI2, LZCNT, MOVBE.</p>
-              </div>
-
-              <div>
-                <span className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold block mb-0.5">NID Import Coverage</span>
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-white font-mono font-bold">{selectedGame.compatibility.score}%</span>
-                  <span className="text-neutral-400 font-mono text-[11px]">
-                    {selectedGame.compatibility.resolvedNids} / {selectedGame.compatibility.totalNids} functions
-                  </span>
-                </div>
-                <div className="w-full bg-white/10 rounded-full h-1.5 overflow-hidden">
-                  <div 
-                    className="bg-emerald-400 h-full rounded-full"
-                    style={{ width: `${selectedGame.compatibility.score}%` }}
-                  />
-                </div>
-              </div>
-
-              <div>
-                <span className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold block mb-0.5">PRX System Dependencies</span>
-                {selectedGame.compatibility.unresolvedModules.length > 0 ? (
-                  <p className="text-amber-300 font-mono text-[11px]">
-                    Missing: {selectedGame.compatibility.unresolvedModules.join(', ')}
-                  </p>
-                ) : (
-                  <p className="text-emerald-400 text-[11px] flex items-center space-x-1">
-                    <CheckCircle2 className="w-3.5 h-3.5 inline mr-1" />
-                    <span>All core runtime dependencies resolved</span>
-                  </p>
-                )}
-              </div>
-
-              <div>
-                <span className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold block mb-0.5">Play Statistics</span>
-                <p className="text-white">{selectedGame.playTime || '0 hrs'} total playtime</p>
-                <p className="text-neutral-400 text-[11px]">Last session: {selectedGame.lastPlayed || 'Never'}</p>
-              </div>
-            </div>
-          </div>
-
-          <div className="pt-4 border-t border-white/10 space-y-2">
-            <button
-              onClick={() => {
-                setShowTechnicalDrawer(false);
-                onOpenNidAudit(selectedGame);
-              }}
-              className="w-full py-2.5 rounded-full bg-white/10 hover:bg-white/15 text-white font-semibold text-xs tracking-wide transition-colors"
-            >
-              Open Full NID Audit
-            </button>
-
-            {onDeleteGame && (
+            <div className="pt-4 border-t border-white/10 space-y-2">
               <button
                 onClick={() => {
                   setShowTechnicalDrawer(false);
-                  onDeleteGame(selectedGame.id);
+                  onOpenNidAudit(selectedGame);
                 }}
-                className="w-full py-2 rounded-full bg-red-500/10 hover:bg-red-500/20 text-red-400 font-semibold text-xs tracking-wide border border-red-500/20 transition-colors flex items-center justify-center space-x-1.5"
+                className="w-full py-2.5 rounded-full bg-white/10 hover:bg-white/15 text-white font-semibold text-xs tracking-wide transition-colors"
               >
-                <Trash2 className="w-3.5 h-3.5" />
-                <span>Remove From Library</span>
+                Open Full NID Audit
               </button>
-            )}
+
+              {onDeleteGame && (
+                <button
+                  onClick={() => {
+                    setShowTechnicalDrawer(false);
+                    onDeleteGame(selectedGame.id);
+                  }}
+                  className="w-full py-2 rounded-full bg-red-500/10 hover:bg-red-500/20 text-red-400 font-semibold text-xs tracking-wide border border-red-500/20 transition-colors flex items-center justify-center space-x-1.5"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Remove From Library</span>
+                </button>
+              )}
+            </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Demo / Sample Preset Notice Dialog */}
-      {sampleNoticeGame && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-black/80 backdrop-blur-md animate-fade-in">
+      {sampleNoticeGame && typeof document !== 'undefined' && createPortal(
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-black/80 backdrop-blur-md animate-fade-in select-none">
           <div className="relative w-full max-w-md bg-[#0b0e14]/95 rounded-2xl border border-white/10 overflow-hidden shadow-2xl p-6">
             <div className="flex items-center space-x-2.5 text-amber-400 mb-3">
               <AlertTriangle className="w-5 h-5" />
@@ -510,7 +545,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
