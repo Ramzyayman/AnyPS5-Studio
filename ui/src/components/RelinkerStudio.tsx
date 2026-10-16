@@ -206,7 +206,7 @@ export const RelinkerStudio: React.FC<RelinkerStudioProps> = ({
     if (telemetry && !telemetry.relinkerBinaryFound) {
       return { isReady: false, statusText: 'Relinker toolchain missing' };
     }
-    return { isReady: true, statusText: 'Your PC is ready to relink this game' };
+    return { isReady: true, statusText: 'Ready to Play' };
   }, [selectedGame, telemetry]);
 
   // Start Relinking Process
@@ -418,7 +418,7 @@ export const RelinkerStudio: React.FC<RelinkerStudioProps> = ({
                         readiness.isReady ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]' : 'bg-red-400 shadow-[0_0_8px_rgba(248,113,113,0.6)]'
                       }`} />
                       <span className="text-sm font-semibold text-white tracking-tight">
-                        {readiness.isReady ? 'Your PC is ready' : 'System check needed'}
+                        {readiness.isReady ? 'Ready to Play' : 'System check needed'}
                       </span>
                     </div>
 
