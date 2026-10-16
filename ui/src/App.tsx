@@ -335,6 +335,12 @@ export const App: React.FC = () => {
         <GameLauncherModal
           game={activeRunningGame}
           onClose={() => setActiveRunningGame(null)}
+          onNavigateToRelinker={(g) => {
+            setActiveRunningGame(null);
+            const idx = games.findIndex((item) => item.id === g.id);
+            if (idx !== -1) setSelectedGameIndex(idx);
+            setActiveTab('relinker');
+          }}
         />
       )}
 

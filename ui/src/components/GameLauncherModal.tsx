@@ -1,213 +1,661 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
-  Square, 
-  Terminal, 
-  Activity, 
-  Layers, 
-  Gamepad2, 
+  Play,
+  Square,
+  RefreshCw,
   X,
-  AlertCircle
+  Terminal,
+  ChevronDown,
+  Copy,
+  Check,
+  AlertCircle,
+  AlertTriangle,
+  CheckCircle2,
+  Loader2,
+  Wrench,
+  Gamepad2,
+  Cpu,
+  Layers,
+  Activity
 } from 'lucide-react';
-import { GameItem } from '../types';
+import { GameItem, SystemTelemetry } from '../types';
 import { audioService } from '../services/audioService';
 import { apiBridge } from '../services/apiBridge';
 
 interface GameLauncherModalProps {
   game: GameItem;
   onClose: () => void;
+  onNavigateToRelinker?: (game: GameItem) => void;
 }
 
-export const GameLauncherModal: React.FC<GameLauncherModalProps> = ({ game, onClose }) => {
-  const [fps, setFps] = useState<number>(60.0);
-  const [frameTime, setFrameTime] = useState<number>(16.6);
-  const [pipelinesCount, setPipelinesCount] = useState<number>(142);
-  const [isRunning, setIsRunning] = useState<boolean>(true);
-  const [pid, setPid] = useState<number | null>(null);
-  const [launchError, setLaunchError] = useState<string | null>(null);
-  const [logs, setLogs] = useState<string[]>([
-    `[AnyPS5] Launching native ported executable: ${game.path}/${game.executableName || 'app.exe'}`,
-    `[AnyPS5] Checking runtime layout: libs/ system PRX and app0/ guest filesystem...`,
-  ]);
-  const logContainerRef = useRef<HTMLDivElement>(null);
+type LaunchState = 'launching' | 'running' | 'closed' | 'crashed' | 'failed';
 
-  // Auto-scroll logs to bottom
+interface ErrorDetails {
+  summary: string;
+  remedy?: string;
+  isRelinkHint?: boolean;
+}
+
+export const GameLauncherModal: React.FC<GameLauncherModalProps> = ({ 
+  game, 
+  onClose,
+  onNavigateToRelinker 
+}) => {
+  const [launchState, setLaunchState] = useState<LaunchState>('launching');
+  const [statusMessage, setStatusMessage] = useState<string>('Initializing runtime environment...');
+  const [errorMessage, setErrorMessage] = useState<ErrorDetails | null>(null);
+
+  const [pid, setPid] = useState<number | null>(null);
+  const [exitCode, setExitCode] = useState<number | null>(null);
+  const [exitCodeHex, setExitCodeHex] = useState<string | null>(null);
+
+  const [logs, setLogs] = useState<string[]>([]);
+  const [pipelinesCount, setPipelinesCount] = useState<number | null>(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
+  const [showTechnicalDetails, setShowTechnicalDetails] = useState<boolean>(false);
+  const [isCopied, setIsCopied] = useState<boolean>(false);
+  const [gamepadConnected, setGamepadConnected] = useState<boolean>(false);
+  const [telemetry, setTelemetry] = useState<SystemTelemetry | null>(null);
+
+  const userRequestedStopRef = useRef<boolean>(false);
+  const logContainerRef = useRef<HTMLDivElement>(null);
+  const isMountedRef = useRef<boolean>(true);
+
+  // Auto-scroll logs when expanded
   useEffect(() => {
-    if (logContainerRef.current) {
+    if (showTechnicalDetails && logContainerRef.current) {
       logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
     }
-  }, [logs]);
+  }, [logs, showTechnicalDetails]);
 
-  // Launch the real game process and subscribe to live logs
+  // Load telemetry for technical details drawer
   useEffect(() => {
-    let isMounted = true;
+    apiBridge.getTelemetry().then((tel) => {
+      if (isMountedRef.current) setTelemetry(tel);
+    }).catch(() => {});
+  }, []);
 
-    // Subscribe to live log streaming from Electron backend
-    const unsubscribe = apiBridge.onGameLog((log) => {
-      if (!isMounted) return;
-      setLogs((prev) => [...prev.slice(-300), log.message]);
+  // Poll controller connection unobtrusively
+  useEffect(() => {
+    const checkGamepad = () => {
+      const gps = navigator.getGamepads ? navigator.getGamepads() : [];
+      setGamepadConnected(Boolean(gps && gps[0]));
+    };
+    checkGamepad();
+    const interval = setInterval(checkGamepad, 2000);
+    return () => clearInterval(interval);
+  }, []);
 
-      if (log.message.includes('exited with code')) {
-        setIsRunning(false);
+  // Track session duration while game is actively running
+  useEffect(() => {
+    let timer: NodeJS.Timeout | null = null;
+    if (launchState === 'running') {
+      timer = setInterval(() => {
+        setElapsedSeconds((prev) => prev + 1);
+      }, 1000);
+    }
+    return () => {
+      if (timer) clearInterval(timer);
+    };
+  }, [launchState]);
+
+  // Handle process termination (clean vs crash)
+  const handleProcessExit = useCallback((code: number | null, hex: string | null) => {
+    if (!isMountedRef.current) return;
+
+    setPid(null);
+    setExitCode(code);
+    const resolvedHex = hex || (code !== null ? '0x' + (code >>> 0).toString(16).toUpperCase() : 'null');
+    setExitCodeHex(resolvedHex);
+
+    if (userRequestedStopRef.current) {
+      setLaunchState('closed');
+      setStatusMessage('Game session was stopped');
+      setErrorMessage(null);
+      return;
+    }
+
+    if (code === 0) {
+      setLaunchState('closed');
+      setStatusMessage('Game session ended normally');
+      setErrorMessage(null);
+    } else {
+      setLaunchState('crashed');
+      if (code === 3221225477 || code === -1073741819) {
+        setErrorMessage({
+          summary: 'The game closed unexpectedly',
+          remedy: 'An access violation (0xC0000005) occurred. In Relinker Studio, verify that "Unused Import Optimization" is set to Level 0 (Safe / Full Compatibility) so virtual tables and C++ error categories are not stripped.',
+          isRelinkHint: true,
+        });
+      } else if (code === 3221225781 || code === -1073741515) {
+        setErrorMessage({
+          summary: 'The game closed unexpectedly',
+          remedy: 'A required guest PRX or runtime dependency (0xC0000135) could not be loaded. Ensure the game folder was relinked with all middleware modules.',
+          isRelinkHint: true,
+        });
+      } else {
+        setErrorMessage({
+          summary: 'The game closed unexpectedly',
+          remedy: `Process exited with error code ${resolvedHex}. Inspect Technical Details below for complete crash diagnostics.`,
+          isRelinkHint: false,
+        });
       }
-      if (log.message.includes('cached SPIR-V pipeline')) {
-        const match = log.message.match(/(\d+)\s+cached SPIR-V pipeline/);
+      audioService.playCancel();
+    }
+  }, []);
+
+  const isLaunchingRef = useRef<boolean>(false);
+
+  // Launch the actual game process
+  const launchGameProcess = useCallback(async (targetGame: GameItem) => {
+    if (isLaunchingRef.current) return;
+    isLaunchingRef.current = true;
+
+    setLaunchState('launching');
+    setStatusMessage('Starting native 64-bit executable...');
+    setErrorMessage(null);
+    setExitCode(null);
+    setExitCodeHex(null);
+    setElapsedSeconds(0);
+    userRequestedStopRef.current = false;
+
+    setLogs([
+      `[AnyPS5] Launching native ported executable: ${targetGame.path}/${targetGame.executableName || 'app.exe'}`,
+      `[AnyPS5] Checking runtime layout: libs/ system PRX and app0/ guest filesystem...`,
+    ]);
+
+    audioService.playLaunch();
+
+    try {
+      const res = await apiBridge.launchGame(targetGame);
+      if (!isMountedRef.current) return;
+
+      if (res.error) {
+        setLaunchState('failed');
+        const isMissingExe = res.error.toLowerCase().includes('not found') || res.error.toLowerCase().includes('relink');
+        setErrorMessage({
+          summary: "The game couldn't start",
+          remedy: res.error,
+          isRelinkHint: isMissingExe,
+        });
+        audioService.playCancel();
+        setLogs((prev) => [...prev, `[AnyPS5 Error] ${res.error}`]);
+      } else if (res.pid) {
+        setPid(res.pid);
+        setLaunchState('running');
+        setStatusMessage('Game running');
+      }
+    } catch (err: any) {
+      if (!isMountedRef.current) return;
+      setLaunchState('failed');
+      setErrorMessage({
+        summary: "The game couldn't start",
+        remedy: err?.message || 'An unexpected error occurred while launching the executable.',
+        isRelinkHint: false,
+      });
+      audioService.playCancel();
+    } finally {
+      isLaunchingRef.current = false;
+    }
+  }, []);
+
+  // Initial launch and event subscriptions
+  useEffect(() => {
+    isMountedRef.current = true;
+
+    // Direct IPC exit event listener
+    const unsubscribeExit = apiBridge.onGameExit?.((data) => {
+      handleProcessExit(data.code, data.exitCodeHex);
+    }) || (() => {});
+
+    // Live log stream listener
+    const unsubscribeLog = apiBridge.onGameLog((log) => {
+      if (!isMountedRef.current) return;
+      setLogs((prev) => [...prev.slice(-400), log.message]);
+
+      const msg = log.message;
+
+      // Extract real startup progression
+      if (msg.includes('Checking runtime layout')) {
+        setStatusMessage('Verifying runtime layout and libraries...');
+      } else if (msg.includes('Launching native ported executable')) {
+        setStatusMessage('Starting 64-bit native executable...');
+      } else if (msg.includes('Initialized child process PID')) {
+        setLaunchState('running');
+        setStatusMessage('Game running');
+      }
+
+      // Fallback process exit detection from log stream
+      if (msg.includes('Game process exited with code')) {
+        const match = msg.match(/Game process exited with code (-?\d+)\s*\((0x[0-9A-Fa-f]+)\)/);
+        if (match) {
+          handleProcessExit(parseInt(match[1]), match[2]);
+        } else {
+          handleProcessExit(null, null);
+        }
+      }
+
+      // Vulkan pipeline counter
+      if (msg.includes('cached SPIR-V pipeline')) {
+        const match = msg.match(/(\d+)\s+cached SPIR-V pipeline/);
         if (match) setPipelinesCount(parseInt(match[1]));
       }
     });
 
-    // Actually trigger game launch
-    apiBridge.launchGame(game).then((res) => {
-      if (!isMounted) return;
-      if (res.error) {
-        setLaunchError(res.error);
-        setIsRunning(false);
-        setLogs((prev) => [...prev, `[AnyPS5 Error] ${res.error}`]);
-      } else if (res.pid) {
-        setPid(res.pid);
-        setIsRunning(true);
-      }
-    });
-
-    // Realistic FPS jitter when game is running
-    const interval = setInterval(() => {
-      if (!isMounted) return;
-      const jitter = (Math.random() - 0.5) * 0.4;
-      const currentFps = +(60 + jitter).toFixed(1);
-      setFps(currentFps);
-      setFrameTime(+(1000 / currentFps).toFixed(2));
-    }, 1000);
+    launchGameProcess(game);
 
     return () => {
-      isMounted = false;
-      unsubscribe();
-      clearInterval(interval);
+      isMountedRef.current = false;
+      unsubscribeExit();
+      unsubscribeLog();
     };
-  }, [game]);
+  }, [game.id, handleProcessExit, launchGameProcess]);
 
+  // Handle Stop button click
   const handleStop = async () => {
     audioService.playCancel();
+    userRequestedStopRef.current = true;
     await apiBridge.stopGame(pid || undefined);
-    setIsRunning(false);
-    onClose();
+    setLaunchState('closed');
+    setStatusMessage('Game session was stopped');
+  };
+
+  // Format active playtime
+  const formatPlaytime = (seconds: number) => {
+    if (seconds < 60) return `${seconds}s`;
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    if (mins < 60) return `${mins}m ${secs.toString().padStart(2, '0')}s`;
+    const hrs = Math.floor(mins / 60);
+    const remMins = mins % 60;
+    return `${hrs}h ${remMins.toString().padStart(2, '0')}m`;
+  };
+
+  // Copy full diagnostics report to clipboard
+  const handleCopyDiagnostics = () => {
+    audioService.playConfirm();
+    const report = [
+      `======================================================`,
+      `AnyPS5 Studio - Game Launch Diagnostics Report`,
+      `Generated: ${new Date().toLocaleString()}`,
+      `======================================================`,
+      `Game Title:       ${game.title}`,
+      `Title ID:         ${game.titleId}`,
+      `SDK Version:      ${game.sdkVersion || 'Prospero'}`,
+      `Executable:       ${game.path}/${game.executableName || 'app.exe'}`,
+      `Status:           ${launchState.toUpperCase()}`,
+      `Process ID (PID): ${pid ?? 'Not running'}`,
+      `Exit Code:        ${exitCode !== null ? `${exitCode} (${exitCodeHex})` : 'N/A'}`,
+      `Active Playtime:  ${formatPlaytime(elapsedSeconds)}`,
+      `Vulkan Pipelines: ${pipelinesCount !== null ? pipelinesCount : 'Standard / Uncached'}`,
+      `Controller:       ${gamepadConnected ? 'DualSense / Gamepad Active' : 'Keyboard / Mouse'}`,
+      `Host CPU:         ${telemetry?.hostCpu || 'Verified'}`,
+      `Host Graphics:    ${telemetry?.gpuName || 'DirectX 12 / Vulkan'}`,
+      `Operating System: ${telemetry?.osName || 'Windows x64'}`,
+      ``,
+      `------------------------------------------------------`,
+      `Execution Logs (${logs.length} entries):`,
+      `------------------------------------------------------`,
+      ...logs,
+      `======================================================`,
+    ].join('\n');
+
+    navigator.clipboard.writeText(report).then(() => {
+      setIsCopied(true);
+      setTimeout(() => setIsCopied(false), 2500);
+    }).catch(() => {});
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-black/80 backdrop-blur-md animate-fade-in">
-      <div className="relative w-full max-w-4xl bg-[#0b0e14]/95 rounded-2xl border border-white/10 overflow-hidden shadow-2xl flex flex-col max-h-[85vh]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 md:p-6 bg-black/80 backdrop-blur-md animate-fade-in select-none">
+      <div className="relative w-full max-w-2xl bg-[#0b0e14]/95 rounded-3xl border border-white/10 overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
+        
         {/* Top Header Bar */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 bg-white/[0.02]">
-          <div className="flex items-center space-x-3">
-            {isRunning ? (
-              <span className="flex h-2.5 w-2.5 relative">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
-              </span>
-            ) : (
-              <span className="flex h-2.5 w-2.5 rounded-full bg-neutral-600"></span>
-            )}
-            <div>
-              <h3 className="font-semibold text-white text-base tracking-wide">{game.title}</h3>
-              <p className="text-[11px] text-white/50 font-mono">
-                {isRunning ? `Running Natively · PID: ${pid || 'Active'}` : 'Process Stopped'} · {game.titleId}
-              </p>
-            </div>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-white/[0.07] bg-white/[0.02]">
+          <div className="flex items-center space-x-2.5">
+            <span className="w-2 h-2 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.6)]" />
+            <span className="text-xs font-semibold text-neutral-300 uppercase tracking-wider">
+              AnyPS5 Launcher
+            </span>
           </div>
 
-          <div className="flex items-center space-x-3">
-            {isRunning && (
-              <button
-                onClick={handleStop}
-                className="flex items-center space-x-2 px-4 py-1.5 rounded-full bg-red-500/15 hover:bg-red-500/25 text-red-300 border border-red-500/30 text-xs font-medium transition-all"
-              >
-                <Square className="w-3 h-3 fill-current" />
-                <span>Stop Game</span>
-              </button>
-            )}
-            <button
-              onClick={handleStop}
-              className="p-1 rounded-full hover:bg-white/10 text-white/50 hover:text-white transition-colors"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-
-        {launchError && (
-          <div className="mx-6 mt-4 p-3.5 rounded-xl bg-red-500/10 border border-red-500/20 text-red-300 text-xs flex items-center space-x-3">
-            <AlertCircle className="w-4 h-4 flex-shrink-0" />
-            <p className="leading-relaxed">{launchError}</p>
-          </div>
-        )}
-
-        {/* Live HUD Dashboard */}
-        <div className="grid grid-cols-3 gap-4 p-6 bg-black/40 border-b border-white/5">
-          <div className="p-3.5 rounded-xl bg-white/[0.03] border border-white/5 flex items-center space-x-3">
-            <div className="w-9 h-9 rounded-lg bg-white/5 flex items-center justify-center text-white/80">
-              <Activity className="w-4 h-4" />
-            </div>
-            <div>
-              <span className="text-[10px] text-white/40 uppercase font-medium tracking-wider block">Performance</span>
-              <div className="flex items-baseline space-x-1.5">
-                <span className="text-xl font-bold text-white font-mono">{isRunning ? fps : '0.0'}</span>
-                <span className="text-xs text-white/50">FPS {isRunning && `(${frameTime}ms)`}</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="p-3.5 rounded-xl bg-white/[0.03] border border-white/5 flex items-center space-x-3">
-            <div className="w-9 h-9 rounded-lg bg-white/5 flex items-center justify-center text-white/80">
-              <Layers className="w-4 h-4" />
-            </div>
-            <div>
-              <span className="text-[10px] text-white/40 uppercase font-medium tracking-wider block">Vulkan Graphics</span>
-              <div className="flex items-baseline space-x-1.5">
-                <span className="text-xl font-bold text-white font-mono">{isRunning ? pipelinesCount : '—'}</span>
-                <span className="text-xs text-white/50">Vulkan Pipelines</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="p-3.5 rounded-xl bg-white/[0.03] border border-white/5 flex items-center space-x-3">
-            <div className="w-9 h-9 rounded-lg bg-white/5 flex items-center justify-center text-white/80">
-              <Gamepad2 className="w-4 h-4" />
-            </div>
-            <div>
-              <span className="text-[10px] text-white/40 uppercase font-medium tracking-wider block">Controller</span>
-              <span className="text-sm font-semibold text-emerald-400">DualSense Active</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Live Runtime Log Console */}
-        <div className="p-6 flex-1 flex flex-col overflow-hidden">
-          <div className="flex items-center space-x-2 text-xs font-mono text-white/50 mb-2">
-            <Terminal className="w-3.5 h-3.5 text-white/60" />
-            <span>Process Standard Output & PRX Diagnostics</span>
-          </div>
-
-          <div 
-            ref={logContainerRef}
-            className="flex-1 max-h-60 bg-black/60 rounded-xl p-4 font-mono text-xs overflow-y-auto space-y-1.5 border border-white/5 select-text"
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-1 rounded-full text-neutral-400 hover:text-white hover:bg-white/10 transition-colors"
+            title="Close Launcher"
           >
-            {logs.map((line, idx) => (
-              <div key={idx} className="text-white/80 leading-relaxed font-mono">
-                {line.startsWith('[libkernel]') || line.startsWith('[SAVEDATA') ? (
-                  <span className="text-blue-400 font-medium">{line}</span>
-                ) : line.startsWith('[libSceAgc') || line.startsWith('[src/Texture') ? (
-                  <span className="text-indigo-300">{line}</span>
-                ) : line.startsWith('[libScePad]') || line.startsWith('[DONE]') ? (
-                  <span className="text-emerald-400">{line}</span>
-                ) : line.startsWith('Loading PRX') ? (
-                  <span className="text-sky-300">{line}</span>
-                ) : line.startsWith('[AnyPS5 Error]') || line.toLowerCase().includes('fatal') ? (
-                  <span className="text-rose-400 font-semibold">{line}</span>
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* Primary User-Friendly Content View */}
+        <div className="p-6 md:p-8 flex flex-col sm:flex-row items-center sm:items-start gap-6 md:gap-7">
+          
+          {/* Cover Artwork */}
+          <div className="shrink-0 relative group">
+            <img
+              src={game.iconUrl}
+              alt={game.title}
+              className="w-36 h-48 md:w-44 md:h-56 rounded-2xl object-cover shadow-2xl border border-white/10 bg-neutral-900"
+              onError={(e) => {
+                // Subtle fallback if image fails
+                (e.target as HTMLElement).style.display = 'none';
+              }}
+            />
+          </div>
+
+          {/* Details & Actions */}
+          <div className="flex-1 min-w-0 flex flex-col justify-between self-stretch text-center sm:text-left space-y-4">
+            
+            {/* Title & Metadata */}
+            <div>
+              <h2 className="text-2xl md:text-3xl font-extrabold text-white tracking-tight leading-snug line-clamp-2">
+                {game.title}
+              </h2>
+              <div className="flex items-center justify-center sm:justify-start space-x-2.5 mt-1 text-xs text-neutral-400 font-mono">
+                <span>{game.titleId}</span>
+                <span>•</span>
+                <span>Native 64-bit Windows</span>
+              </div>
+            </div>
+
+            {/* Status Section */}
+            <div className="space-y-1.5 py-1">
+              
+              {/* STATE: LAUNCHING */}
+              {launchState === 'launching' && (
+                <div className="space-y-1">
+                  <div className="flex items-center justify-center sm:justify-start space-x-2">
+                    <Loader2 className="w-4 h-4 text-sky-400 animate-spin shrink-0" />
+                    <span className="text-base font-semibold text-white">Launching game...</span>
+                  </div>
+                  <p className="text-xs text-neutral-400 leading-relaxed">
+                    {statusMessage}
+                  </p>
+                </div>
+              )}
+
+              {/* STATE: RUNNING */}
+              {launchState === 'running' && (
+                <div className="space-y-1">
+                  <div className="flex items-center justify-center sm:justify-start space-x-2.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.7)] shrink-0" />
+                    <span className="text-base font-semibold text-white">Game running</span>
+                  </div>
+                  <p className="text-xs text-neutral-400 leading-relaxed font-mono">
+                    Active session · Elapsed: {formatPlaytime(elapsedSeconds)}
+                  </p>
+                </div>
+              )}
+
+              {/* STATE: EXITED NORMALLY */}
+              {launchState === 'closed' && (
+                <div className="space-y-1">
+                  <div className="flex items-center justify-center sm:justify-start space-x-2">
+                    <CheckCircle2 className="w-4 h-4 text-neutral-400 shrink-0" />
+                    <span className="text-base font-semibold text-white">Game closed</span>
+                  </div>
+                  <p className="text-xs text-neutral-400 leading-relaxed">
+                    The game session has ended normally.
+                  </p>
+                </div>
+              )}
+
+              {/* STATE: CRASHED */}
+              {launchState === 'crashed' && (
+                <div className="space-y-1">
+                  <div className="flex items-center justify-center sm:justify-start space-x-2 text-amber-400">
+                    <AlertTriangle className="w-4 h-4 shrink-0" />
+                    <span className="text-base font-semibold text-white">The game closed unexpectedly</span>
+                  </div>
+                  <p className="text-xs text-neutral-300 leading-relaxed">
+                    {errorMessage?.remedy || 'The game process exited abnormally. Check technical details below for more information.'}
+                  </p>
+                </div>
+              )}
+
+              {/* STATE: FAILED TO START */}
+              {launchState === 'failed' && (
+                <div className="space-y-1">
+                  <div className="flex items-center justify-center sm:justify-start space-x-2 text-rose-400">
+                    <AlertCircle className="w-4 h-4 shrink-0" />
+                    <span className="text-base font-semibold text-white">The game couldn't start</span>
+                  </div>
+                  <p className="text-xs text-neutral-300 leading-relaxed">
+                    {errorMessage?.remedy || 'Could not initialize the executable. Check technical details below.'}
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Action Buttons */}
+            <div className="pt-2 flex flex-wrap items-center justify-center sm:justify-start gap-3">
+              
+              {/* While Launching */}
+              {launchState === 'launching' && (
+                <>
+                  <button
+                    disabled
+                    type="button"
+                    className="px-6 py-2.5 rounded-full bg-white/20 text-neutral-400 font-semibold text-xs flex items-center space-x-2 cursor-not-allowed shadow-none"
+                  >
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>Launching...</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onClose}
+                    className="px-5 py-2.5 rounded-full bg-white/10 hover:bg-white/15 text-white font-medium text-xs transition-colors"
+                  >
+                    Back to Library
+                  </button>
+                </>
+              )}
+
+              {/* While Running */}
+              {launchState === 'running' && (
+                <>
+                  <button
+                    type="button"
+                    onClick={handleStop}
+                    className="px-6 py-2.5 rounded-full bg-red-500/15 hover:bg-red-500/25 text-red-300 border border-red-500/30 font-semibold text-xs transition-all active:scale-[0.98] flex items-center space-x-2"
+                  >
+                    <Square className="w-3.5 h-3.5 fill-current" />
+                    <span>Stop Game</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onClose}
+                    className="px-5 py-2.5 rounded-full bg-white/10 hover:bg-white/15 text-white font-medium text-xs transition-colors"
+                  >
+                    Back to Library
+                  </button>
+                </>
+              )}
+
+              {/* When Closed Normally */}
+              {launchState === 'closed' && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => launchGameProcess(game)}
+                    className="px-6 py-2.5 rounded-full bg-white text-black font-bold text-xs hover:bg-neutral-200 transition-all active:scale-[0.98] shadow-lg flex items-center space-x-2"
+                  >
+                    <Play className="w-3.5 h-3.5 fill-current" />
+                    <span>Play Again</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onClose}
+                    className="px-5 py-2.5 rounded-full bg-white/10 hover:bg-white/15 text-white font-medium text-xs transition-colors"
+                  >
+                    Back to Library
+                  </button>
+                </>
+              )}
+
+              {/* When Crashed or Failed */}
+              {(launchState === 'crashed' || launchState === 'failed') && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => launchGameProcess(game)}
+                    className="px-6 py-2.5 rounded-full bg-white text-black font-bold text-xs hover:bg-neutral-200 transition-all active:scale-[0.98] shadow-lg flex items-center space-x-2"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    <span>Try Again</span>
+                  </button>
+
+                  {errorMessage?.isRelinkHint && onNavigateToRelinker && (
+                    <button
+                      type="button"
+                      onClick={() => onNavigateToRelinker(game)}
+                      className="px-5 py-2.5 rounded-full bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 border border-indigo-500/30 font-medium text-xs transition-colors flex items-center space-x-2"
+                    >
+                      <Wrench className="w-3.5 h-3.5" />
+                      <span>Relinker Studio</span>
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={onClose}
+                    className="px-5 py-2.5 rounded-full bg-white/10 hover:bg-white/15 text-white font-medium text-xs transition-colors"
+                  >
+                    Back to Library
+                  </button>
+                </>
+              )}
+            </div>
+
+          </div>
+        </div>
+
+        {/* Collapsible Technical Details Section */}
+        <div className="border-t border-white/[0.07] bg-black/40">
+          <button
+            type="button"
+            onClick={() => setShowTechnicalDetails(!showTechnicalDetails)}
+            className="flex items-center justify-between w-full px-6 py-3.5 text-xs text-neutral-400 hover:text-white transition-colors"
+          >
+            <span className="font-medium flex items-center space-x-2">
+              <Terminal className="w-3.5 h-3.5 text-neutral-500" />
+              <span>Technical Details</span>
+            </span>
+            <ChevronDown 
+              className={`w-3.5 h-3.5 transition-transform duration-200 ${
+                showTechnicalDetails ? 'rotate-180 text-white' : 'text-neutral-500'
+              }`} 
+            />
+          </button>
+
+          {showTechnicalDetails && (
+            <div className="px-6 pb-6 pt-1 space-y-4 animate-fade-in">
+              
+              {/* Telemetry & Process Summary Bar */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 font-mono text-[11px]">
+                <div className="p-2.5 rounded-xl bg-white/[0.03] border border-white/5 space-y-0.5">
+                  <span className="text-neutral-500 block text-[10px] uppercase">Process ID</span>
+                  <span className="text-neutral-200 font-semibold">{pid ?? 'Inactive'}</span>
+                </div>
+
+                <div className="p-2.5 rounded-xl bg-white/[0.03] border border-white/5 space-y-0.5">
+                  <span className="text-neutral-500 block text-[10px] uppercase">Exit Code</span>
+                  <span className={`font-semibold ${
+                    exitCode === 0 ? 'text-emerald-400' : exitCode !== null ? 'text-rose-400' : 'text-neutral-400'
+                  }`}>
+                    {exitCode !== null ? `${exitCode} (${exitCodeHex})` : launchState === 'running' ? 'Active' : 'N/A'}
+                  </span>
+                </div>
+
+                <div className="p-2.5 rounded-xl bg-white/[0.03] border border-white/5 space-y-0.5">
+                  <span className="text-neutral-500 block text-[10px] uppercase">Vulkan Cache</span>
+                  <span className="text-neutral-200 font-semibold">
+                    {pipelinesCount !== null ? `${pipelinesCount} pipelines` : 'DirectX 12 / Vulkan'}
+                  </span>
+                </div>
+
+                <div className="p-2.5 rounded-xl bg-white/[0.03] border border-white/5 space-y-0.5">
+                  <span className="text-neutral-500 block text-[10px] uppercase">Controller</span>
+                  <span className={`font-semibold ${gamepadConnected ? 'text-emerald-400' : 'text-neutral-400'}`}>
+                    {gamepadConnected ? 'DualSense Active' : 'Keyboard / Mouse'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Console Logs Header with Copy Diagnostics */}
+              <div className="flex items-center justify-between pt-1">
+                <span className="text-[11px] font-mono text-neutral-400">
+                  Process Standard Output & PRX Diagnostics
+                </span>
+
+                <button
+                  type="button"
+                  onClick={handleCopyDiagnostics}
+                  className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-neutral-300 hover:text-white border border-white/10 text-xs font-mono transition-all"
+                >
+                  {isCopied ? (
+                    <>
+                      <Check className="w-3.5 h-3.5 text-emerald-400" />
+                      <span className="text-emerald-400 font-semibold">Copied!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3.5 h-3.5 text-neutral-400" />
+                      <span>Copy Diagnostics</span>
+                    </>
+                  )}
+                </button>
+              </div>
+
+              {/* Console Logs Output */}
+              <div
+                ref={logContainerRef}
+                className="max-h-52 bg-black/80 rounded-xl p-3.5 font-mono text-[11px] leading-relaxed overflow-y-auto space-y-1 border border-white/5 select-text"
+              >
+                {logs.length === 0 ? (
+                  <div className="text-neutral-600 italic">No output logged yet.</div>
                 ) : (
-                  line
+                  logs.map((line, idx) => {
+                    const lower = line.toLowerCase();
+                    const isError = lower.includes('error') || lower.includes('fatal') || lower.includes('crash') || lower.includes('exception');
+                    const isWarn = lower.includes('warn') || lower.includes('exited with code');
+                    const isPrx = line.startsWith('Loading PRX') || line.startsWith('[PRX');
+                    const isSys = line.startsWith('[libkernel]') || line.startsWith('[SAVEDATA');
+                    const isGpu = line.startsWith('[libSceAgc') || line.startsWith('[src/Texture');
+                    const isPad = line.startsWith('[libScePad]');
+
+                    return (
+                      <div 
+                        key={idx} 
+                        className={
+                          isError 
+                            ? 'text-red-400 font-semibold' 
+                            : isWarn 
+                            ? 'text-amber-300' 
+                            : isPrx 
+                            ? 'text-sky-300' 
+                            : isSys 
+                            ? 'text-blue-400' 
+                            : isGpu 
+                            ? 'text-indigo-300' 
+                            : isPad 
+                            ? 'text-emerald-400' 
+                            : 'text-neutral-300'
+                        }
+                      >
+                        {line}
+                      </div>
+                    );
+                  })
                 )}
               </div>
-            ))}
-          </div>
+
+            </div>
+          )}
         </div>
+
       </div>
     </div>
   );

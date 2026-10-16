@@ -25,5 +25,12 @@ contextBridge.exposeInMainWorld('anyps5', {
       ipcRenderer.removeListener('anyps5:game-log', handler);
     };
   },
+  onGameExit: (callback: (data: { code: number | null; exitCodeHex: string; isCrash: boolean }) => void) => {
+    const handler = (_: unknown, data: { code: number | null; exitCodeHex: string; isCrash: boolean }) => callback(data);
+    ipcRenderer.on('anyps5:game-exit', handler);
+    return () => {
+      ipcRenderer.removeListener('anyps5:game-exit', handler);
+    };
+  },
 });
 

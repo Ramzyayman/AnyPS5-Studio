@@ -575,7 +575,8 @@ ipcMain.handle('anyps5:run-relinker', async (_, { game, options }) => {
       sendLog(`[AnyPS5] Registered guest plugin module directory: ${modDir}`, 'info');
     }
 
-    const filterValue = (options.unusedFilter === 'none' || options.unusedFilter === 0) ? '0' : '1';
+    // Use Level 0 (Safe / Full Compatibility) by default to preserve all C++ vtable relocations and dynamic call targets
+    const filterValue = options.unusedFilter === 2 ? '2' : (options.unusedFilter === 1 ? '1' : '0');
     args.push(`unused-filter=${filterValue}`);
 
     args.push(inputElf, outputExe);
@@ -747,7 +748,21 @@ ipcMain.handle('anyps5:launch-game', async (_, game) => {
     });
 
     child.on('close', (code) => {
-      sendLog(`[AnyPS5] Game process exited with code ${code}`, code === 0 ? 'info' : 'warn');
+      const exitCodeHex = code !== null ? '0x' + (code >>> 0).toString(16).toUpperCase() : 'null';
+      sendLog(`[AnyPS5] Game process exited with code ${code} (${exitCodeHex})`, code === 0 ? 'info' : 'warn');
+
+      if (code === 3221225477 || code === -1073741819) {
+        sendLog(`[AnyPS5 Diagnostics] Crash detected: Access Violation (0xC0000005). If the title was relinked with aggressive import filtering, ensure 'Unused Import Optimization' is set to Level 0 (Safe / Full Compatibility) to preserve all C++ virtual tables and dynamic function pointers.`, 'error');
+      } else if (code === 3221225781 || code === -1073741515) {
+        sendLog(`[AnyPS5 Diagnostics] Crash detected: Missing Dependency DLL (0xC0000135). Ensure all required middleware PRXs and runtime libraries in libs/ are deployed.`, 'error');
+      }
+
+      mainWindow?.webContents.send('anyps5:game-exit', {
+        code,
+        exitCodeHex,
+        isCrash: code !== 0 && code !== null,
+      });
+
       if (activeGameProcess === child) {
         activeGameProcess = null;
       }

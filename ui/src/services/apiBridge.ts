@@ -31,6 +31,9 @@ declare global {
       onGameLog: (
         callback: (data: { level: string; message: string; timestamp?: string }) => void
       ) => () => void;
+      onGameExit?: (
+        callback: (data: { code: number | null; exitCodeHex: string; isCrash: boolean }) => void
+      ) => () => void;
     };
   }
 }
@@ -135,6 +138,13 @@ class ApiBridge {
   public onGameLog(callback: (data: { level: string; message: string; timestamp?: string }) => void): () => void {
     if (window.anyps5) {
       return window.anyps5.onGameLog(callback);
+    }
+    return () => {};
+  }
+
+  public onGameExit(callback: (data: { code: number | null; exitCodeHex: string; isCrash: boolean }) => void): () => void {
+    if (window.anyps5?.onGameExit) {
+      return window.anyps5.onGameExit(callback);
     }
     return () => {};
   }

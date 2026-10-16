@@ -92,7 +92,7 @@ export const RelinkerStudio: React.FC<RelinkerStudioProps> = ({
     target: 'windows',
     subsystem: 'gui',
     cpuTranslation: 'intel',
-    unusedFilter: 1,
+    unusedFilter: 0,
     rpath: '$ORIGIN/libs',
     traceImports: false,
     windowsDiagnostics: true,
@@ -123,7 +123,7 @@ export const RelinkerStudio: React.FC<RelinkerStudioProps> = ({
           cpuTranslation: data.recommendedCpuTranslation || 'intel',
           target: 'windows',
           subsystem: 'gui',
-          unusedFilter: 1,
+          unusedFilter: 0,
         }));
       }
     } catch (err: any) {
@@ -466,7 +466,13 @@ export const RelinkerStudio: React.FC<RelinkerStudioProps> = ({
                         </div>
                         <div className="flex justify-between border-b border-white/5 pb-1">
                           <span className="text-neutral-500">Import Filter:</span>
-                          <span className="text-neutral-200">Level 1 (Standard Pruning)</span>
+                          <span className="text-neutral-200">
+                            {options.unusedFilter === 0
+                              ? 'Level 0 (Full Compatibility / Safe)'
+                              : options.unusedFilter === 1
+                              ? 'Level 1 (Standard Pruning)'
+                              : 'Level 2 (Strict Pruning)'}
+                          </span>
                         </div>
                       </div>
 
@@ -915,7 +921,7 @@ export const RelinkerStudio: React.FC<RelinkerStudioProps> = ({
                           : 'text-neutral-400 hover:text-white'
                       }`}
                     >
-                      Level {level} {level === 1 ? '(Standard)' : level === 0 ? '(None)' : '(Strict)'}
+                      Level {level} {level === 0 ? '(Safe / Recommended)' : level === 1 ? '(Standard)' : '(Strict)'}
                     </button>
                   ))}
                 </div>
