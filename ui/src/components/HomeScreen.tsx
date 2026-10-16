@@ -272,10 +272,12 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           </h1>
 
           {/* Concise Game Description (only displayed when a factual description is available) */}
-          {selectedGame.description && (
+          {selectedGame.description ? (
             <p className="text-sm text-neutral-300 max-w-xl leading-relaxed mb-6 drop-shadow">
               {selectedGame.description}
             </p>
+          ) : (
+            <div className="mb-5" />
           )}
 
           {/* Action Buttons Zone (Play Game dominant + Relinker Studio secondary + Understated NID Coverage) */}

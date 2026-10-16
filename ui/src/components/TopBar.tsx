@@ -14,6 +14,14 @@ interface TopBarProps {
   gamepadConnected: boolean;
 }
 
+const NAV_ITEMS: { key: 'games' | 'relinker' | 'nid' | 'prx' | 'telemetry'; label: string }[] = [
+  { key: 'games', label: 'Games' },
+  { key: 'relinker', label: 'Relinker Studio' },
+  { key: 'nid', label: 'NID Inspector' },
+  { key: 'prx', label: 'PRX Libraries' },
+  { key: 'telemetry', label: 'System Status' },
+];
+
 export const TopBar: React.FC<TopBarProps> = ({
   activeTab,
   onTabChange,
@@ -43,94 +51,43 @@ export const TopBar: React.FC<TopBarProps> = ({
   };
 
   return (
-    <header className="relative z-30 h-14 flex items-center justify-between px-8 bg-transparent select-none">
-      {/* Left: AnyPS5 Console Identity & Clean Navigation Tabs */}
+    <header className="relative z-30 h-14 flex items-center justify-between px-10 bg-gradient-to-b from-[#04060a]/60 via-[#04060a]/20 to-transparent select-none">
+      {/* Left: Compact AnyPS5 Console Identity & PS5 Typography Navigation */}
       <div className="flex items-center space-x-10">
-        {/* Subtle Brand Mark */}
-        <div className="flex items-center space-x-2.5">
-          <div className="w-6 h-6 rounded-md bg-white flex items-center justify-center">
-            <span className="font-black text-black text-[11px] tracking-tighter">PS</span>
+        {/* Compact Console Brand Mark */}
+        <div className="flex items-center space-x-2">
+          <div className="w-5 h-5 rounded-[4px] bg-white flex items-center justify-center">
+            <span className="font-black text-black text-[10px] tracking-tighter">PS</span>
           </div>
-          <span className="font-semibold text-sm tracking-wide text-white/90">
+          <span className="font-semibold text-xs tracking-wider text-white/90 uppercase">
             AnyPS5 <span className="text-white/40 font-normal">Studio</span>
           </span>
         </div>
 
-        {/* Console Navigation Tabs (Clean text with active indicator, no bloated pills) */}
-        <nav className="flex items-center space-x-8 text-sm">
-          <button
-            onClick={() => handleTabClick('games')}
-            className={`relative py-1 font-medium tracking-wide transition-colors ${
-              activeTab === 'games'
-                ? 'text-white'
-                : 'text-neutral-400 hover:text-white/80'
-            }`}
-          >
-            <span>Games</span>
-            {activeTab === 'games' && (
-              <span className="absolute bottom-0 left-0 right-0 h-[2px] bg-white rounded-full" />
-            )}
-          </button>
-
-          <button
-            onClick={() => handleTabClick('relinker')}
-            className={`relative py-1 font-medium tracking-wide transition-colors ${
-              activeTab === 'relinker'
-                ? 'text-white'
-                : 'text-neutral-400 hover:text-white/80'
-            }`}
-          >
-            <span>Relinker Studio</span>
-            {activeTab === 'relinker' && (
-              <span className="absolute bottom-0 left-0 right-0 h-[2px] bg-white rounded-full" />
-            )}
-          </button>
-
-          <button
-            onClick={() => handleTabClick('nid')}
-            className={`relative py-1 font-medium tracking-wide transition-colors ${
-              activeTab === 'nid'
-                ? 'text-white'
-                : 'text-neutral-400 hover:text-white/80'
-            }`}
-          >
-            <span>NID Inspector</span>
-            {activeTab === 'nid' && (
-              <span className="absolute bottom-0 left-0 right-0 h-[2px] bg-white rounded-full" />
-            )}
-          </button>
-
-          <button
-            onClick={() => handleTabClick('prx')}
-            className={`relative py-1 font-medium tracking-wide transition-colors ${
-              activeTab === 'prx'
-                ? 'text-white'
-                : 'text-neutral-400 hover:text-white/80'
-            }`}
-          >
-            <span>PRX Libraries</span>
-            {activeTab === 'prx' && (
-              <span className="absolute bottom-0 left-0 right-0 h-[2px] bg-white rounded-full" />
-            )}
-          </button>
-
-          <button
-            onClick={() => handleTabClick('telemetry')}
-            className={`relative py-1 font-medium tracking-wide transition-colors ${
-              activeTab === 'telemetry'
-                ? 'text-white'
-                : 'text-neutral-400 hover:text-white/80'
-            }`}
-          >
-            <span>System Status</span>
-            {activeTab === 'telemetry' && (
-              <span className="absolute bottom-0 left-0 right-0 h-[2px] bg-white rounded-full" />
-            )}
-          </button>
+        {/* PS5 Typography-Driven Navigation (no underlines, no boxes, purely typography-differentiated) */}
+        <nav className="flex items-baseline space-x-8" role="tablist">
+          {NAV_ITEMS.map((item) => {
+            const isSelected = activeTab === item.key;
+            return (
+              <button
+                key={item.key}
+                role="tab"
+                aria-selected={isSelected}
+                onClick={() => handleTabClick(item.key)}
+                className={`relative py-1 tracking-wide focus:outline-none focus-visible:ring-1 focus-visible:ring-white/60 focus-visible:rounded transition-all duration-200 ease-out motion-reduce:transition-none ${
+                  isSelected
+                    ? 'text-white text-[16px] font-semibold opacity-100'
+                    : 'text-white/40 text-[14px] font-medium opacity-80 hover:text-white/70 hover:opacity-100'
+                }`}
+              >
+                <span>{item.label}</span>
+              </button>
+            );
+          })}
         </nav>
       </div>
 
-      {/* Right: Understated Console Controls */}
+      {/* Right: Small, Understated Console Controls */}
       <div className="flex items-center space-x-5 text-neutral-300">
         {/* Import Game Button */}
         <button
@@ -138,7 +95,7 @@ export const TopBar: React.FC<TopBarProps> = ({
             audioService.playConfirm();
             onOpenAddGame();
           }}
-          className="flex items-center space-x-1.5 px-3 py-1 rounded-full bg-white/10 hover:bg-white/15 text-white text-xs font-medium transition-colors"
+          className="flex items-center space-x-1 px-2.5 py-1 rounded-full text-white/60 hover:text-white hover:bg-white/10 text-xs font-medium transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-white/50"
           title="Import Decrypted PS5 Title"
         >
           <Plus className="w-3.5 h-3.5" />
@@ -147,10 +104,10 @@ export const TopBar: React.FC<TopBarProps> = ({
 
         {/* Controller Status */}
         <div 
-          className="flex items-center space-x-1.5 text-xs text-neutral-400"
+          className="flex items-center space-x-1.5 text-xs text-white/40"
           title={gamepadConnected ? "DualSense Wireless Controller Connected" : "Keyboard Navigation Active"}
         >
-          <Gamepad2 className={`w-4 h-4 ${gamepadConnected ? 'text-blue-400' : 'text-neutral-500'}`} />
+          <Gamepad2 className={`w-4 h-4 ${gamepadConnected ? 'text-blue-400' : 'text-white/40'}`} />
           {gamepadConnected && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />}
         </div>
 
@@ -160,14 +117,14 @@ export const TopBar: React.FC<TopBarProps> = ({
             audioService.playConfirm();
             onOpenSettings();
           }}
-          className="p-1 hover:text-white transition-colors"
+          className="p-1 text-white/50 hover:text-white transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-white/50 focus-visible:rounded"
           title="System Settings"
         >
           <Settings className="w-4 h-4" />
         </button>
 
         {/* Console Clock */}
-        <span className="text-xs font-medium tracking-wider text-white pl-2">
+        <span className="text-xs font-medium tracking-wider text-white/70 pl-1">
           {time}
         </span>
       </div>
