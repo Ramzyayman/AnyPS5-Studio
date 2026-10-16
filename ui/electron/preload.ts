@@ -11,6 +11,9 @@ contextBridge.exposeInMainWorld('anyps5', {
   launchGame: (game: unknown) => ipcRenderer.invoke('anyps5:launch-game', game),
   stopGame: (pid?: number) => ipcRenderer.invoke('anyps5:stop-game', pid),
   getSystemTelemetry: () => ipcRenderer.invoke('anyps5:get-telemetry'),
+  getSettings: () => ipcRenderer.invoke('anyps5:get-settings'),
+  saveSettings: (settings: unknown) => ipcRenderer.invoke('anyps5:save-settings', settings),
+  selectFile: (filters?: unknown) => ipcRenderer.invoke('anyps5:select-file', filters),
   onRelinkerEvent: (callback: (event: { type: string; data: unknown }) => void) => {
     const handler = (_: unknown, event: { type: string; data: unknown }) => callback(event);
     ipcRenderer.on('anyps5:relinker-event', handler);

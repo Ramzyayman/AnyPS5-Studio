@@ -1,10 +1,11 @@
-import { GameItem, RelinkerOptions, SystemTelemetry, ConversionStage, ConversionLog } from '../types';
+import { GameItem, RelinkerOptions, SystemTelemetry, ConversionStage, ConversionLog, AppSettings } from '../types';
 import { INITIAL_GAMES } from './sampleData';
 
 declare global {
   interface Window {
     anyps5?: {
       selectFolder: () => Promise<string | null>;
+      selectFile?: (filters?: Array<{ name: string; extensions: string[] }>) => Promise<string | null>;
       inspectFolder: (folderPath: string) => Promise<{
         title?: string;
         titleId?: string;
@@ -16,6 +17,8 @@ declare global {
       } | null>;
       getGames: () => Promise<GameItem[]>;
       saveGames: (games: GameItem[]) => Promise<void>;
+      getSettings?: () => Promise<AppSettings>;
+      saveSettings?: (settings: Partial<AppSettings>) => Promise<boolean>;
       runRelinker: (
         game: GameItem,
         options: RelinkerOptions,
@@ -97,6 +100,41 @@ class ApiBridge {
     return null;
   }
 
+  public async selectFile(filters?: Array<{ name: string; extensions: string[] }>): Promise<string | null> {
+    if (window.anyps5?.selectFile) {
+      return await window.anyps5.selectFile(filters);
+    }
+    return null;
+  }
+
+  public async getSettings(): Promise<AppSettings> {
+    if (window.anyps5?.getSettings) {
+      return await window.anyps5.getSettings();
+    }
+    const local = localStorage.getItem('anyps5_settings');
+    if (local) {
+      try {
+        return JSON.parse(local);
+      } catch {}
+    }
+    return {
+      relinkerPath: '',
+      prxPath: '',
+      defaultTarget: 'windows',
+      cpuFix: 'intel',
+      soundEnabled: true,
+      hapticsEnabled: true,
+      advanced: false,
+    };
+  }
+
+  public async saveSettings(settings: Partial<AppSettings>): Promise<void> {
+    if (window.anyps5?.saveSettings) {
+      await window.anyps5.saveSettings(settings);
+    }
+    localStorage.setItem('anyps5_settings', JSON.stringify(settings));
+  }
+
   public async getTelemetry(): Promise<SystemTelemetry> {
     if (window.anyps5) {
       return await window.anyps5.getSystemTelemetry();
@@ -110,7 +148,7 @@ class ApiBridge {
       memoryUsageMb: 3410,
       totalMemoryMb: 32768,
       relinkerBinaryFound: true,
-      relinkerPath: 'C:/Users/PC/.gemini/antigravity/scratch/AnyPS5/build/relinker.exe',
+      relinkerPath: 'build/relinker.exe',
       prxVersion: 'v0.8.4-cleanroom',
       osName: 'Windows 11 (Build 26200, x64)',
       cpuArchitecture: 'x64',

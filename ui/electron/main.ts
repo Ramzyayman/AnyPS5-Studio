@@ -290,9 +290,137 @@ function inspectGameFolder(folderPath: string) {
   }
 }
 
-const appRootDir = app.isPackaged
-  ? process.resourcesPath
-  : path.resolve(__dirname, '../..');
+// Settings & Dynamic Installation Paths Management
+const settingsStorePath = path.join(app.getPath('userData'), 'anyps5_settings.json');
+
+interface AppSettings {
+  relinkerPath?: string;
+  prxPath?: string;
+  defaultTarget?: string;
+  cpuFix?: string;
+  soundEnabled?: boolean;
+  hapticsEnabled?: boolean;
+  advanced?: boolean;
+}
+
+function loadSettings(): AppSettings {
+  try {
+    if (fs.existsSync(settingsStorePath)) {
+      return JSON.parse(fs.readFileSync(settingsStorePath, 'utf8'));
+    }
+  } catch (err) {
+    console.error('Failed to read settings.json:', err);
+  }
+  return {};
+}
+
+function saveSettings(settings: AppSettings) {
+  try {
+    fs.writeFileSync(settingsStorePath, JSON.stringify(settings, null, 2), 'utf8');
+  } catch (err) {
+    console.error('Failed to write settings.json:', err);
+  }
+}
+
+function getDefaultRelinkerPath(): string {
+  const candidates: string[] = [];
+  if (app.isPackaged) {
+    if (process.resourcesPath) {
+      candidates.push(
+        path.join(process.resourcesPath, 'build', 'relinker.exe'),
+        path.join(process.resourcesPath, 'relinker.exe')
+      );
+    }
+    try {
+      const exeDir = path.dirname(app.getPath('exe'));
+      candidates.push(
+        path.join(exeDir, 'resources', 'build', 'relinker.exe'),
+        path.join(exeDir, 'resources', 'relinker.exe'),
+        path.join(exeDir, 'build', 'relinker.exe'),
+        path.join(exeDir, 'relinker.exe')
+      );
+    } catch {}
+  } else {
+    candidates.push(
+      path.resolve(__dirname, '../../build/relinker.exe'),
+      path.resolve(__dirname, '../../build-relinker/core/relinker/Release/relinker.exe'),
+      path.resolve(process.cwd(), 'build/relinker.exe'),
+      path.resolve(process.cwd(), '../build/relinker.exe')
+    );
+  }
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return path.normalize(c);
+  }
+  return candidates[0] ? path.normalize(candidates[0]) : '';
+}
+
+function getDefaultLibsPath(): string {
+  const candidates: string[] = [];
+  if (app.isPackaged) {
+    if (process.resourcesPath) {
+      candidates.push(path.join(process.resourcesPath, 'libs'));
+    }
+    try {
+      const exeDir = path.dirname(app.getPath('exe'));
+      candidates.push(
+        path.join(exeDir, 'resources', 'libs'),
+        path.join(exeDir, 'libs')
+      );
+    } catch {}
+  } else {
+    candidates.push(
+      path.resolve(__dirname, '../../libs'),
+      path.resolve(process.cwd(), 'libs'),
+      path.resolve(process.cwd(), '../libs')
+    );
+  }
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return path.normalize(c);
+  }
+  return candidates[0] ? path.normalize(candidates[0]) : '';
+}
+
+function getResolvedRelinkerPath(): string {
+  const userSettings = loadSettings();
+  if (userSettings.relinkerPath && fs.existsSync(userSettings.relinkerPath)) {
+    return path.normalize(userSettings.relinkerPath);
+  }
+  return getDefaultRelinkerPath();
+}
+
+function getResolvedLibsPath(): string {
+  const userSettings = loadSettings();
+  if (userSettings.prxPath && fs.existsSync(userSettings.prxPath)) {
+    return path.normalize(userSettings.prxPath);
+  }
+  return getDefaultLibsPath();
+}
+
+function getResolvedUnwrapScript(): string {
+  const candidates: string[] = [];
+  if (app.isPackaged) {
+    if (process.resourcesPath) {
+      candidates.push(path.join(process.resourcesPath, 'tools', 'unwrap_self.py'));
+    }
+    try {
+      const exeDir = path.dirname(app.getPath('exe'));
+      candidates.push(
+        path.join(exeDir, 'resources', 'tools', 'unwrap_self.py'),
+        path.join(exeDir, 'tools', 'unwrap_self.py')
+      );
+    } catch {}
+  } else {
+    candidates.push(
+      path.resolve(__dirname, '../../tools/unwrap_self.py'),
+      path.resolve(process.cwd(), 'tools/unwrap_self.py'),
+      path.resolve(process.cwd(), '../tools/unwrap_self.py')
+    );
+  }
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return path.normalize(c);
+  }
+  return candidates[0] ? path.normalize(candidates[0]) : '';
+}
 
 function fixGameHierarchyInPlace(gameDir: string, sendLog: (msg: string, level?: string) => void) {
   const resolved = path.resolve(gameDir);
@@ -368,12 +496,8 @@ function fixGameHierarchyInPlace(gameDir: string, sendLog: (msg: string, level?:
     fs.mkdirSync(gameLibs, { recursive: true });
   }
 
-  const repoLibsCandidates = [
-    path.resolve(appRootDir, 'libs'),
-    'C:/Users/PC/.gemini/antigravity/scratch/AnyPS5/libs',
-  ];
-  const sourceLibs = repoLibsCandidates.find((p) => fs.existsSync(p));
-  if (sourceLibs) {
+  const sourceLibs = getResolvedLibsPath();
+  if (sourceLibs && fs.existsSync(sourceLibs)) {
     const prxFiles = fs.readdirSync(sourceLibs);
     let copiedCount = 0;
     for (const prx of prxFiles) {
@@ -426,7 +550,7 @@ function fixGameHierarchyInPlace(gameDir: string, sendLog: (msg: string, level?:
       const magic = buffer.readUInt32LE(0);
       if (magic === 0x1D3D154F || magic === 0xEEF51454) {
         sendLog(`[AnyPS5] Detected encrypted/signed SELF container in eboot.bin. Unwrapping via tools/unwrap_self.py...`, 'info');
-        const unwrapScript = path.resolve(appRootDir, 'tools/unwrap_self.py');
+        const unwrapScript = getResolvedUnwrapScript();
         const unwrapRes = spawnSync('python', [unwrapScript, ebootBin, inputElf], { cwd: resolved });
         if (unwrapRes.status === 0 && fs.existsSync(inputElf)) {
           fs.copyFileSync(inputElf, fallbackElf);
@@ -447,7 +571,7 @@ function fixGameHierarchyInPlace(gameDir: string, sendLog: (msg: string, level?:
   // 6. Discover, clean and unwrap all guest modules across app0/ (including sce_module, games/, Plugins/, etc.)
   const moduleDirs: string[] = [];
   try {
-    const unwrapScript = path.resolve(appRootDir, 'tools/unwrap_self.py');
+    const unwrapScript = getResolvedUnwrapScript();
     const discoveredDirs = new Set<string>();
 
     function scanDirectory(currentDir: string) {
@@ -588,15 +712,10 @@ ipcMain.handle('anyps5:run-relinker', async (_, { game, options }) => {
     sendStage(7, 'completed', 100);
 
     // Step 2: Locate compiled relinker.exe binary
-    const candidatePaths = [
-      path.resolve(appRootDir, 'build/relinker.exe'),
-      path.resolve(appRootDir, 'build-relinker/core/relinker/Release/relinker.exe'),
-      'C:/Users/PC/.gemini/antigravity/scratch/AnyPS5/build/relinker.exe',
-    ];
-    const defaultBin = candidatePaths.find((p) => fs.existsSync(p)) || candidatePaths[0];
+    const defaultBin = getResolvedRelinkerPath();
 
-    if (!fs.existsSync(defaultBin)) {
-      const errMsg = `Native relinker binary not found at ${defaultBin}`;
+    if (!defaultBin || !fs.existsSync(defaultBin)) {
+      const errMsg = `Native relinker binary not found at ${defaultBin || 'installation path'}`;
       sendLog(`[AnyPS5 Error] ${errMsg}`, 'error');
       mainWindow?.webContents.send('anyps5:relinker-event', {
         type: 'error',
@@ -881,16 +1000,11 @@ ipcMain.handle('anyps5:get-telemetry', async () => {
   }
 
   // Locate relinker executable
-  const candidatePaths = [
-    path.resolve(appRootDir, 'build/relinker.exe'),
-    path.resolve(appRootDir, 'build-relinker/core/relinker/Release/relinker.exe'),
-    'C:/Users/PC/.gemini/antigravity/scratch/AnyPS5/build/relinker.exe',
-  ];
-  const relinkerPath = candidatePaths.find((p) => fs.existsSync(p)) || '';
-  const relinkerBinaryFound = Boolean(relinkerPath);
+  const relinkerPath = getResolvedRelinkerPath();
+  const relinkerBinaryFound = fs.existsSync(relinkerPath);
 
   // Check clean-room PRX system libraries
-  const libsDir = path.resolve(appRootDir, 'libs');
+  const libsDir = getResolvedLibsPath();
   const prxVersion = fs.existsSync(libsDir) ? 'v0.8.4-cleanroom' : 'Not installed';
 
   // Determine CPU vendor & translation recommendation
@@ -956,5 +1070,43 @@ ipcMain.handle('anyps5:close-window', () => {
 
 ipcMain.handle('anyps5:is-maximized', () => {
   return mainWindow?.isMaximized() ?? false;
+});
+
+// Settings & File Selection IPC Handlers
+ipcMain.handle('anyps5:get-settings', async () => {
+  const userSettings = loadSettings();
+  const defaultRelinkerPath = getDefaultRelinkerPath();
+  const defaultPrxPath = getDefaultLibsPath();
+
+  return {
+    relinkerPath: userSettings.relinkerPath || defaultRelinkerPath,
+    prxPath: userSettings.prxPath || defaultPrxPath,
+    defaultTarget: userSettings.defaultTarget || 'windows',
+    cpuFix: userSettings.cpuFix || 'intel',
+    soundEnabled: userSettings.soundEnabled !== undefined ? userSettings.soundEnabled : true,
+    hapticsEnabled: userSettings.hapticsEnabled !== undefined ? userSettings.hapticsEnabled : true,
+    advanced: userSettings.advanced !== undefined ? userSettings.advanced : false,
+    defaultRelinkerPath,
+    defaultPrxPath,
+  };
+});
+
+ipcMain.handle('anyps5:save-settings', async (_, newSettings) => {
+  saveSettings(newSettings);
+  return true;
+});
+
+ipcMain.handle('anyps5:select-file', async (_, filters) => {
+  if (!mainWindow) return null;
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openFile'],
+    title: 'Select Executable',
+    filters: (filters as Array<{ name: string; extensions: string[] }>) || [
+      { name: 'Executables (*.exe)', extensions: ['exe'] },
+      { name: 'All Files', extensions: ['*'] },
+    ],
+  });
+  if (result.canceled || result.filePaths.length === 0) return null;
+  return result.filePaths[0];
 });
 

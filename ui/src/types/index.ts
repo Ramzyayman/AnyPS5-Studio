@@ -73,3 +73,15 @@ export interface SystemTelemetry {
   recommendedCpuTranslation?: 'none' | 'intel' | 'rosetta';
   recommendationReason?: string;
 }
+
+export interface AppSettings {
+  relinkerPath: string;
+  prxPath: string;
+  defaultTarget: string;
+  cpuFix: string;
+  soundEnabled: boolean;
+  hapticsEnabled: boolean;
+  advanced: boolean;
+  defaultRelinkerPath?: string;
+  defaultPrxPath?: string;
+}

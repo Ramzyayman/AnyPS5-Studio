@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Settings, 
   FolderSearch, 
@@ -11,6 +11,7 @@ import {
   HardDrive
 } from 'lucide-react';
 import { audioService } from '../services/audioService';
+import { apiBridge } from '../services/apiBridge';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -25,17 +26,38 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   showAdvancedNav,
   onToggleAdvancedNav
 }) => {
-  const [relinkerPath, setRelinkerPath] = useState<string>('C:/Users/PC/.gemini/antigravity/scratch/AnyPS5/build/relinker.exe');
-  const [prxPath, setPrxPath] = useState<string>('C:/Users/PC/.gemini/antigravity/scratch/AnyPS5/libs');
+  const [relinkerPath, setRelinkerPath] = useState<string>('');
+  const [prxPath, setPrxPath] = useState<string>('');
+  const [defaultRelinkerPath, setDefaultRelinkerPath] = useState<string>('');
+  const [defaultPrxPath, setDefaultPrxPath] = useState<string>('');
   const [defaultTarget, setDefaultTarget] = useState<string>('windows');
   const [cpuFix, setCpuFix] = useState<string>('intel');
   const [soundEnabled, setSoundEnabled] = useState<boolean>(audioService.enabled);
   const [hapticsEnabled, setHapticsEnabled] = useState<boolean>(true);
   const [advanced, setAdvanced] = useState<boolean>(showAdvancedNav);
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (isOpen) {
       setAdvanced(showAdvancedNav);
+      apiBridge.getSettings().then((settings) => {
+        if (settings) {
+          if (settings.relinkerPath) setRelinkerPath(settings.relinkerPath);
+          if (settings.prxPath) setPrxPath(settings.prxPath);
+          if (settings.defaultRelinkerPath) setDefaultRelinkerPath(settings.defaultRelinkerPath);
+          if (settings.defaultPrxPath) setDefaultPrxPath(settings.defaultPrxPath);
+          if (settings.defaultTarget) setDefaultTarget(settings.defaultTarget);
+          if (settings.cpuFix) setCpuFix(settings.cpuFix);
+          if (settings.soundEnabled !== undefined) {
+            setSoundEnabled(settings.soundEnabled);
+            audioService.enabled = settings.soundEnabled;
+          }
+          if (settings.hapticsEnabled !== undefined) setHapticsEnabled(settings.hapticsEnabled);
+          if (settings.advanced !== undefined) {
+            setAdvanced(settings.advanced);
+            onToggleAdvancedNav(settings.advanced);
+          }
+        }
+      });
     }
   }, [isOpen, showAdvancedNav]);
 
@@ -46,8 +68,39 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     onToggleAdvancedNav(checked);
   };
 
-  const handleSave = () => {
+  const handleBrowseRelinker = async () => {
+    const selected = await apiBridge.selectFile([
+      { name: 'Executable (*.exe)', extensions: ['exe'] },
+      { name: 'All Files (*.*)', extensions: ['*'] }
+    ]);
+    if (selected) {
+      setRelinkerPath(selected);
+    }
+  };
+
+  const handleBrowsePrx = async () => {
+    const selected = await apiBridge.selectGameFolder();
+    if (selected) {
+      setPrxPath(selected);
+    }
+  };
+
+  const handleResetDefaults = () => {
+    if (defaultRelinkerPath) setRelinkerPath(defaultRelinkerPath);
+    if (defaultPrxPath) setPrxPath(defaultPrxPath);
+  };
+
+  const handleSave = async () => {
     audioService.playConfirm();
+    await apiBridge.saveSettings({
+      relinkerPath,
+      prxPath,
+      defaultTarget,
+      cpuFix,
+      soundEnabled,
+      hapticsEnabled,
+      advanced,
+    });
     onToggleAdvancedNav(advanced);
     onClose();
   };
@@ -71,23 +124,43 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         <div className="space-y-4">
           <div>
             <label className="block text-xs font-medium text-white/70 mb-1">Native Relinker Executable</label>
-            <input
-              type="text"
-              value={relinkerPath}
-              onChange={(e) => setRelinkerPath(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-white text-xs font-mono focus:outline-none focus:border-white/30 focus:ring-1 focus:ring-white/20 transition-all"
-            />
-            <p className="text-[11px] text-white/40 mt-1">Compiled relinker binary built with CMake / LLVM 18</p>
+            <div className="flex items-center space-x-2">
+              <input
+                type="text"
+                value={relinkerPath}
+                onChange={(e) => setRelinkerPath(e.target.value)}
+                placeholder="Loading installation path..."
+                className="w-full px-3 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-white text-xs font-mono focus:outline-none focus:border-white/30 focus:ring-1 focus:ring-white/20 transition-all"
+              />
+              <button
+                type="button"
+                onClick={handleBrowseRelinker}
+                className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-white/80 hover:text-white text-xs font-medium border border-white/10 transition-colors flex-shrink-0"
+              >
+                Browse...
+              </button>
+            </div>
+            <p className="text-[11px] text-white/40 mt-1">Compiled relinker binary bundled with AnyPS5 Studio</p>
           </div>
 
           <div>
             <label className="block text-xs font-medium text-white/70 mb-1">System PRX Libraries Directory</label>
-            <input
-              type="text"
-              value={prxPath}
-              onChange={(e) => setPrxPath(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-white text-xs font-mono focus:outline-none focus:border-white/30 focus:ring-1 focus:ring-white/20 transition-all"
-            />
+            <div className="flex items-center space-x-2">
+              <input
+                type="text"
+                value={prxPath}
+                onChange={(e) => setPrxPath(e.target.value)}
+                placeholder="Loading installation path..."
+                className="w-full px-3 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-white text-xs font-mono focus:outline-none focus:border-white/30 focus:ring-1 focus:ring-white/20 transition-all"
+              />
+              <button
+                type="button"
+                onClick={handleBrowsePrx}
+                className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-white/80 hover:text-white text-xs font-medium border border-white/10 transition-colors flex-shrink-0"
+              >
+                Browse...
+              </button>
+            </div>
             <p className="text-[11px] text-white/40 mt-1">Directory containing clean-room libkernel.prx, libSceAgcDriver.prx</p>
           </div>
 
@@ -158,21 +231,30 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
           </div>
 
-          <div className="pt-4 flex items-center justify-end space-x-3 border-t border-white/10">
+          <div className="pt-4 flex items-center justify-between border-t border-white/10">
             <button
               type="button"
-              onClick={onClose}
-              className="px-4 py-2 rounded-full text-xs font-medium text-white/60 hover:text-white transition-colors"
+              onClick={handleResetDefaults}
+              className="text-xs text-white/40 hover:text-white/70 transition-colors"
             >
-              Cancel
+              Reset to Defaults
             </button>
-            <button
-              type="button"
-              onClick={handleSave}
-              className="px-6 py-2 rounded-full bg-white text-black hover:bg-white/90 text-xs font-semibold transition-all"
-            >
-              Save Preferences
-            </button>
+            <div className="flex items-center space-x-3">
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-4 py-2 rounded-full text-xs font-medium text-white/60 hover:text-white transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSave}
+                className="px-6 py-2 rounded-full bg-white text-black hover:bg-white/90 text-xs font-semibold transition-all"
+              >
+                Save Preferences
+              </button>
+            </div>
           </div>
         </div>
       </div>
