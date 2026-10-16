@@ -156,9 +156,9 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         <div className="absolute inset-x-0 bottom-0 h-48 bg-gradient-to-t from-[#04060a] via-[#04060a]/50 to-transparent" />
       </div>
 
-      {/* Top Section: Game Carousel Shelf (Positioned naturally below floating navbar) */}
-      <div className="relative z-10 pt-20 px-10">
-        <div className="flex items-center justify-between text-xs font-medium text-neutral-400 mb-2.5">
+      {/* Top Section: Game Carousel Shelf (Positioned naturally below floating navbar in upper-left) */}
+      <div className="relative z-10 pt-20 md:pt-22 px-8 md:px-12">
+        <div className="flex items-center justify-between text-xs font-medium text-neutral-400 mb-3">
           <div className="flex items-center space-x-2">
             <span className="text-white font-semibold text-sm">Your Games</span>
             <span className="text-neutral-500 text-xs font-normal">({games.length})</span>
@@ -180,8 +180,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           )}
         </div>
 
-        {/* Shelf scroll container */}
-        <div className="flex items-center space-x-4 overflow-x-auto pb-4 pt-1 px-1 scrollbar-none scroll-smooth">
+        {/* Shelf scroll container with 25% larger box art covers */}
+        <div className="flex items-center space-x-5 md:space-x-6 overflow-x-auto pb-5 pt-2 px-1 scrollbar-none scroll-smooth">
           {games.map((game, idx) => {
             const isSelected = idx === selectedGameIndex;
             return (
@@ -191,10 +191,10 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                   itemRefs.current[idx] = el;
                 }}
                 onClick={() => handleTileClick(idx)}
-                className={`relative flex-shrink-0 w-28 h-36 rounded-xl overflow-hidden transition-all duration-200 focus:outline-none ${
+                className={`relative flex-shrink-0 w-36 h-48 rounded-xl overflow-hidden transition-all duration-200 ease-out focus:outline-none motion-reduce:transition-none ${
                   isSelected
-                    ? 'scale-105 ring-2 ring-white ring-offset-2 ring-offset-[#04060a] z-20 shadow-2xl opacity-100'
-                    : 'opacity-65 hover:opacity-90 hover:scale-[1.02]'
+                    ? 'scale-[1.04] ring-2 ring-white ring-offset-2 ring-offset-[#04060a] z-20 shadow-2xl opacity-100'
+                    : 'opacity-70 hover:opacity-95 hover:scale-[1.02] focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[#04060a]'
                 }`}
               >
                 <img
@@ -204,16 +204,16 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                 />
 
                 {/* Status Dot */}
-                <div className="absolute top-2 right-2">
+                <div className="absolute top-2.5 right-2.5">
                   {game.status === 'ported' ? (
-                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 block shadow-sm" />
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 block shadow-sm ring-1 ring-black/40" />
                   ) : (
-                    <span className="w-2 h-2 rounded-full bg-blue-400 block" />
+                    <span className="w-2 h-2 rounded-full bg-blue-400 block ring-1 ring-black/40" />
                   )}
                 </div>
 
                 {/* Subtle gradient on tile */}
-                <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent p-2 text-left">
+                <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/40 to-transparent p-2.5 text-left">
                   <p className="text-[11px] font-semibold text-white truncate leading-tight">
                     {game.title}
                   </p>
@@ -224,9 +224,9 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         </div>
       </div>
 
-      {/* Center-Lower Section: Selected Game Hero & Primary Actions */}
+      {/* Center-Lower Section: Selected Game Hero & Primary Actions (Elevated with generous bottom breathing room) */}
       {selectedGame && (
-        <div className="relative z-10 px-10 pb-12 max-w-4xl">
+        <div className="relative z-10 px-8 md:px-12 pb-20 md:pb-24 lg:pb-28 max-w-3xl lg:max-w-4xl">
           {/* Metadata Row: Clean title ID, port-status, and binary size */}
           <div className="flex items-center space-x-3 mb-2 text-xs flex-wrap gap-y-1">
             <span className="text-neutral-400 font-mono text-xs tracking-wide">

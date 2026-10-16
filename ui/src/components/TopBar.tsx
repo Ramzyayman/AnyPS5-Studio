@@ -52,11 +52,11 @@ export const TopBar: React.FC<TopBarProps> = ({
 
   return (
     <header 
-      className="relative z-30 h-16 flex items-center justify-between px-10 bg-transparent select-none"
+      className="relative z-30 h-16 flex items-center justify-between px-8 md:px-12 bg-transparent select-none"
       style={{ backgroundColor: 'transparent' }}
     >
       {/* Left: Compact AnyPS5 Console Identity & PS5 Typography Navigation */}
-      <div className="flex items-center space-x-10">
+      <div className="flex items-center space-x-8 md:space-x-12">
         {/* Compact Console Brand Mark */}
         <div className="flex items-center space-x-2">
           <div className="w-5 h-5 rounded-[4px] bg-white flex items-center justify-center">
@@ -68,7 +68,7 @@ export const TopBar: React.FC<TopBarProps> = ({
         </div>
 
         {/* PS5 Typography-Driven Navigation (no underlines, no boxes, purely typography-differentiated) */}
-        <nav className="flex items-baseline space-x-8" role="tablist">
+        <nav className="flex items-baseline space-x-6 md:space-x-8" role="tablist">
           {NAV_ITEMS.map((item) => {
             const isSelected = activeTab === item.key;
             return (
@@ -80,7 +80,7 @@ export const TopBar: React.FC<TopBarProps> = ({
                 className={`relative py-1 tracking-wide focus:outline-none focus-visible:ring-1 focus-visible:ring-white/60 focus-visible:rounded transition-all duration-200 ease-out motion-reduce:transition-none ${
                   isSelected
                     ? 'text-white text-[16px] font-semibold opacity-100'
-                    : 'text-white/40 text-[14px] font-medium opacity-80 hover:text-white/70 hover:opacity-100'
+                    : 'text-white/65 text-[14px] font-normal hover:text-white/90'
                 }`}
               >
                 <span>{item.label}</span>

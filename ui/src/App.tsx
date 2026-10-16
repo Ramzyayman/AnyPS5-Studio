@@ -30,10 +30,41 @@ export const App: React.FC = () => {
     });
   }, []);
 
+  const TAB_ORDER: ('games' | 'relinker' | 'nid' | 'prx' | 'telemetry')[] = [
+    'games',
+    'relinker',
+    'nid',
+    'prx',
+    'telemetry'
+  ];
+
   // Keyboard navigation for authentic console feel
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (isAddGameOpen || isSettingsOpen || activeRunningGame || games.length === 0) return;
+      if (isAddGameOpen || isSettingsOpen || activeRunningGame) return;
+
+      // Tab switching via Q/E or [ / ]
+      if ((e.key === 'q' || e.key === 'Q' || e.key === '[') && !['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) {
+        setActiveTab((prev) => {
+          const idx = TAB_ORDER.indexOf(prev);
+          const next = TAB_ORDER[(idx - 1 + TAB_ORDER.length) % TAB_ORDER.length];
+          audioService.playNavTick();
+          return next;
+        });
+        return;
+      }
+
+      if ((e.key === 'e' || e.key === 'E' || e.key === ']') && !['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) {
+        setActiveTab((prev) => {
+          const idx = TAB_ORDER.indexOf(prev);
+          const next = TAB_ORDER[(idx + 1) % TAB_ORDER.length];
+          audioService.playNavTick();
+          return next;
+        });
+        return;
+      }
+
+      if (games.length === 0) return;
 
       if (e.key === 'ArrowRight' && activeTab === 'games') {
         setSelectedGameIndex((prev) => {
@@ -74,46 +105,73 @@ export const App: React.FC = () => {
   useEffect(() => {
     let animationFrameId: number;
     let lastButtonState = false;
+    let lastBumperState = false;
 
     const pollGamepads = () => {
       const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
       const gp = gamepads[0];
       setGamepadConnected(Boolean(gp));
 
-      if (gp && activeTab === 'games' && !isAddGameOpen && !isSettingsOpen && !activeRunningGame && games.length > 0) {
-        // D-pad Right or Left Stick Right
-        const rightPressed = gp.buttons[15]?.pressed || gp.axes[0] > 0.5;
-        const leftPressed = gp.buttons[14]?.pressed || gp.axes[0] < -0.5;
-        const crossPressed = gp.buttons[0]?.pressed; // Cross / A
+      if (gp && !isAddGameOpen && !isSettingsOpen && !activeRunningGame) {
+        // L1 / LB (Button 4) and R1 / RB (Button 5) tab navigation
+        const l1Pressed = gp.buttons[4]?.pressed;
+        const r1Pressed = gp.buttons[5]?.pressed;
 
-        if (rightPressed && !lastButtonState) {
-          lastButtonState = true;
-          setSelectedGameIndex((prev) => {
-            const next = (prev + 1) % games.length;
+        if (l1Pressed && !lastBumperState) {
+          lastBumperState = true;
+          setActiveTab((prev) => {
+            const idx = TAB_ORDER.indexOf(prev);
+            const next = TAB_ORDER[(idx - 1 + TAB_ORDER.length) % TAB_ORDER.length];
             audioService.playNavTick();
             return next;
           });
-        } else if (leftPressed && !lastButtonState) {
-          lastButtonState = true;
-          setSelectedGameIndex((prev) => {
-            const next = (prev - 1 + games.length) % games.length;
+        } else if (r1Pressed && !lastBumperState) {
+          lastBumperState = true;
+          setActiveTab((prev) => {
+            const idx = TAB_ORDER.indexOf(prev);
+            const next = TAB_ORDER[(idx + 1) % TAB_ORDER.length];
             audioService.playNavTick();
             return next;
           });
-        } else if (crossPressed && !lastButtonState) {
-          lastButtonState = true;
-          const game = games[selectedGameIndex];
-          if (game) {
-            if (game.status === 'ported') {
-              audioService.playLaunch();
-              setActiveRunningGame(game);
-            } else {
-              audioService.playConfirm();
-              setActiveTab('relinker');
+        } else if (!l1Pressed && !r1Pressed) {
+          lastBumperState = false;
+        }
+
+        // D-pad & Sticks when on games tab
+        if (activeTab === 'games' && games.length > 0) {
+          const rightPressed = gp.buttons[15]?.pressed || gp.axes[0] > 0.5;
+          const leftPressed = gp.buttons[14]?.pressed || gp.axes[0] < -0.5;
+          const crossPressed = gp.buttons[0]?.pressed; // Cross / A
+
+          if (rightPressed && !lastButtonState) {
+            lastButtonState = true;
+            setSelectedGameIndex((prev) => {
+              const next = (prev + 1) % games.length;
+              audioService.playNavTick();
+              return next;
+            });
+          } else if (leftPressed && !lastButtonState) {
+            lastButtonState = true;
+            setSelectedGameIndex((prev) => {
+              const next = (prev - 1 + games.length) % games.length;
+              audioService.playNavTick();
+              return next;
+            });
+          } else if (crossPressed && !lastButtonState) {
+            lastButtonState = true;
+            const game = games[selectedGameIndex];
+            if (game) {
+              if (game.status === 'ported') {
+                audioService.playLaunch();
+                setActiveRunningGame(game);
+              } else {
+                audioService.playConfirm();
+                setActiveTab('relinker');
+              }
             }
+          } else if (!rightPressed && !leftPressed && !crossPressed) {
+            lastButtonState = false;
           }
-        } else if (!rightPressed && !leftPressed && !crossPressed) {
-          lastButtonState = false;
         }
       }
 
