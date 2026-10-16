@@ -11,6 +11,7 @@ export const INITIAL_GAMES: GameItem[] = [
     path: 'C:/Games/PS5/DreamingSarah',
     executableName: 'app.exe',
     targetPlatform: 'windows',
+    description: 'A surreal adventure game following Sarah as she explores diverse dreamscapes to wake up from a coma.',
     isSample: true,
     iconUrl: 'https://cdn.cloudflare.steamstatic.com/steam/apps/296870/library_600x900.jpg',
     backdropUrl: 'https://cdn.cloudflare.steamstatic.com/steam/apps/296870/library_hero.jpg',

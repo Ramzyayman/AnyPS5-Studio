@@ -66,6 +66,9 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     if (index !== selectedGameIndex) {
       audioService.playNavTick();
       onSelectGame(index);
+    } else {
+      audioService.playNavTick();
+      setShowTechnicalDrawer((prev) => !prev);
     }
   };
 
@@ -144,24 +147,23 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             key={selectedGame.id}
             src={selectedGame.backdropUrl}
             alt={selectedGame.title}
-            className="w-full h-full object-cover object-top opacity-50 scale-100 transition-opacity duration-700 ease-in-out"
+            className="w-full h-full object-cover object-top opacity-65 scale-100 transition-opacity duration-700 ease-in-out"
           />
         )}
-        {/* Layered cinematic masks for legibility */}
-        <div className="absolute inset-0 bg-gradient-to-t from-[#04060a] via-[#04060a]/60 to-transparent" />
-        <div className="absolute inset-0 bg-gradient-to-r from-[#04060a] via-[#04060a]/75 to-transparent w-full md:w-3/4" />
-        <div className="absolute inset-0 bg-gradient-to-b from-[#04060a]/80 via-transparent to-transparent h-32" />
+        {/* Layered cinematic masks: refined to keep center & upper-right visible while lower-left is readable */}
+        <div className="absolute inset-0 bg-gradient-to-r from-[#04060a] via-[#04060a]/80 via-35% to-transparent w-full md:w-3/4" />
+        <div className="absolute inset-x-0 bottom-0 h-48 bg-gradient-to-t from-[#04060a] via-[#04060a]/50 to-transparent" />
+        <div className="absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-[#04060a]/70 to-transparent" />
       </div>
 
       {/* Top Section: Game Carousel Shelf */}
       <div className="relative z-10 pt-3 px-10">
-        <div className="flex items-center justify-between text-[11px] font-medium text-neutral-400 tracking-wider uppercase mb-2.5">
+        <div className="flex items-center justify-between text-xs font-medium text-neutral-400 mb-2.5">
           <div className="flex items-center space-x-2">
-            <span>Installed Library</span>
-            <span>•</span>
-            <span className="text-white/80">{games.length} Titles</span>
+            <span className="text-white font-semibold text-sm">Your Games</span>
+            <span className="text-neutral-500 text-xs font-normal">({games.length})</span>
             {hasSampleTitles && (
-              <span className="text-[10px] text-amber-400/90 font-mono lowercase tracking-normal">
+              <span className="text-[10px] text-amber-400/80 font-mono">
                 (includes demo presets)
               </span>
             )}
@@ -170,7 +172,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           {hasSampleTitles && onClearDemoGames && (
             <button
               onClick={onClearDemoGames}
-              className="text-[11px] text-neutral-400 hover:text-white transition-colors lowercase"
+              className="text-[11px] text-neutral-400 hover:text-white transition-colors"
               title="Remove sample demonstration games from library"
             >
               Clear demo presets
@@ -225,12 +227,9 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
       {/* Center-Lower Section: Selected Game Hero & Primary Actions */}
       {selectedGame && (
         <div className="relative z-10 px-10 pb-12 max-w-4xl">
-          {/* Metadata Row */}
+          {/* Metadata Row: Clean title ID, port-status, and binary size */}
           <div className="flex items-center space-x-3 mb-2 text-xs flex-wrap gap-y-1">
-            <span className="px-2 py-0.5 rounded bg-white/10 text-white font-mono text-[11px] font-semibold tracking-wider">
-              PS5
-            </span>
-            <span className="text-neutral-400 font-mono text-xs">
+            <span className="text-neutral-400 font-mono text-xs tracking-wide">
               {selectedGame.titleId}
             </span>
             <span className="text-neutral-600">•</span>
@@ -254,24 +253,32 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
               </span>
             )}
             <span className="text-neutral-600">•</span>
-            <span className="text-neutral-400 text-xs">
+            <span className="text-neutral-400 text-xs font-mono">
               {formatSize(selectedGame.sizeBytes)}
             </span>
           </div>
 
-          {/* Large Game Title */}
-          <h1 className="text-4xl md:text-5xl font-black text-white tracking-tight mb-3 drop-shadow-md">
-            {selectedGame.title}
+          {/* Large Game Title - Clickable for contextual details & specs */}
+          <h1 
+            onClick={() => {
+              audioService.playNavTick();
+              setShowTechnicalDrawer(true);
+            }}
+            className="text-4xl md:text-5xl font-black text-white tracking-tight mb-3 drop-shadow-md cursor-pointer hover:text-white/90 group inline-flex items-center space-x-3"
+            title="Click to view title details and technical specifications"
+          >
+            <span>{selectedGame.title}</span>
+            <Info className="w-4 h-4 text-neutral-400 opacity-0 group-hover:opacity-80 transition-opacity" />
           </h1>
 
-          {/* Concise Description */}
-          <p className="text-sm text-neutral-300 max-w-xl leading-relaxed mb-8 drop-shadow">
-            {selectedGame.isSample
-              ? 'Preloaded UI demonstration preset. Real binary execution requires importing your own decrypted PlayStation 5 eboot.bin.'
-              : 'Native executable port for 64-bit Windows. Uses clean-room PRX system libraries with Vulkan/SPIR-V graphics pipeline translation.'}
-          </p>
+          {/* Concise Game Description (only displayed when a factual description is available) */}
+          {selectedGame.description && (
+            <p className="text-sm text-neutral-300 max-w-xl leading-relaxed mb-6 drop-shadow">
+              {selectedGame.description}
+            </p>
+          )}
 
-          {/* Action Buttons Zone (PlayStation Hierarchy: Bold Primary + Translucent Secondaries) */}
+          {/* Action Buttons Zone (Play Game dominant + Relinker Studio secondary + Understated NID Coverage) */}
           <div className="flex flex-wrap items-center gap-3">
             {selectedGame.status === 'ported' ? (
               <button
@@ -302,29 +309,17 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
               <span>Relinker Studio</span>
             </button>
 
-            {/* Tertiary Action: NID Compatibility */}
+            {/* Understated Action: NID Coverage */}
             <button
               onClick={() => {
                 audioService.playConfirm();
                 onOpenNidAudit(selectedGame);
               }}
-              className="flex items-center space-x-2 px-5 py-3 rounded-full bg-white/10 hover:bg-white/15 text-white font-medium text-xs tracking-wide border border-white/10 transition-all"
+              className="flex items-center space-x-1.5 px-3 py-2 text-neutral-400 hover:text-white text-xs font-medium transition-colors rounded-full hover:bg-white/5"
+              title="View NID import compatibility audit"
             >
-              <Code2 className="w-3.5 h-3.5 text-neutral-300" />
-              <span>NID Compatibility ({selectedGame.compatibility.score}%)</span>
-            </button>
-
-            {/* Technical Specs Drawer Toggle */}
-            <button
-              onClick={() => {
-                audioService.playNavTick();
-                setShowTechnicalDrawer(!showTechnicalDrawer);
-              }}
-              className="flex items-center space-x-1.5 px-4 py-3 rounded-full bg-white/5 hover:bg-white/10 text-neutral-300 font-medium text-xs border border-white/5 transition-all"
-              title="View Contextual Technical Specs"
-            >
-              <Info className="w-3.5 h-3.5" />
-              <span>Details</span>
+              <Code2 className="w-3.5 h-3.5 text-neutral-400" />
+              <span>NID Coverage: {selectedGame.compatibility.score}%</span>
             </button>
           </div>
         </div>
@@ -357,14 +352,27 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             {/* Spec items */}
             <div className="space-y-4 text-xs">
               <div>
+                <span className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold block mb-0.5">Porting Architecture</span>
+                <p className="text-neutral-300 text-xs leading-relaxed">
+                  Native 64-bit Windows PE port utilizing AnyPS5 clean-room PRX system libraries with Vulkan/SPIR-V graphics pipeline translation.
+                </p>
+              </div>
+
+              <div>
                 <span className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold block mb-0.5">Title & Path</span>
                 <p className="text-white font-medium">{selectedGame.title}</p>
                 <p className="text-neutral-400 font-mono text-[11px] truncate">{selectedGame.path}</p>
               </div>
 
-              <div>
-                <span className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold block mb-0.5">Executable Binary</span>
-                <p className="text-white font-mono">{selectedGame.executableName}</p>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <span className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold block mb-0.5">Executable</span>
+                  <p className="text-white font-mono">{selectedGame.executableName}</p>
+                </div>
+                <div>
+                  <span className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold block mb-0.5">Binary Size</span>
+                  <p className="text-white font-mono">{formatSize(selectedGame.sizeBytes)}</p>
+                </div>
               </div>
 
               <div>
@@ -392,6 +400,20 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                     style={{ width: `${selectedGame.compatibility.score}%` }}
                   />
                 </div>
+              </div>
+
+              <div>
+                <span className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold block mb-0.5">PRX System Dependencies</span>
+                {selectedGame.compatibility.unresolvedModules.length > 0 ? (
+                  <p className="text-amber-300 font-mono text-[11px]">
+                    Missing: {selectedGame.compatibility.unresolvedModules.join(', ')}
+                  </p>
+                ) : (
+                  <p className="text-emerald-400 text-[11px] flex items-center space-x-1">
+                    <CheckCircle2 className="w-3.5 h-3.5 inline mr-1" />
+                    <span>All core runtime dependencies resolved</span>
+                  </p>
+                )}
               </div>
 
               <div>

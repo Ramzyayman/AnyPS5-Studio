@@ -22,7 +22,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const [prxPath, setPrxPath] = useState<string>('C:/Users/PC/.gemini/antigravity/scratch/AnyPS5/libs');
   const [defaultTarget, setDefaultTarget] = useState<string>('windows');
   const [cpuFix, setCpuFix] = useState<string>('intel');
-  const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
+  const [soundEnabled, setSoundEnabled] = useState<boolean>(audioService.enabled);
   const [hapticsEnabled, setHapticsEnabled] = useState<boolean>(true);
 
   if (!isOpen) return null;

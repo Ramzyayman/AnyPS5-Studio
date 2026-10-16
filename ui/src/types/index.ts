@@ -10,6 +10,7 @@ export interface GameItem {
   path: string;
   executableName: string;
   targetPlatform: 'windows' | 'linux';
+  description?: string;
   isSample?: boolean;
   iconUrl: string;
   backdropUrl: string;

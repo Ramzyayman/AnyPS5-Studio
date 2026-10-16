@@ -2,9 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { 
   Gamepad2, 
   Settings, 
-  Volume2, 
-  VolumeX, 
-  Search,
   Plus
 } from 'lucide-react';
 import { audioService } from '../services/audioService';
@@ -25,7 +22,6 @@ export const TopBar: React.FC<TopBarProps> = ({
   gamepadConnected,
 }) => {
   const [time, setTime] = useState<string>('');
-  const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
 
   useEffect(() => {
     const updateTime = () => {
@@ -44,13 +40,6 @@ export const TopBar: React.FC<TopBarProps> = ({
       audioService.playNavTick();
       onTabChange(tab);
     }
-  };
-
-  const toggleSound = () => {
-    const next = !soundEnabled;
-    setSoundEnabled(next);
-    audioService.enabled = next;
-    if (next) audioService.playConfirm();
   };
 
   return (
@@ -164,15 +153,6 @@ export const TopBar: React.FC<TopBarProps> = ({
           <Gamepad2 className={`w-4 h-4 ${gamepadConnected ? 'text-blue-400' : 'text-neutral-500'}`} />
           {gamepadConnected && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />}
         </div>
-
-        {/* Audio Mute/Unmute */}
-        <button
-          onClick={toggleSound}
-          className="p-1 hover:text-white transition-colors"
-          title={soundEnabled ? "Mute UI Sounds" : "Unmute UI Sounds"}
-        >
-          {soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4 text-neutral-500" />}
-        </button>
 
         {/* Settings */}
         <button
