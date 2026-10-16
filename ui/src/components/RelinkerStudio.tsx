@@ -292,10 +292,10 @@ export const RelinkerStudio: React.FC<RelinkerStudioProps> = ({
   };
 
   return (
-    <div className="relative w-full h-full flex flex-col pt-20 px-12 pb-10 overflow-y-auto select-none">
+    <div className="relative w-full h-full flex flex-col pt-20 px-12 md:px-16 pb-12 overflow-y-auto select-none">
       
       {/* Console Header: Title & Clean Mode Toggle */}
-      <div className="max-w-[1040px] w-full flex items-center justify-between mb-8 pb-4 border-b border-white/5">
+      <div className="max-w-[1200px] w-full flex items-center justify-between mb-8 pb-4 border-b border-white/5">
         <div>
           <span className="text-[11px] font-medium text-neutral-400 uppercase tracking-wider block mb-1">
             System Software / Relinker Studio
@@ -333,49 +333,55 @@ export const RelinkerStudio: React.FC<RelinkerStudioProps> = ({
       </div>
 
       {/* ============================================================== */}
-      {/* SIMPLE MODE (Desktop Workspace ~1040px, High Intent, Zero Clutter) */}
+      {/* SIMPLE MODE (Desktop Workspace ~1200px, High Intent, Zero Clutter) */}
       {/* ============================================================== */}
       {mode === 'simple' && (
-        <div className="max-w-[1040px] w-full flex flex-col space-y-8 animate-fade-in">
+        <div className="max-w-[1200px] w-full flex flex-col space-y-7 animate-fade-in">
           
           {/* STATE 1: IDLE (Before Execution) */}
           {executionState === 'idle' && (
-            <div className="space-y-8">
+            <div className="space-y-7">
               
               {/* 1. Selected Game Showcase */}
-              <div className="flex items-start space-x-6">
+              <div className="flex items-start space-x-7">
                 {/* Artwork Cover */}
                 <div className="relative shrink-0">
                   <img
                     src={selectedGame.iconUrl}
                     alt={selectedGame.title}
-                    className="w-28 h-36 md:w-32 md:h-44 rounded-xl object-cover shadow-2xl border border-white/10"
+                    className="w-36 h-48 md:w-40 md:h-54 rounded-2xl object-cover shadow-2xl border border-white/10"
                   />
                 </div>
 
                 {/* Title & Metadata */}
-                <div className="flex-1 min-w-0 pt-1">
-                  <span className="text-[11px] font-semibold text-neutral-400 uppercase tracking-wider block mb-1">
-                    Selected PlayStation 5 Game
-                  </span>
-                  <h1 className="text-2xl md:text-3xl font-extrabold text-white tracking-tight leading-tight truncate">
-                    {selectedGame.title}
-                  </h1>
+                <div className="flex-1 min-w-0 pt-1 space-y-3">
+                  <div>
+                    <span className="text-[11px] font-semibold text-neutral-400 uppercase tracking-wider block mb-1">
+                      Selected PlayStation 5 Game
+                    </span>
+                    <h1 className="text-3xl md:text-4xl font-extrabold text-white tracking-tight leading-tight truncate">
+                      {selectedGame.title}
+                    </h1>
 
-                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-neutral-400 mt-2 font-mono">
-                    <span>{selectedGame.titleId}</span>
-                    <span className="text-neutral-600">•</span>
-                    <span>{(selectedGame.sizeBytes / (1024 * 1024 * 1024)).toFixed(1)} GB</span>
-                    <span className="text-neutral-600">•</span>
-                    <span className="text-neutral-500 truncate max-w-xs">{selectedGame.path}</span>
+                    <p className="text-xs text-neutral-400 font-mono mt-1.5 flex items-center space-x-2">
+                      <span className="text-neutral-300 font-semibold">{selectedGame.titleId}</span>
+                      <span className="text-neutral-600">•</span>
+                      <span>{(selectedGame.sizeBytes / (1024 * 1024 * 1024)).toFixed(1)} GB</span>
+                      {selectedGame.status === 'ported' && (
+                        <>
+                          <span className="text-neutral-600">•</span>
+                          <span className="text-emerald-400 font-sans font-medium">Ready to Play</span>
+                        </>
+                      )}
+                    </p>
                   </div>
 
                   {/* Obvious Game Switcher */}
-                  <div className="mt-4 relative inline-block" ref={gameSwitcherRef}>
+                  <div className="relative inline-block" ref={gameSwitcherRef}>
                     <button
                       type="button"
                       onClick={() => setIsGameSwitcherOpen(!isGameSwitcherOpen)}
-                      className="flex items-center space-x-2 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-xs font-medium text-neutral-300 hover:text-white border border-white/10 transition-colors"
+                      className="flex items-center space-x-2 px-3.5 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-xs font-medium text-neutral-300 hover:text-white border border-white/10 transition-colors"
                     >
                       <span>Change Game</span>
                       <ChevronDown className="w-3.5 h-3.5 text-neutral-400" />
@@ -410,81 +416,64 @@ export const RelinkerStudio: React.FC<RelinkerStudioProps> = ({
                 </div>
               </div>
 
-              {/* 2. Configuration & Readiness Presentation (Concise section with subtle dividers) */}
-              <div className="border-t border-white/10 pt-6 space-y-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="text-sm font-semibold text-white tracking-wide">
-                      Configuration & System Readiness
-                    </h3>
-                    <p className="text-xs text-neutral-400 mt-0.5">
-                      Automatically configured based on your verified system hardware.
-                    </p>
-                  </div>
-
-                  <div className="flex items-center space-x-4 text-xs">
-                    <button
-                      type="button"
-                      onClick={() => setShowSettingsDetails(!showSettingsDetails)}
-                      className="text-neutral-400 hover:text-white transition-colors flex items-center space-x-1"
-                    >
-                      <span>{showSettingsDetails ? 'Hide details' : 'Inspect settings'}</span>
-                      {showSettingsDetails ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-                    </button>
-                  </div>
-                </div>
-
-                {/* 3-Column Hierarchy via subtle vertical dividers, no nested cards */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 py-4 border-y border-white/5">
-                  {/* Column 1: System Readiness */}
-                  <div>
-                    <span className="text-[11px] font-semibold text-neutral-400 uppercase tracking-wider block mb-1">
-                      System Readiness
-                    </span>
-                    <div className="flex items-center space-x-2">
-                      <span className={`w-2 h-2 rounded-full ${
+              {/* 2. Configuration & Readiness (Single status + concise explanation) */}
+              <div className="border-t border-white/10 pt-6 space-y-3">
+                <div className="flex items-start justify-between">
+                  <div className="space-y-1.5">
+                    <div className="flex items-center space-x-2.5">
+                      <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${
                         readiness.isReady ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]' : 'bg-red-400 shadow-[0_0_8px_rgba(248,113,113,0.6)]'
                       }`} />
-                      <span className="text-sm font-medium text-white">
+                      <span className="text-base font-semibold text-white tracking-tight">
                         {readiness.isReady ? 'Your PC is ready' : 'System check needed'}
                       </span>
                     </div>
-                    <p className="text-xs text-neutral-400 mt-1">
-                      {readiness.isReady ? 'Compiler and libraries verified' : readiness.statusText}
+                    <p className="text-xs text-neutral-400 pl-5 leading-relaxed max-w-2xl">
+                      {readiness.isReady
+                        ? (options.cpuTranslation === 'intel'
+                            ? 'Configured automatically for your Intel processor with AVX2 instruction lowering and clean window mode.'
+                            : options.cpuTranslation === 'none'
+                            ? 'Configured automatically for your AMD Ryzen processor with native Zen2 instructions and clean window mode.'
+                            : 'Configured automatically for your system environment with clean window mode.')
+                        : readiness.statusText}
                     </p>
                   </div>
 
-                  {/* Column 2: Output Format */}
-                  <div>
-                    <span className="text-[11px] font-semibold text-neutral-400 uppercase tracking-wider block mb-1">
-                      Output Format
-                    </span>
-                    <p className="text-sm font-medium text-white">
-                      Windows Executable (.exe)
-                    </p>
-                    <p className="text-xs text-neutral-400 mt-1">
-                      DirectX 12 / Vulkan GUI window
-                    </p>
-                  </div>
-
-                  {/* Column 3: Optimization Choice */}
-                  <div>
-                    <span className="text-[11px] font-semibold text-neutral-400 uppercase tracking-wider block mb-1">
-                      CPU Translation
-                    </span>
-                    <p className="text-sm font-medium text-white">
-                      {options.cpuTranslation === 'intel' ? 'Intel AVX2 Optimization' : options.cpuTranslation === 'rosetta' ? 'Rosetta 2 Translation' : 'AMD Zen2 Native'}
-                    </p>
-                    <p className="text-xs text-neutral-400 mt-1">
-                      {options.cpuTranslation === 'intel' ? 'Adapts console instructions for Intel Core' : 'Preserves original Zen2 instructions'}
-                    </p>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowSettingsDetails(!showSettingsDetails)}
+                    className="text-xs text-neutral-400 hover:text-white transition-colors flex items-center space-x-1 shrink-0 ml-4 pt-0.5"
+                  >
+                    <span>{showSettingsDetails ? 'Hide details' : 'Inspect settings'}</span>
+                    {showSettingsDetails ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                  </button>
                 </div>
 
-                {/* Expandable Technical Settings & Hardware inspection */}
+                {/* Expandable Inspect Settings Drawer */}
                 {showSettingsDetails && (
-                  <div className="p-4 rounded-xl bg-white/[0.02] border border-white/5 space-y-3 font-mono text-xs text-neutral-300 animate-fade-in">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="mt-3 p-4 rounded-xl bg-white/[0.02] border border-white/5 space-y-3 font-mono text-xs text-neutral-300 animate-fade-in">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-2">
+                      <div className="space-y-1.5">
+                        <div className="flex justify-between border-b border-white/5 pb-1">
+                          <span className="text-neutral-500">Output Format:</span>
+                          <span className="text-neutral-200">Windows Executable (.exe)</span>
+                        </div>
+                        <div className="flex justify-between border-b border-white/5 pb-1">
+                          <span className="text-neutral-500">Window Subsystem:</span>
+                          <span className="text-neutral-200">Clean Window (GUI)</span>
+                        </div>
+                        <div className="flex justify-between border-b border-white/5 pb-1">
+                          <span className="text-neutral-500">CPU Translation:</span>
+                          <span className="text-neutral-200">
+                            {options.cpuTranslation === 'intel' ? 'Intel AVX2 Optimization' : options.cpuTranslation === 'rosetta' ? 'Rosetta 2 Translation' : 'AMD Zen2 Native'}
+                          </span>
+                        </div>
+                        <div className="flex justify-between border-b border-white/5 pb-1">
+                          <span className="text-neutral-500">Import Filter:</span>
+                          <span className="text-neutral-200">Level 1 (Standard Pruning)</span>
+                        </div>
+                      </div>
+
                       <div className="space-y-1.5">
                         <div className="flex justify-between border-b border-white/5 pb-1">
                           <span className="text-neutral-500">Host Processor:</span>
@@ -495,24 +484,16 @@ export const RelinkerStudio: React.FC<RelinkerStudioProps> = ({
                           <span className="text-neutral-200">{telemetry?.gpuName || 'DirectX 12 / Vulkan'}</span>
                         </div>
                         <div className="flex justify-between border-b border-white/5 pb-1">
-                          <span className="text-neutral-500">Host OS:</span>
-                          <span className="text-neutral-200">{telemetry?.osName || 'Windows'}</span>
-                        </div>
-                      </div>
-                      <div className="space-y-1.5">
-                        <div className="flex justify-between border-b border-white/5 pb-1">
-                          <span className="text-neutral-500">Compiler Engine:</span>
+                          <span className="text-neutral-500">Compiler Tool:</span>
                           <span className={telemetry?.relinkerBinaryFound ? 'text-emerald-400' : 'text-red-400'}>
                             {telemetry?.relinkerBinaryFound ? 'Ready (relinker.exe)' : 'Missing'}
                           </span>
                         </div>
                         <div className="flex justify-between border-b border-white/5 pb-1">
-                          <span className="text-neutral-500">PRX Runtime:</span>
-                          <span className="text-neutral-200">{telemetry?.prxVersion || 'Ready'}</span>
-                        </div>
-                        <div className="flex justify-between border-b border-white/5 pb-1">
-                          <span className="text-neutral-500">Import Optimization:</span>
-                          <span className="text-neutral-200">Level 1 (Standard Pruning)</span>
+                          <span className="text-neutral-500">Game Directory:</span>
+                          <span className="text-neutral-400 truncate max-w-[200px]" title={selectedGame.path}>
+                            {selectedGame.path}
+                          </span>
                         </div>
                       </div>
                     </div>
@@ -520,7 +501,7 @@ export const RelinkerStudio: React.FC<RelinkerStudioProps> = ({
                 )}
               </div>
 
-              {/* 3. Primary Action Area (Positioned directly after configuration) */}
+              {/* 3. Primary Action Area (Brought closer to configuration) */}
               <div className="pt-2 flex flex-wrap items-center gap-5">
                 <button
                   type="button"
@@ -783,7 +764,7 @@ export const RelinkerStudio: React.FC<RelinkerStudioProps> = ({
       {/* ADVANCED MODE (Full Technical Controls for Developers)        */}
       {/* ============================================================== */}
       {mode === 'advanced' && (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 flex-1 min-h-0">
+        <div className="max-w-[1200px] w-full grid grid-cols-1 lg:grid-cols-12 gap-8 flex-1 min-h-0">
           
           {/* Left Column: Technical Controls */}
           <div className="lg:col-span-5 flex flex-col space-y-5">
