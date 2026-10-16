@@ -11,6 +11,7 @@ import { SettingsModal } from './components/SettingsModal';
 import { GameItem } from './types';
 import { apiBridge } from './services/apiBridge';
 import { audioService } from './services/audioService';
+import { CheckCircle2, X } from 'lucide-react';
 
 import { INITIAL_GAMES } from './services/sampleData';
 
@@ -22,6 +23,8 @@ export const App: React.FC = () => {
   const [isAddGameOpen, setIsAddGameOpen] = useState<boolean>(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [gamepadConnected, setGamepadConnected] = useState<boolean>(false);
+  const [downloadedUpdateVersion, setDownloadedUpdateVersion] = useState<string | null>(null);
+  const [showUpdateToast, setShowUpdateToast] = useState<boolean>(false);
 
   // Advanced navbar items setting (persisted in localStorage, default OFF)
   const [showAdvancedNav, setShowAdvancedNav] = useState<boolean>(() => {
@@ -51,6 +54,18 @@ export const App: React.FC = () => {
     apiBridge.getGames().then((loaded) => {
       setGames(loaded);
     });
+  }, []);
+
+  // Listen for background auto-updates
+  useEffect(() => {
+    const unsub = apiBridge.onUpdateStatus((status) => {
+      if (status.status === 'downloaded' && status.version) {
+        setDownloadedUpdateVersion(status.version);
+        setShowUpdateToast(true);
+        audioService.playConfirm();
+      }
+    });
+    return () => unsub();
   }, []);
 
   const availableTabs: ('games' | 'relinker' | 'nid' | 'prx' | 'telemetry')[] = showAdvancedNav
@@ -358,6 +373,46 @@ export const App: React.FC = () => {
         showAdvancedNav={showAdvancedNav}
         onToggleAdvancedNav={handleToggleAdvancedNav}
       />
+
+      {/* PS5 Notification Toast: Update Ready */}
+      {showUpdateToast && downloadedUpdateVersion && (
+        <div className="fixed top-14 right-6 z-50 animate-fade-in max-w-sm w-full bg-[#141923]/95 border border-white/20 rounded-2xl shadow-2xl backdrop-blur-xl p-4 flex flex-col space-y-3">
+          <div className="flex items-start justify-between">
+            <div className="flex items-center space-x-3">
+              <div className="w-9 h-9 rounded-xl bg-[#0070d1]/20 border border-[#0070d1]/40 flex items-center justify-center flex-shrink-0">
+                <CheckCircle2 className="w-5 h-5 text-[#0070d1]" />
+              </div>
+              <div>
+                <h4 className="text-xs font-semibold text-white tracking-wide">Update Ready to Install</h4>
+                <p className="text-[11px] text-white/60 mt-0.5">AnyPS5 Studio v{downloadedUpdateVersion} has been downloaded.</p>
+              </div>
+            </div>
+            <button
+              onClick={() => setShowUpdateToast(false)}
+              className="text-white/40 hover:text-white/80 transition-colors p-1"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+          <div className="flex items-center justify-end space-x-2 pt-1 border-t border-white/10">
+            <button
+              onClick={() => setShowUpdateToast(false)}
+              className="px-3 py-1.5 rounded-lg text-xs font-medium text-white/60 hover:text-white transition-colors"
+            >
+              Later
+            </button>
+            <button
+              onClick={() => {
+                audioService.playConfirm();
+                apiBridge.quitAndInstallUpdate();
+              }}
+              className="px-4 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-semibold transition-colors shadow-lg shadow-emerald-500/20"
+            >
+              Restart & Install
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

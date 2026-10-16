@@ -14,6 +14,16 @@ contextBridge.exposeInMainWorld('anyps5', {
   getSettings: () => ipcRenderer.invoke('anyps5:get-settings'),
   saveSettings: (settings: unknown) => ipcRenderer.invoke('anyps5:save-settings', settings),
   selectFile: (filters?: unknown) => ipcRenderer.invoke('anyps5:select-file', filters),
+  checkForUpdates: () => ipcRenderer.invoke('anyps5:check-for-updates'),
+  quitAndInstallUpdate: () => ipcRenderer.invoke('anyps5:quit-and-install-update'),
+  getAppVersion: () => ipcRenderer.invoke('anyps5:get-app-version'),
+  onUpdateStatus: (callback: (status: unknown) => void) => {
+    const handler = (_: unknown, status: unknown) => callback(status);
+    ipcRenderer.on('anyps5:update-status', handler);
+    return () => {
+      ipcRenderer.removeListener('anyps5:update-status', handler);
+    };
+  },
   onRelinkerEvent: (callback: (event: { type: string; data: unknown }) => void) => {
     const handler = (_: unknown, event: { type: string; data: unknown }) => callback(event);
     ipcRenderer.on('anyps5:relinker-event', handler);

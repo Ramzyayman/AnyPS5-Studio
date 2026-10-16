@@ -1,4 +1,4 @@
-import { GameItem, RelinkerOptions, SystemTelemetry, ConversionStage, ConversionLog, AppSettings } from '../types';
+import { GameItem, RelinkerOptions, SystemTelemetry, ConversionStage, ConversionLog, AppSettings, UpdateStatus } from '../types';
 import { INITIAL_GAMES } from './sampleData';
 
 declare global {
@@ -19,6 +19,10 @@ declare global {
       saveGames: (games: GameItem[]) => Promise<void>;
       getSettings?: () => Promise<AppSettings>;
       saveSettings?: (settings: Partial<AppSettings>) => Promise<boolean>;
+      checkForUpdates?: () => Promise<{ status: string; currentVersion: string; error?: string }>;
+      quitAndInstallUpdate?: () => void;
+      getAppVersion?: () => Promise<string>;
+      onUpdateStatus?: (callback: (status: UpdateStatus) => void) => () => void;
       runRelinker: (
         game: GameItem,
         options: RelinkerOptions,
@@ -220,6 +224,33 @@ class ApiBridge {
   public onWindowMaximizedChange(callback: (isMax: boolean) => void): () => void {
     if (window.anyps5?.onWindowMaximizedChange) {
       return window.anyps5.onWindowMaximizedChange(callback);
+    }
+    return () => {};
+  }
+
+  public async checkForUpdates(): Promise<{ status: string; currentVersion: string; error?: string }> {
+    if (window.anyps5?.checkForUpdates) {
+      return await window.anyps5.checkForUpdates();
+    }
+    return { status: 'not-available', currentVersion: '1.0.0' };
+  }
+
+  public quitAndInstallUpdate(): void {
+    if (window.anyps5?.quitAndInstallUpdate) {
+      window.anyps5.quitAndInstallUpdate();
+    }
+  }
+
+  public async getAppVersion(): Promise<string> {
+    if (window.anyps5?.getAppVersion) {
+      return await window.anyps5.getAppVersion();
+    }
+    return '1.0.0';
+  }
+
+  public onUpdateStatus(callback: (status: UpdateStatus) => void): () => void {
+    if (window.anyps5?.onUpdateStatus) {
+      return window.anyps5.onUpdateStatus(callback);
     }
     return () => {};
   }

@@ -85,3 +85,13 @@ export interface AppSettings {
   defaultRelinkerPath?: string;
   defaultPrxPath?: string;
 }
+
+export interface UpdateStatus {
+  status: 'idle' | 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'error';
+  version?: string;
+  progress?: number;
+  bytesPerSecond?: number;
+  transferred?: number;
+  total?: number;
+  error?: string;
+}

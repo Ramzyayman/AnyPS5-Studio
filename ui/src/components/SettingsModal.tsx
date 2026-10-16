@@ -8,10 +8,14 @@ import {
   Check, 
   X,
   FileCode2,
-  HardDrive
+  HardDrive,
+  RefreshCw,
+  DownloadCloud,
+  CheckCircle2
 } from 'lucide-react';
 import { audioService } from '../services/audioService';
 import { apiBridge } from '../services/apiBridge';
+import { UpdateStatus } from '../types';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -35,6 +39,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [soundEnabled, setSoundEnabled] = useState<boolean>(audioService.enabled);
   const [hapticsEnabled, setHapticsEnabled] = useState<boolean>(true);
   const [advanced, setAdvanced] = useState<boolean>(showAdvancedNav);
+  const [appVersion, setAppVersion] = useState<string>('1.0.0');
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus>({ status: 'idle' });
+
+  useEffect(() => {
+    apiBridge.getAppVersion().then(setAppVersion).catch(() => {});
+    const unsub = apiBridge.onUpdateStatus((status) => {
+      setUpdateStatus(status);
+    });
+    return () => unsub();
+  }, []);
 
   useEffect(() => {
     if (isOpen) {
@@ -88,6 +102,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const handleResetDefaults = () => {
     if (defaultRelinkerPath) setRelinkerPath(defaultRelinkerPath);
     if (defaultPrxPath) setPrxPath(defaultPrxPath);
+  };
+
+  const handleCheckForUpdates = async () => {
+    audioService.playNavTick();
+    setUpdateStatus({ status: 'checking' });
+    try {
+      const res = await apiBridge.checkForUpdates();
+      if (res.status === 'not-available' || res.status === 'dev-mode') {
+        setUpdateStatus({ status: 'not-available', version: res.currentVersion });
+      }
+    } catch (err: any) {
+      setUpdateStatus({ status: 'error', error: err?.message || 'Update check failed.' });
+    }
   };
 
   const handleSave = async () => {
@@ -228,6 +255,96 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <span className="text-[11px] text-white/50 leading-normal mt-0.5">Show advanced developer tools in the main navigation.</span>
                 </div>
               </label>
+            </div>
+          </div>
+
+          {/* Software Updates */}
+          <div className="pt-3 border-t border-white/10">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center space-x-2">
+                <RefreshCw className="w-3.5 h-3.5 text-white/70" />
+                <span className="text-xs font-medium text-white/90">Software Updates</span>
+              </div>
+              <span className="px-2 py-0.5 rounded-full bg-white/10 text-[10px] font-mono text-white/70">
+                v{appVersion}
+              </span>
+            </div>
+
+            <div className="p-3 rounded-xl bg-white/[0.03] border border-white/10 flex flex-col space-y-2">
+              <div className="flex items-center justify-between text-xs">
+                <div className="flex items-center space-x-2">
+                  {updateStatus.status === 'checking' && (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 text-white/70 animate-spin" />
+                      <span className="text-white/70">Checking for updates...</span>
+                    </>
+                  )}
+                  {updateStatus.status === 'downloading' && (
+                    <>
+                      <DownloadCloud className="w-3.5 h-3.5 text-[#0070d1] animate-bounce" />
+                      <span className="text-white/90">
+                        Downloading update v{updateStatus.version || ''}... {updateStatus.progress ? `(${updateStatus.progress}%)` : ''}
+                      </span>
+                    </>
+                  )}
+                  {updateStatus.status === 'downloaded' && (
+                    <>
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                      <span className="text-emerald-400 font-medium">
+                        Update v{updateStatus.version} ready to install.
+                      </span>
+                    </>
+                  )}
+                  {updateStatus.status === 'not-available' && (
+                    <>
+                      <Check className="w-3.5 h-3.5 text-white/60" />
+                      <span className="text-white/60">AnyPS5 Studio is up to date.</span>
+                    </>
+                  )}
+                  {updateStatus.status === 'error' && (
+                    <span className="text-rose-400 text-[11px] truncate max-w-[280px]">
+                      {updateStatus.error || 'Update check failed.'}
+                    </span>
+                  )}
+                  {updateStatus.status === 'idle' && (
+                    <span className="text-white/60">Check for latest release updates.</span>
+                  )}
+                  {updateStatus.status === 'available' && (
+                    <span className="text-white/80">Found update v{updateStatus.version}. Starting download...</span>
+                  )}
+                </div>
+
+                {updateStatus.status === 'downloaded' ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      audioService.playConfirm();
+                      apiBridge.quitAndInstallUpdate();
+                    }}
+                    className="px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-semibold transition-colors flex-shrink-0"
+                  >
+                    Restart & Install
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={updateStatus.status === 'checking' || updateStatus.status === 'downloading'}
+                    onClick={handleCheckForUpdates}
+                    className="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 disabled:opacity-50 text-white/80 hover:text-white text-xs font-medium border border-white/10 transition-colors flex-shrink-0"
+                  >
+                    {updateStatus.status === 'checking' ? 'Checking...' : 'Check for Updates'}
+                  </button>
+                )}
+              </div>
+
+              {updateStatus.status === 'downloading' && (
+                <div className="w-full bg-white/10 rounded-full h-1.5 overflow-hidden">
+                  <div
+                    className="bg-[#0070d1] h-full transition-all duration-300 rounded-full"
+                    style={{ width: `${updateStatus.progress || 0}%` }}
+                  />
+                </div>
+              )}
             </div>
           </div>
 

@@ -88,34 +88,62 @@ if (!gotTheLock) {
   app.whenReady().then(() => {
     createWindow();
 
-    // Background auto-updater for GitHub Releases
-    if (app.isPackaged) {
-      try {
-        autoUpdater.autoDownload = true;
-        autoUpdater.autoInstallOnAppQuit = true;
+    // In-App Background auto-updater for GitHub Releases
+    try {
+      autoUpdater.autoDownload = true;
+      autoUpdater.autoInstallOnAppQuit = true;
 
-        autoUpdater.on('update-downloaded', (info) => {
-          if (mainWindow) {
-            dialog.showMessageBox(mainWindow, {
-              type: 'info',
-              title: 'AnyPS5 Studio Update Ready',
-              message: `Version ${info.version} has been downloaded in the background and will be applied when you restart the application.`,
-              buttons: ['Restart Now', 'Later'],
-              defaultId: 0,
-            }).then((res) => {
-              if (res.response === 0) {
-                autoUpdater.quitAndInstall();
-              }
-            });
-          }
-        });
+      const sendUpdateStatus = (status: {
+        status: 'idle' | 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'error';
+        version?: string;
+        progress?: number;
+        bytesPerSecond?: number;
+        transferred?: number;
+        total?: number;
+        error?: string;
+      }) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('anyps5:update-status', status);
+        }
+      };
 
-        autoUpdater.checkForUpdatesAndNotify().catch((err) => {
-          console.warn('Auto-updater background check:', err?.message || err);
+      autoUpdater.on('checking-for-update', () => {
+        sendUpdateStatus({ status: 'checking' });
+      });
+
+      autoUpdater.on('update-available', (info) => {
+        sendUpdateStatus({ status: 'available', version: info.version });
+      });
+
+      autoUpdater.on('update-not-available', (info) => {
+        sendUpdateStatus({ status: 'not-available', version: info?.version || app.getVersion() });
+      });
+
+      autoUpdater.on('download-progress', (progressObj) => {
+        sendUpdateStatus({
+          status: 'downloading',
+          progress: Math.round(progressObj.percent),
+          bytesPerSecond: progressObj.bytesPerSecond,
+          transferred: progressObj.transferred,
+          total: progressObj.total,
         });
-      } catch (updaterErr) {
-        console.warn('AutoUpdater initialization error:', updaterErr);
+      });
+
+      autoUpdater.on('update-downloaded', (info) => {
+        sendUpdateStatus({ status: 'downloaded', version: info.version });
+      });
+
+      autoUpdater.on('error', (err) => {
+        sendUpdateStatus({ status: 'error', error: err?.message || String(err) });
+      });
+
+      if (app.isPackaged) {
+        autoUpdater.checkForUpdates().catch((err) => {
+          console.warn('Auto-updater initial background check:', err?.message || err);
+        });
       }
+    } catch (updaterErr) {
+      console.warn('AutoUpdater initialization error:', updaterErr);
     }
 
     app.on('activate', () => {
@@ -1125,5 +1153,34 @@ ipcMain.handle('anyps5:select-file', async (_, filters) => {
   });
   if (result.canceled || result.filePaths.length === 0) return null;
   return result.filePaths[0];
+});
+
+// Software Updates IPC Handlers
+ipcMain.handle('anyps5:check-for-updates', async () => {
+  if (!app.isPackaged) {
+    return { status: 'not-available', currentVersion: app.getVersion() };
+  }
+  try {
+    const result = await autoUpdater.checkForUpdates();
+    return {
+      status: 'checked',
+      currentVersion: app.getVersion(),
+      updateInfo: result?.updateInfo,
+    };
+  } catch (err: any) {
+    return {
+      status: 'error',
+      currentVersion: app.getVersion(),
+      error: err?.message || String(err),
+    };
+  }
+});
+
+ipcMain.handle('anyps5:quit-and-install-update', () => {
+  autoUpdater.quitAndInstall();
+});
+
+ipcMain.handle('anyps5:get-app-version', () => {
+  return app.getVersion();
 });
 
