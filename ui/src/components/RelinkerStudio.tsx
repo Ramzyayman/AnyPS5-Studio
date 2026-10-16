@@ -292,10 +292,12 @@ export const RelinkerStudio: React.FC<RelinkerStudioProps> = ({
   };
 
   return (
-    <div className="relative w-full h-full flex flex-col pt-20 px-12 md:px-16 pb-12 overflow-y-auto select-none">
+    <div className="relative w-full h-full flex flex-col pt-24 px-8 md:px-12 lg:px-16 pb-12 overflow-y-auto select-none">
       
       {/* Console Header: Title & Clean Mode Toggle */}
-      <div className="max-w-[1160px] w-full flex items-center justify-between mb-8 pb-4 border-b border-white/5">
+      <div className={`w-full flex items-center justify-between mb-8 pb-4 border-b border-white/5 ${
+        mode === 'simple' ? 'max-w-[1280px] mx-auto' : 'max-w-[1160px]'
+      }`}>
         <div>
           <span className="text-[11px] font-medium text-neutral-400 uppercase tracking-wider block mb-1">
             System Software / Relinker Studio
@@ -333,193 +335,194 @@ export const RelinkerStudio: React.FC<RelinkerStudioProps> = ({
       </div>
 
       {/* ============================================================== */}
-      {/* SIMPLE MODE (Cohesive Desktop Workspace ~1160px)               */}
+      {/* SIMPLE MODE (Cohesive Desktop Workspace ~1280px)               */}
       {/* ============================================================== */}
       {mode === 'simple' && (
-        <div className="max-w-[1160px] w-full flex flex-col space-y-6 animate-fade-in">
+        <div className="max-w-[1280px] w-full mx-auto flex flex-col space-y-7 animate-fade-in">
           
-          {/* STATE 1: IDLE (Before Execution - Unified Workflow Block) */}
+          {/* STATE 1: IDLE (Before Execution - Structured 3-Tier Workflow) */}
           {executionState === 'idle' && (
             <div className="space-y-6">
               
-              {/* Cohesive Game & Readiness Hero Unit */}
-              <div className="flex items-start space-x-8">
-                {/* Artwork Cover */}
+              {/* 1. Selected Game Area */}
+              <div className="flex items-start space-x-7">
+                {/* Artwork Cover (200-220px tall, preserving aspect ratio) */}
                 <div className="relative shrink-0">
                   <img
                     src={selectedGame.iconUrl}
                     alt={selectedGame.title}
-                    className="w-36 h-48 md:w-40 md:h-54 rounded-2xl object-cover shadow-2xl border border-white/10"
+                    className="w-[165px] h-[220px] rounded-2xl object-cover shadow-2xl border border-white/10"
                   />
                 </div>
 
-                {/* Unified Workflow Details (Game → Readiness → Config → Action) */}
-                <div className="flex-1 min-w-0 pt-0.5 space-y-4">
-                  
-                  {/* Selected Game Title & Meta */}
-                  <div>
-                    <span className="text-[11px] font-semibold text-neutral-400 uppercase tracking-wider block mb-1">
-                      Selected PlayStation 5 Game
-                    </span>
-                    <h1 className="text-3xl md:text-4xl font-extrabold text-white tracking-tight leading-tight truncate">
-                      {selectedGame.title}
-                    </h1>
+                {/* Game Title, Prominence & Breathing Room, Secondary Metadata */}
+                <div className="flex-1 min-w-0 h-[220px] flex flex-col justify-center">
+                  <span className="text-[11px] font-semibold text-neutral-400 uppercase tracking-wider block mb-2">
+                    Selected PlayStation 5 Game
+                  </span>
+                  <h1 className="text-3xl md:text-4xl lg:text-[42px] font-extrabold text-white tracking-tight leading-tight truncate mb-3">
+                    {selectedGame.title}
+                  </h1>
 
-                    <div className="flex items-center space-x-3 text-xs text-neutral-400 font-mono mt-1.5">
-                      <span className="text-neutral-300 font-semibold">{selectedGame.titleId}</span>
-                      <span className="text-neutral-600">•</span>
-                      <span>{(selectedGame.sizeBytes / (1024 * 1024 * 1024)).toFixed(1)} GB</span>
-                      <span className="text-neutral-600">•</span>
-                      
-                      {/* Change Game popover trigger */}
-                      <div className="relative inline-block" ref={gameSwitcherRef}>
-                        <button
-                          type="button"
-                          onClick={() => setIsGameSwitcherOpen(!isGameSwitcherOpen)}
-                          className="text-neutral-300 hover:text-white font-sans text-xs underline underline-offset-4 decoration-white/20 hover:decoration-white transition-colors inline-flex items-center space-x-1"
-                        >
-                          <span>Change Game</span>
-                          <ChevronDown className="w-3 h-3 text-neutral-400" />
-                        </button>
+                  <div className="flex items-center space-x-3 text-xs text-neutral-400 font-mono">
+                    <span className="text-neutral-300 font-semibold">{selectedGame.titleId}</span>
+                    <span className="text-neutral-600">•</span>
+                    <span>{(selectedGame.sizeBytes / (1024 * 1024 * 1024)).toFixed(1)} GB</span>
+                    <span className="text-neutral-600">•</span>
+                    
+                    {/* Change Game popover trigger */}
+                    <div className="relative inline-block" ref={gameSwitcherRef}>
+                      <button
+                        type="button"
+                        onClick={() => setIsGameSwitcherOpen(!isGameSwitcherOpen)}
+                        className="text-neutral-300 hover:text-white font-sans text-xs underline underline-offset-4 decoration-white/20 hover:decoration-white transition-colors inline-flex items-center space-x-1"
+                      >
+                        <span>Change Game</span>
+                        <ChevronDown className="w-3 h-3 text-neutral-400" />
+                      </button>
 
-                        {isGameSwitcherOpen && (
-                          <div className="absolute left-0 mt-2 w-80 max-h-64 overflow-y-auto bg-[#0b0e14] border border-white/15 rounded-xl shadow-2xl z-50 py-1 divide-y divide-white/5">
-                            {games.map(g => (
-                              <button
-                                key={g.id}
-                                type="button"
-                                onClick={() => {
-                                  setSelectedGame(g);
-                                  setIsGameSwitcherOpen(false);
-                                  setErrorMessage(null);
-                                  audioService.playNavTick();
-                                }}
-                                className={`w-full flex items-center space-x-3 px-3 py-2 text-left text-xs transition-colors ${
-                                  g.id === selectedGame.id ? 'bg-white/10 text-white font-semibold' : 'text-neutral-300 hover:bg-white/5 hover:text-white'
-                                }`}
-                              >
-                                <img src={g.iconUrl} alt={g.title} className="w-8 h-8 rounded-lg object-cover shrink-0" />
-                                <div className="truncate">
-                                  <div className="truncate font-medium">{g.title}</div>
-                                  <div className="text-[10px] text-neutral-400 font-mono">{g.titleId}</div>
-                                </div>
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                      </div>
+                      {isGameSwitcherOpen && (
+                        <div className="absolute left-0 mt-2 w-80 max-h-64 overflow-y-auto bg-[#0b0e14] border border-white/15 rounded-xl shadow-2xl z-50 py-1 divide-y divide-white/5">
+                          {games.map(g => (
+                            <button
+                              key={g.id}
+                              type="button"
+                              onClick={() => {
+                                setSelectedGame(g);
+                                setIsGameSwitcherOpen(false);
+                                setErrorMessage(null);
+                                audioService.playNavTick();
+                              }}
+                              className={`w-full flex items-center space-x-3 px-3 py-2 text-left text-xs transition-colors ${
+                                g.id === selectedGame.id ? 'bg-white/10 text-white font-semibold' : 'text-neutral-300 hover:bg-white/5 hover:text-white'
+                              }`}
+                            >
+                              <img src={g.iconUrl} alt={g.title} className="w-8 h-8 rounded-lg object-cover shrink-0" />
+                              <div className="truncate">
+                                <div className="truncate font-medium">{g.title}</div>
+                                <div className="text-[10px] text-neutral-400 font-mono">{g.titleId}</div>
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
+                </div>
+              </div>
 
-                  {/* System Readiness & Config (Natural continuation, no heavy dividing line) */}
-                  <div className="space-y-1.5 pt-1">
+              {/* 2. System Readiness & Configuration Section (Directly beneath selected-game area) */}
+              <div className="rounded-2xl bg-white/[0.025] border border-white/[0.07] p-5 md:p-6 transition-all">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                  <div className="space-y-1.5 min-w-0">
                     <div className="flex items-center space-x-2.5">
                       <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${
                         readiness.isReady ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]' : 'bg-red-400 shadow-[0_0_8px_rgba(248,113,113,0.6)]'
                       }`} />
-                      <span className="text-sm font-semibold text-white tracking-tight">
+                      <span className="text-base font-semibold text-white tracking-tight">
                         {readiness.isReady ? 'Ready to Play' : 'System check needed'}
                       </span>
                     </div>
 
-                    <div className="pl-5 text-xs text-neutral-400 leading-relaxed">
-                      <span>
-                        {readiness.isReady
-                          ? (options.cpuTranslation === 'intel'
-                              ? 'Configured automatically for your Intel processor with clean window mode.'
-                              : options.cpuTranslation === 'none'
-                              ? 'Configured automatically for your AMD Ryzen processor with clean window mode.'
-                              : 'Configured automatically for your system environment.')
-                          : readiness.statusText}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => setShowSettingsDetails(!showSettingsDetails)}
-                        className="text-neutral-400 hover:text-white transition-colors underline underline-offset-4 decoration-white/20 hover:decoration-white font-medium inline-flex items-center space-x-0.5 ml-2"
-                      >
-                        <span>{showSettingsDetails ? 'Hide settings' : 'Inspect settings'}</span>
-                      </button>
+                    <p className="text-xs md:text-sm text-neutral-400 leading-relaxed pl-5">
+                      {readiness.isReady
+                        ? (options.cpuTranslation === 'intel'
+                            ? 'Configured automatically for your Intel processor with clean window mode.'
+                            : options.cpuTranslation === 'none'
+                            ? 'Configured automatically for your AMD Ryzen processor with clean window mode.'
+                            : 'Configured automatically for your system environment.')
+                        : readiness.statusText}
+                    </p>
+                  </div>
+
+                  <div className="sm:self-center shrink-0 pl-5 sm:pl-0">
+                    <button
+                      type="button"
+                      onClick={() => setShowSettingsDetails(!showSettingsDetails)}
+                      className="text-xs font-medium text-neutral-400 hover:text-white transition-colors inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg hover:bg-white/5 border border-transparent hover:border-white/10"
+                    >
+                      <span>{showSettingsDetails ? 'Hide settings' : 'Inspect settings'}</span>
+                      <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${showSettingsDetails ? 'rotate-180 text-white' : 'text-neutral-400'}`} />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Expandable Inspect Settings Drawer */}
+                {showSettingsDetails && (
+                  <div className="mt-5 pt-4 border-t border-white/5 font-mono text-xs text-neutral-300 animate-fade-in">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-2.5">
+                      <div className="space-y-2">
+                        <div className="flex justify-between border-b border-white/5 pb-1">
+                          <span className="text-neutral-500">Output Format:</span>
+                          <span className="text-neutral-200">Windows Executable (.exe)</span>
+                        </div>
+                        <div className="flex justify-between border-b border-white/5 pb-1">
+                          <span className="text-neutral-500">Window Subsystem:</span>
+                          <span className="text-neutral-200">Clean Window (GUI)</span>
+                        </div>
+                        <div className="flex justify-between border-b border-white/5 pb-1">
+                          <span className="text-neutral-500">CPU Translation:</span>
+                          <span className="text-neutral-200">
+                            {options.cpuTranslation === 'intel' ? 'Intel AVX2 Optimization' : options.cpuTranslation === 'rosetta' ? 'Rosetta 2 Translation' : 'AMD Zen2 Native'}
+                          </span>
+                        </div>
+                        <div className="flex justify-between border-b border-white/5 pb-1">
+                          <span className="text-neutral-500">Import Filter:</span>
+                          <span className="text-neutral-200">Level 1 (Standard Pruning)</span>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <div className="flex justify-between border-b border-white/5 pb-1">
+                          <span className="text-neutral-500">Host Processor:</span>
+                          <span className="text-neutral-200">{telemetry?.hostCpu || 'Verified'}</span>
+                        </div>
+                        <div className="flex justify-between border-b border-white/5 pb-1">
+                          <span className="text-neutral-500">Host Graphics:</span>
+                          <span className="text-neutral-200">{telemetry?.gpuName || 'DirectX 12 / Vulkan'}</span>
+                        </div>
+                        <div className="flex justify-between border-b border-white/5 pb-1">
+                          <span className="text-neutral-500">Compiler Tool:</span>
+                          <span className={telemetry?.relinkerBinaryFound ? 'text-emerald-400' : 'text-red-400'}>
+                            {telemetry?.relinkerBinaryFound ? 'Ready (relinker.exe)' : 'Missing'}
+                          </span>
+                        </div>
+                        <div className="flex justify-between border-b border-white/5 pb-1">
+                          <span className="text-neutral-500">Game Directory:</span>
+                          <span className="text-neutral-400 truncate max-w-[220px]" title={selectedGame.path}>
+                            {selectedGame.path}
+                          </span>
+                        </div>
+                      </div>
                     </div>
                   </div>
-
-                  {/* Primary Action Area (Brought directly below configuration) */}
-                  <div className="pt-2 pl-5 flex flex-wrap items-center gap-5">
-                    <button
-                      type="button"
-                      onClick={handleStartRelinking}
-                      disabled={!readiness.isReady}
-                      className={`px-8 py-3.5 rounded-full font-bold text-sm tracking-wide transition-all shadow-xl flex items-center space-x-2.5 ${
-                        !readiness.isReady
-                          ? 'bg-neutral-800 text-neutral-500 cursor-not-allowed'
-                          : 'bg-white text-black hover:bg-neutral-200 active:scale-[0.98] shadow-white/10'
-                      }`}
-                    >
-                      <Sparkles className="w-4 h-4 fill-black" />
-                      <span>Start Relinking</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => handleSetMode('advanced')}
-                      className="text-xs text-neutral-400 hover:text-white transition-colors"
-                    >
-                      Customize settings in Advanced mode
-                    </button>
-                  </div>
-
-                </div>
+                )}
               </div>
 
-              {/* Expandable Inspect Settings Drawer (Opens cleanly below hero) */}
-              {showSettingsDetails && (
-                <div className="p-5 rounded-2xl bg-white/[0.02] border border-white/5 space-y-3 font-mono text-xs text-neutral-300 animate-fade-in mt-4">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-x-10 gap-y-2">
-                    <div className="space-y-1.5">
-                      <div className="flex justify-between border-b border-white/5 pb-1">
-                        <span className="text-neutral-500">Output Format:</span>
-                        <span className="text-neutral-200">Windows Executable (.exe)</span>
-                      </div>
-                      <div className="flex justify-between border-b border-white/5 pb-1">
-                        <span className="text-neutral-500">Window Subsystem:</span>
-                        <span className="text-neutral-200">Clean Window (GUI)</span>
-                      </div>
-                      <div className="flex justify-between border-b border-white/5 pb-1">
-                        <span className="text-neutral-500">CPU Translation:</span>
-                        <span className="text-neutral-200">
-                          {options.cpuTranslation === 'intel' ? 'Intel AVX2 Optimization' : options.cpuTranslation === 'rosetta' ? 'Rosetta 2 Translation' : 'AMD Zen2 Native'}
-                        </span>
-                      </div>
-                      <div className="flex justify-between border-b border-white/5 pb-1">
-                        <span className="text-neutral-500">Import Filter:</span>
-                        <span className="text-neutral-200">Level 1 (Standard Pruning)</span>
-                      </div>
-                    </div>
+              {/* 3. Primary Action Area (Directly below readiness/configuration section) */}
+              <div className="flex flex-wrap items-center gap-5 pt-1">
+                <button
+                  type="button"
+                  onClick={handleStartRelinking}
+                  disabled={!readiness.isReady}
+                  className={`w-[220px] h-12 rounded-full font-bold text-sm tracking-wide transition-all shadow-xl flex items-center justify-center space-x-2.5 ${
+                    !readiness.isReady
+                      ? 'bg-neutral-800 text-neutral-500 cursor-not-allowed border border-white/5'
+                      : 'bg-white text-black hover:bg-neutral-200 active:scale-[0.98] shadow-white/10'
+                  }`}
+                >
+                  <Sparkles className="w-4 h-4 fill-black" />
+                  <span>Start Relinking</span>
+                </button>
 
-                    <div className="space-y-1.5">
-                      <div className="flex justify-between border-b border-white/5 pb-1">
-                        <span className="text-neutral-500">Host Processor:</span>
-                        <span className="text-neutral-200">{telemetry?.hostCpu || 'Verified'}</span>
-                      </div>
-                      <div className="flex justify-between border-b border-white/5 pb-1">
-                        <span className="text-neutral-500">Host Graphics:</span>
-                        <span className="text-neutral-200">{telemetry?.gpuName || 'DirectX 12 / Vulkan'}</span>
-                      </div>
-                      <div className="flex justify-between border-b border-white/5 pb-1">
-                        <span className="text-neutral-500">Compiler Tool:</span>
-                        <span className={telemetry?.relinkerBinaryFound ? 'text-emerald-400' : 'text-red-400'}>
-                          {telemetry?.relinkerBinaryFound ? 'Ready (relinker.exe)' : 'Missing'}
-                        </span>
-                      </div>
-                      <div className="flex justify-between border-b border-white/5 pb-1">
-                        <span className="text-neutral-500">Game Directory:</span>
-                        <span className="text-neutral-400 truncate max-w-[200px]" title={selectedGame.path}>
-                          {selectedGame.path}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
+                <button
+                  type="button"
+                  onClick={() => handleSetMode('advanced')}
+                  className="text-xs text-neutral-400 hover:text-white transition-colors"
+                >
+                  Customize settings in Advanced mode
+                </button>
+              </div>
 
             </div>
           )}
@@ -530,7 +533,7 @@ export const RelinkerStudio: React.FC<RelinkerStudioProps> = ({
               <img
                 src={selectedGame.iconUrl}
                 alt={selectedGame.title}
-                className="w-36 h-48 md:w-40 md:h-54 rounded-2xl object-cover shadow-2xl border border-white/10 shrink-0"
+                className="w-[165px] h-[220px] rounded-2xl object-cover shadow-2xl border border-white/10 shrink-0"
               />
 
               <div className="flex-1 min-w-0 pt-1 space-y-4 max-w-xl">
@@ -606,7 +609,7 @@ export const RelinkerStudio: React.FC<RelinkerStudioProps> = ({
               <img
                 src={selectedGame.iconUrl}
                 alt={selectedGame.title}
-                className="w-36 h-48 md:w-40 md:h-54 rounded-2xl object-cover shadow-2xl border border-white/10 shrink-0"
+                className="w-[165px] h-[220px] rounded-2xl object-cover shadow-2xl border border-white/10 shrink-0"
               />
 
               <div className="flex-1 min-w-0 pt-1 space-y-4 max-w-xl">
@@ -640,7 +643,7 @@ export const RelinkerStudio: React.FC<RelinkerStudioProps> = ({
                         audioService.playLaunch();
                         onLaunchGame(selectedGame);
                       }}
-                      className="px-8 py-3.5 rounded-full bg-white text-black font-bold text-sm hover:bg-neutral-200 active:scale-[0.98] transition-all shadow-xl flex items-center space-x-2"
+                      className="w-[200px] h-12 rounded-full bg-white text-black font-bold text-sm hover:bg-neutral-200 active:scale-[0.98] transition-all shadow-xl flex items-center justify-center space-x-2"
                     >
                       <Play className="w-4 h-4 fill-black" />
                       <span>Play Game Now</span>
@@ -654,7 +657,7 @@ export const RelinkerStudio: React.FC<RelinkerStudioProps> = ({
                         audioService.playNavTick();
                         onNavigateToGames();
                       }}
-                      className="px-6 py-3.5 rounded-full bg-white/10 hover:bg-white/15 text-white font-medium text-xs transition-colors border border-white/10"
+                      className="px-6 h-12 rounded-full bg-white/10 hover:bg-white/15 text-white font-medium text-xs transition-colors border border-white/10 flex items-center justify-center"
                     >
                       Back to Games Library
                     </button>
@@ -681,7 +684,7 @@ export const RelinkerStudio: React.FC<RelinkerStudioProps> = ({
               <img
                 src={selectedGame.iconUrl}
                 alt={selectedGame.title}
-                className="w-36 h-48 md:w-40 md:h-54 rounded-2xl object-cover shadow-2xl border border-red-500/30 shrink-0"
+                className="w-[165px] h-[220px] rounded-2xl object-cover shadow-2xl border border-red-500/30 shrink-0"
               />
 
               <div className="flex-1 min-w-0 pt-1 space-y-4 max-w-xl">
@@ -715,7 +718,7 @@ export const RelinkerStudio: React.FC<RelinkerStudioProps> = ({
                       setExecutionState('idle');
                       setErrorMessage(null);
                     }}
-                    className="px-8 py-3.5 rounded-full bg-white text-black font-bold text-xs hover:bg-neutral-200 active:scale-[0.98] transition-all shadow-lg"
+                    className="w-[180px] h-12 rounded-full bg-white text-black font-bold text-xs hover:bg-neutral-200 active:scale-[0.98] transition-all shadow-lg flex items-center justify-center"
                   >
                     Try Again
                   </button>
@@ -726,7 +729,7 @@ export const RelinkerStudio: React.FC<RelinkerStudioProps> = ({
                       audioService.playNavTick();
                       handleSetMode('advanced');
                     }}
-                    className="px-6 py-3.5 rounded-full bg-white/10 hover:bg-white/15 text-white font-medium text-xs transition-colors border border-white/10"
+                    className="px-6 h-12 rounded-full bg-white/10 hover:bg-white/15 text-white font-medium text-xs transition-colors border border-white/10 flex items-center justify-center"
                   >
                     Open Advanced Mode
                   </button>
