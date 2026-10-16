@@ -21,6 +21,7 @@ declare global {
         options: RelinkerOptions,
         callbackId: string
       ) => Promise<boolean>;
+      cancelRelinker: () => Promise<boolean>;
       launchGame: (game: GameItem) => Promise<{ pid?: number; error?: string }>;
       stopGame: (pid?: number) => Promise<boolean>;
       getSystemTelemetry: () => Promise<SystemTelemetry>;
@@ -93,17 +94,28 @@ class ApiBridge {
       return await window.anyps5.getSystemTelemetry();
     }
     return {
-      hostCpu: 'AMD Ryzen 7 5800X (8 Cores, 16 Threads)',
+      hostCpu: 'Intel(R) Core(TM) i5-14400F (16 Threads)',
       hasZen2Extensions: true,
       missingExtensions: [],
-      gpuName: 'NVIDIA GeForce RTX 3080 (10GB VRAM) / Vulkan 1.3.280',
+      gpuName: 'NVIDIA GeForce RTX 4060',
       vulkanVersion: '1.3.280 (Direct DCB/ACB Queue Support)',
       memoryUsageMb: 3410,
       totalMemoryMb: 32768,
       relinkerBinaryFound: true,
-      relinkerPath: 'C:/AnyPS5/build/relinker.exe',
+      relinkerPath: 'C:/Users/PC/.gemini/antigravity/scratch/AnyPS5/build/relinker.exe',
       prxVersion: 'v0.8.4-cleanroom',
+      osName: 'Windows 11 (Build 26200, x64)',
+      cpuArchitecture: 'x64',
+      recommendedCpuTranslation: 'intel',
+      recommendationReason: 'Detected Intel Core processor. Recommends --to-intel to translate AMD-specific Zen2 instructions into standard Intel AVX2 micro-ops.',
     };
+  }
+
+  public async cancelRelinker(): Promise<boolean> {
+    if (window.anyps5?.cancelRelinker) {
+      return await window.anyps5.cancelRelinker();
+    }
+    return true;
   }
 
   public async launchGame(game: GameItem): Promise<{ pid?: number; error?: string }> {

@@ -293,6 +293,8 @@ export const App: React.FC = () => {
               games={games}
               selectedGame={selectedGame}
               onUpdateGameStatus={handleUpdateGameStatus}
+              onLaunchGame={(game) => setActiveRunningGame(game)}
+              onNavigateToGames={() => setActiveTab('games')}
             />
           ) : (
             <div className="flex-1 h-full flex flex-col items-center justify-center p-8 pt-20 text-center animate-fade-in">

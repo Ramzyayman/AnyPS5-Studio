@@ -68,4 +68,8 @@ export interface SystemTelemetry {
   relinkerBinaryFound: boolean;
   relinkerPath: string;
   prxVersion: string;
+  osName?: string;
+  cpuArchitecture?: string;
+  recommendedCpuTranslation?: 'none' | 'intel' | 'rosetta';
+  recommendationReason?: string;
 }

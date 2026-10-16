@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('anyps5', {
   saveGames: (games: unknown) => ipcRenderer.invoke('anyps5:save-games', games),
   runRelinker: (game: unknown, options: unknown, callbackId: string) => 
     ipcRenderer.invoke('anyps5:run-relinker', { game, options, callbackId }),
+  cancelRelinker: () => ipcRenderer.invoke('anyps5:cancel-relinker'),
   launchGame: (game: unknown) => ipcRenderer.invoke('anyps5:launch-game', game),
   stopGame: (pid?: number) => ipcRenderer.invoke('anyps5:stop-game', pid),
   getSystemTelemetry: () => ipcRenderer.invoke('anyps5:get-telemetry'),
