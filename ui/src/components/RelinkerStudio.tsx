@@ -7,12 +7,8 @@ import {
   Loader2, 
   Sliders, 
   Play,
-  Cpu,
   ChevronDown,
-  ChevronUp,
-  RefreshCw,
-  X,
-  Check
+  ChevronUp
 } from 'lucide-react';
 import { GameItem, RelinkerOptions, ConversionStage, ConversionLog, SystemTelemetry } from '../types';
 import { apiBridge } from '../services/apiBridge';
@@ -58,16 +54,15 @@ export const RelinkerStudio: React.FC<RelinkerStudioProps> = ({
   const [selectedGame, setSelectedGame] = useState<GameItem>(initialGame);
   const [executionState, setExecutionState] = useState<ExecutionState>('idle');
   const [isCancelling, setIsCancelling] = useState<boolean>(false);
+  const [isGameSwitcherOpen, setIsGameSwitcherOpen] = useState<boolean>(false);
 
   // Simple Mode expandable sections
-  const [showSystemDetails, setShowSystemDetails] = useState<boolean>(false);
   const [showSettingsDetails, setShowSettingsDetails] = useState<boolean>(false);
   const [showLiveLogs, setShowLiveLogs] = useState<boolean>(false);
   const [showErrorLogs, setShowErrorLogs] = useState<boolean>(false);
 
   // System Telemetry State
   const [telemetry, setTelemetry] = useState<SystemTelemetry | null>(null);
-  const [isDetecting, setIsDetecting] = useState<boolean>(false);
 
   // Technical 8-Stage Pipeline (for backend and Advanced mode)
   const [technicalStages, setTechnicalStages] = useState<ConversionStage[]>([
@@ -107,6 +102,7 @@ export const RelinkerStudio: React.FC<RelinkerStudioProps> = ({
   });
 
   const terminalEndRef = useRef<HTMLDivElement>(null);
+  const gameSwitcherRef = useRef<HTMLDivElement>(null);
 
   // Persist mode toggle
   const handleSetMode = (newMode: 'simple' | 'advanced') => {
@@ -117,7 +113,6 @@ export const RelinkerStudio: React.FC<RelinkerStudioProps> = ({
 
   // Perform Real System Detection
   const runSystemDetection = async () => {
-    setIsDetecting(true);
     try {
       const data = await apiBridge.getTelemetry();
       setTelemetry(data);
@@ -133,13 +128,22 @@ export const RelinkerStudio: React.FC<RelinkerStudioProps> = ({
       }
     } catch (err: any) {
       console.warn('System telemetry check:', err);
-    } finally {
-      setIsDetecting(false);
     }
   };
 
   useEffect(() => {
     runSystemDetection();
+  }, []);
+
+  // Close game switcher when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (gameSwitcherRef.current && !gameSwitcherRef.current.contains(e.target as Node)) {
+        setIsGameSwitcherOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
   // Update game when prop changes
@@ -197,27 +201,13 @@ export const RelinkerStudio: React.FC<RelinkerStudioProps> = ({
   // System Readiness Check
   const readiness = useMemo(() => {
     if (!selectedGame || !selectedGame.path) {
-      return { isReady: false, statusText: 'System check needed: Game folder not found' };
+      return { isReady: false, statusText: 'Game folder not found' };
     }
     if (telemetry && !telemetry.relinkerBinaryFound) {
-      return { isReady: false, statusText: 'System check needed: Relinker toolchain missing' };
+      return { isReady: false, statusText: 'Relinker toolchain missing' };
     }
     return { isReady: true, statusText: 'Your PC is ready to relink this game' };
   }, [selectedGame, telemetry]);
-
-  // Single-sentence Recommended Settings Summary
-  const recommendationSummary = useMemo(() => {
-    if (options.cpuTranslation === 'intel') {
-      return 'Configured for your Intel processor (AVX2 optimized, clean game window).';
-    }
-    if (options.cpuTranslation === 'none') {
-      return 'Configured for your AMD Ryzen processor (native Zen2, clean game window).';
-    }
-    if (options.cpuTranslation === 'rosetta') {
-      return 'Configured for Apple Silicon (Rosetta 2 translation).';
-    }
-    return 'Standard configuration selected for 64-bit Windows.';
-  }, [options.cpuTranslation]);
 
   // Start Relinking Process
   const handleStartRelinking = async () => {
@@ -302,10 +292,10 @@ export const RelinkerStudio: React.FC<RelinkerStudioProps> = ({
   };
 
   return (
-    <div className="relative w-full h-full flex flex-col pt-20 px-8 pb-8 overflow-y-auto select-none">
+    <div className="relative w-full h-full flex flex-col pt-20 px-12 pb-10 overflow-y-auto select-none">
       
       {/* Console Header: Title & Clean Mode Toggle */}
-      <div className="flex items-center justify-between mb-8 pb-4 border-b border-white/5">
+      <div className="max-w-[1040px] w-full flex items-center justify-between mb-8 pb-4 border-b border-white/5">
         <div>
           <span className="text-[11px] font-medium text-neutral-400 uppercase tracking-wider block mb-1">
             System Software / Relinker Studio
@@ -343,204 +333,256 @@ export const RelinkerStudio: React.FC<RelinkerStudioProps> = ({
       </div>
 
       {/* ============================================================== */}
-      {/* SIMPLE MODE (Zero Clutter, State-Driven, Non-Technical Friendly) */}
+      {/* SIMPLE MODE (Desktop Workspace ~1040px, High Intent, Zero Clutter) */}
       {/* ============================================================== */}
       {mode === 'simple' && (
-        <div className="flex-1 flex flex-col justify-center items-center max-w-xl mx-auto w-full pb-12">
+        <div className="max-w-[1040px] w-full flex flex-col space-y-8 animate-fade-in">
           
           {/* STATE 1: IDLE (Before Execution) */}
           {executionState === 'idle' && (
-            <div className="w-full space-y-6 animate-fade-in">
+            <div className="space-y-8">
               
-              {/* 1. Selected Game Display & Dropdown */}
-              <div className="flex items-center justify-between p-3.5 rounded-2xl bg-white/[0.03] border border-white/10">
-                <div className="flex items-center space-x-3.5 min-w-0">
+              {/* 1. Selected Game Showcase */}
+              <div className="flex items-start space-x-6">
+                {/* Artwork Cover */}
+                <div className="relative shrink-0">
                   <img
                     src={selectedGame.iconUrl}
                     alt={selectedGame.title}
-                    className="w-12 h-12 rounded-xl object-cover shadow border border-white/10 shrink-0"
+                    className="w-28 h-36 md:w-32 md:h-44 rounded-xl object-cover shadow-2xl border border-white/10"
                   />
-                  <div className="min-w-0">
-                    <h3 className="text-sm font-bold text-white tracking-tight truncate">
-                      {selectedGame.title}
+                </div>
+
+                {/* Title & Metadata */}
+                <div className="flex-1 min-w-0 pt-1">
+                  <span className="text-[11px] font-semibold text-neutral-400 uppercase tracking-wider block mb-1">
+                    Selected PlayStation 5 Game
+                  </span>
+                  <h1 className="text-2xl md:text-3xl font-extrabold text-white tracking-tight leading-tight truncate">
+                    {selectedGame.title}
+                  </h1>
+
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-neutral-400 mt-2 font-mono">
+                    <span>{selectedGame.titleId}</span>
+                    <span className="text-neutral-600">•</span>
+                    <span>{(selectedGame.sizeBytes / (1024 * 1024 * 1024)).toFixed(1)} GB</span>
+                    <span className="text-neutral-600">•</span>
+                    <span className="text-neutral-500 truncate max-w-xs">{selectedGame.path}</span>
+                  </div>
+
+                  {/* Obvious Game Switcher */}
+                  <div className="mt-4 relative inline-block" ref={gameSwitcherRef}>
+                    <button
+                      type="button"
+                      onClick={() => setIsGameSwitcherOpen(!isGameSwitcherOpen)}
+                      className="flex items-center space-x-2 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-xs font-medium text-neutral-300 hover:text-white border border-white/10 transition-colors"
+                    >
+                      <span>Change Game</span>
+                      <ChevronDown className="w-3.5 h-3.5 text-neutral-400" />
+                    </button>
+
+                    {isGameSwitcherOpen && (
+                      <div className="absolute left-0 mt-2 w-80 max-h-64 overflow-y-auto bg-[#0b0e14] border border-white/15 rounded-xl shadow-2xl z-30 py-1 divide-y divide-white/5">
+                        {games.map(g => (
+                          <button
+                            key={g.id}
+                            type="button"
+                            onClick={() => {
+                              setSelectedGame(g);
+                              setIsGameSwitcherOpen(false);
+                              setErrorMessage(null);
+                              audioService.playNavTick();
+                            }}
+                            className={`w-full flex items-center space-x-3 px-3 py-2 text-left text-xs transition-colors ${
+                              g.id === selectedGame.id ? 'bg-white/10 text-white font-semibold' : 'text-neutral-300 hover:bg-white/5 hover:text-white'
+                            }`}
+                          >
+                            <img src={g.iconUrl} alt={g.title} className="w-8 h-8 rounded-lg object-cover shrink-0" />
+                            <div className="truncate">
+                              <div className="truncate font-medium">{g.title}</div>
+                              <div className="text-[10px] text-neutral-400 font-mono">{g.titleId}</div>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* 2. Configuration & Readiness Presentation (Concise section with subtle dividers) */}
+              <div className="border-t border-white/10 pt-6 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-semibold text-white tracking-wide">
+                      Configuration & System Readiness
                     </h3>
-                    <p className="text-[11px] text-neutral-400 font-mono mt-0.5">
-                      {selectedGame.titleId} • {(selectedGame.sizeBytes / (1024 * 1024 * 1024)).toFixed(1)} GB
+                    <p className="text-xs text-neutral-400 mt-0.5">
+                      Automatically configured based on your verified system hardware.
+                    </p>
+                  </div>
+
+                  <div className="flex items-center space-x-4 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => setShowSettingsDetails(!showSettingsDetails)}
+                      className="text-neutral-400 hover:text-white transition-colors flex items-center space-x-1"
+                    >
+                      <span>{showSettingsDetails ? 'Hide details' : 'Inspect settings'}</span>
+                      {showSettingsDetails ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* 3-Column Hierarchy via subtle vertical dividers, no nested cards */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 py-4 border-y border-white/5">
+                  {/* Column 1: System Readiness */}
+                  <div>
+                    <span className="text-[11px] font-semibold text-neutral-400 uppercase tracking-wider block mb-1">
+                      System Readiness
+                    </span>
+                    <div className="flex items-center space-x-2">
+                      <span className={`w-2 h-2 rounded-full ${
+                        readiness.isReady ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]' : 'bg-red-400 shadow-[0_0_8px_rgba(248,113,113,0.6)]'
+                      }`} />
+                      <span className="text-sm font-medium text-white">
+                        {readiness.isReady ? 'Your PC is ready' : 'System check needed'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-neutral-400 mt-1">
+                      {readiness.isReady ? 'Compiler and libraries verified' : readiness.statusText}
+                    </p>
+                  </div>
+
+                  {/* Column 2: Output Format */}
+                  <div>
+                    <span className="text-[11px] font-semibold text-neutral-400 uppercase tracking-wider block mb-1">
+                      Output Format
+                    </span>
+                    <p className="text-sm font-medium text-white">
+                      Windows Executable (.exe)
+                    </p>
+                    <p className="text-xs text-neutral-400 mt-1">
+                      DirectX 12 / Vulkan GUI window
+                    </p>
+                  </div>
+
+                  {/* Column 3: Optimization Choice */}
+                  <div>
+                    <span className="text-[11px] font-semibold text-neutral-400 uppercase tracking-wider block mb-1">
+                      CPU Translation
+                    </span>
+                    <p className="text-sm font-medium text-white">
+                      {options.cpuTranslation === 'intel' ? 'Intel AVX2 Optimization' : options.cpuTranslation === 'rosetta' ? 'Rosetta 2 Translation' : 'AMD Zen2 Native'}
+                    </p>
+                    <p className="text-xs text-neutral-400 mt-1">
+                      {options.cpuTranslation === 'intel' ? 'Adapts console instructions for Intel Core' : 'Preserves original Zen2 instructions'}
                     </p>
                   </div>
                 </div>
 
-                {/* Change Game Select */}
-                <select
-                  value={selectedGame.id}
-                  onChange={(e) => {
-                    const found = games.find(g => g.id === e.target.value);
-                    if (found) {
-                      audioService.playNavTick();
-                      setSelectedGame(found);
-                      setErrorMessage(null);
-                    }
-                  }}
-                  className="bg-white/5 hover:bg-white/10 text-neutral-200 border border-white/10 rounded-xl px-3 py-1.5 text-xs font-medium cursor-pointer focus:outline-none transition-colors ml-3 shrink-0"
-                >
-                  {games.map(g => (
-                    <option key={g.id} value={g.id} className="bg-[#0b0e14] text-white">
-                      {g.title}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* 2. System Readiness (One Concise Status + Expandable Details) */}
-              <div className="py-2.5 px-3 rounded-xl bg-white/[0.02] border border-white/5 space-y-2">
-                <div className="flex items-center justify-between text-xs">
-                  <div className="flex items-center space-x-2.5">
-                    <span className={`w-2 h-2 rounded-full ${
-                      readiness.isReady 
-                        ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]' 
-                        : 'bg-red-400 shadow-[0_0_8px_rgba(248,113,113,0.6)]'
-                    }`} />
-                    <span className="text-neutral-200 font-medium">
-                      {readiness.statusText}
-                    </span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setShowSystemDetails(prev => !prev)}
-                    className="text-neutral-400 hover:text-white text-[11px] transition-colors"
-                  >
-                    {showSystemDetails ? 'Hide details' : 'View details'}
-                  </button>
-                </div>
-
-                {showSystemDetails && (
-                  <div className="pt-2 border-t border-white/5 text-[11px] text-neutral-400 space-y-1 font-mono">
-                    <div className="flex justify-between">
-                      <span className="text-neutral-500">Processor:</span>
-                      <span className="text-neutral-300">{telemetry?.hostCpu || 'Detected'}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-neutral-500">Graphics:</span>
-                      <span className="text-neutral-300">{telemetry?.gpuName || 'DirectX 12 / Vulkan'}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-neutral-500">System OS:</span>
-                      <span className="text-neutral-300">{telemetry?.osName || 'Windows'}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-neutral-500">Relinker Tool:</span>
-                      <span className={telemetry?.relinkerBinaryFound ? 'text-emerald-400' : 'text-red-400'}>
-                        {telemetry?.relinkerBinaryFound ? 'Ready (relinker.exe)' : 'Not Found in build/'}
-                      </span>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* 3. Recommended Settings (Compact One-Line Summary + Expandable Details) */}
-              <div className="py-2.5 px-3 rounded-xl bg-white/[0.02] border border-white/5 space-y-2">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-neutral-300">
-                    {recommendationSummary}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setShowSettingsDetails(prev => !prev)}
-                    className="text-neutral-400 hover:text-white text-[11px] transition-colors shrink-0 ml-3"
-                  >
-                    {showSettingsDetails ? 'Hide summary' : 'Summary'}
-                  </button>
-                </div>
-
+                {/* Expandable Technical Settings & Hardware inspection */}
                 {showSettingsDetails && (
-                  <div className="pt-2 border-t border-white/5 text-[11px] text-neutral-400 space-y-1 font-mono">
-                    <div className="flex justify-between">
-                      <span className="text-neutral-500">Target Executable:</span>
-                      <span className="text-neutral-300">Windows (.exe)</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-neutral-500">Subsystem:</span>
-                      <span className="text-neutral-300">Clean Window (GUI)</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-neutral-500">CPU Translation:</span>
-                      <span className="text-neutral-300">
-                        {options.cpuTranslation === 'intel' ? 'Intel AVX2 Optimization' : options.cpuTranslation === 'rosetta' ? 'Apple Silicon' : 'AMD Zen2 Native'}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-neutral-500">Import Optimization:</span>
-                      <span className="text-neutral-300">Standard (Level 1)</span>
+                  <div className="p-4 rounded-xl bg-white/[0.02] border border-white/5 space-y-3 font-mono text-xs text-neutral-300 animate-fade-in">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-1.5">
+                        <div className="flex justify-between border-b border-white/5 pb-1">
+                          <span className="text-neutral-500">Host Processor:</span>
+                          <span className="text-neutral-200">{telemetry?.hostCpu || 'Verified'}</span>
+                        </div>
+                        <div className="flex justify-between border-b border-white/5 pb-1">
+                          <span className="text-neutral-500">Host Graphics:</span>
+                          <span className="text-neutral-200">{telemetry?.gpuName || 'DirectX 12 / Vulkan'}</span>
+                        </div>
+                        <div className="flex justify-between border-b border-white/5 pb-1">
+                          <span className="text-neutral-500">Host OS:</span>
+                          <span className="text-neutral-200">{telemetry?.osName || 'Windows'}</span>
+                        </div>
+                      </div>
+                      <div className="space-y-1.5">
+                        <div className="flex justify-between border-b border-white/5 pb-1">
+                          <span className="text-neutral-500">Compiler Engine:</span>
+                          <span className={telemetry?.relinkerBinaryFound ? 'text-emerald-400' : 'text-red-400'}>
+                            {telemetry?.relinkerBinaryFound ? 'Ready (relinker.exe)' : 'Missing'}
+                          </span>
+                        </div>
+                        <div className="flex justify-between border-b border-white/5 pb-1">
+                          <span className="text-neutral-500">PRX Runtime:</span>
+                          <span className="text-neutral-200">{telemetry?.prxVersion || 'Ready'}</span>
+                        </div>
+                        <div className="flex justify-between border-b border-white/5 pb-1">
+                          <span className="text-neutral-500">Import Optimization:</span>
+                          <span className="text-neutral-200">Level 1 (Standard Pruning)</span>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 )}
               </div>
 
-              {/* 4. Primary Action: Start Relinking */}
-              <div className="pt-2">
+              {/* 3. Primary Action Area (Positioned directly after configuration) */}
+              <div className="pt-2 flex flex-wrap items-center gap-5">
                 <button
                   type="button"
                   onClick={handleStartRelinking}
                   disabled={!readiness.isReady}
-                  className={`w-full py-4 rounded-full font-bold text-sm tracking-wide transition-all shadow-xl flex items-center justify-center space-x-2 ${
+                  className={`px-8 py-3.5 rounded-full font-bold text-sm tracking-wide transition-all shadow-xl flex items-center space-x-2.5 ${
                     !readiness.isReady
                       ? 'bg-neutral-800 text-neutral-500 cursor-not-allowed'
-                      : 'bg-white text-black hover:bg-neutral-200 active:scale-[0.99] shadow-white/10'
+                      : 'bg-white text-black hover:bg-neutral-200 active:scale-[0.98] shadow-white/10'
                   }`}
                 >
                   <Sparkles className="w-4 h-4 fill-black" />
-                  <span>{selectedGame.status === 'ported' ? 'Re-run Relinking' : 'Start Relinking'}</span>
+                  <span>Start Relinking</span>
                 </button>
-              </div>
 
-              {/* 5. Secondary Options */}
-              <div className="flex items-center justify-center space-x-4 pt-1 text-xs text-neutral-400">
-                <button
-                  type="button"
-                  onClick={() => handleSetMode('advanced')}
-                  className="hover:text-white transition-colors"
-                >
-                  Customize settings
-                </button>
-                <span className="text-neutral-700">•</span>
-                <button
-                  type="button"
-                  onClick={() => setShowSystemDetails(prev => !prev)}
-                  className="hover:text-white transition-colors"
-                >
-                  Technical details
-                </button>
+                <div className="flex items-center space-x-4 text-xs text-neutral-400">
+                  <button
+                    type="button"
+                    onClick={() => handleSetMode('advanced')}
+                    className="hover:text-white transition-colors"
+                  >
+                    Customize settings in Advanced mode
+                  </button>
+                </div>
               </div>
 
             </div>
           )}
 
-          {/* STATE 2: RUNNING (During Execution) */}
+          {/* STATE 2: RUNNING (Clean Progress View) */}
           {executionState === 'running' && (
-            <div className="w-full flex flex-col items-center text-center space-y-6 animate-fade-in py-6">
-              <img
-                src={selectedGame.iconUrl}
-                alt={selectedGame.title}
-                className="w-16 h-16 rounded-2xl object-cover shadow-2xl border border-white/10"
-              />
-
-              <div>
-                <h3 className="text-lg font-bold text-white tracking-tight mb-1">
-                  Relinking {selectedGame.title}
-                </h3>
-                <p className="text-xs text-neutral-400">
-                  {activeStepInfo.description}
-                </p>
+            <div className="space-y-8 animate-fade-in py-2">
+              {/* Header row with Game preview */}
+              <div className="flex items-center space-x-4 pb-6 border-b border-white/5">
+                <img
+                  src={selectedGame.iconUrl}
+                  alt={selectedGame.title}
+                  className="w-14 h-18 rounded-lg object-cover shadow border border-white/10 shrink-0"
+                />
+                <div>
+                  <span className="text-[11px] font-semibold text-blue-400 uppercase tracking-wider block mb-0.5">
+                    Relinking in Progress
+                  </span>
+                  <h2 className="text-xl font-bold text-white tracking-tight">
+                    {selectedGame.title}
+                  </h2>
+                </div>
               </div>
 
-              {/* Step indicator and progress bar */}
-              <div className="w-full space-y-2">
-                <div className="flex justify-between items-center text-xs">
-                  <span className="font-medium text-white flex items-center space-x-2">
-                    <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-400" />
-                    <span>{activeStepInfo.title}</span>
-                  </span>
-                  <span className="font-mono text-neutral-400 text-xs">
+              {/* Progress Section */}
+              <div className="space-y-4 max-w-2xl">
+                <div className="flex justify-between items-baseline text-xs">
+                  <div>
+                    <span className="text-base font-bold text-white flex items-center space-x-2">
+                      <Loader2 className="w-4 h-4 animate-spin text-blue-400 inline" />
+                      <span>{activeStepInfo.title}</span>
+                    </span>
+                    <p className="text-xs text-neutral-400 mt-1">
+                      {activeStepInfo.description}
+                    </p>
+                  </div>
+                  <span className="font-mono text-neutral-300 text-sm font-semibold">
                     Step {activeStepInfo.stepNumber} of 6 • {overallProgress}%
                   </span>
                 </div>
@@ -551,31 +593,30 @@ export const RelinkerStudio: React.FC<RelinkerStudioProps> = ({
                     style={{ width: `${overallProgress}%` }}
                   />
                 </div>
+
+                <div className="flex items-center space-x-5 pt-2 text-xs">
+                  <button
+                    type="button"
+                    onClick={handleCancelRelinking}
+                    disabled={isCancelling}
+                    className="text-neutral-400 hover:text-red-400 transition-colors font-medium"
+                  >
+                    {isCancelling ? 'Cancelling...' : 'Cancel process'}
+                  </button>
+                  <span className="text-neutral-700">•</span>
+                  <button
+                    type="button"
+                    onClick={() => setShowLiveLogs(!showLiveLogs)}
+                    className="text-neutral-400 hover:text-white transition-colors"
+                  >
+                    {showLiveLogs ? 'Hide technical logs' : 'View technical logs'}
+                  </button>
+                </div>
               </div>
 
-              {/* Cancellation & Logs Toggle */}
-              <div className="flex items-center space-x-4 pt-2">
-                <button
-                  type="button"
-                  onClick={handleCancelRelinking}
-                  disabled={isCancelling}
-                  className="text-xs text-neutral-400 hover:text-red-400 transition-colors"
-                >
-                  {isCancelling ? 'Cancelling...' : 'Cancel process'}
-                </button>
-                <span className="text-neutral-700">•</span>
-                <button
-                  type="button"
-                  onClick={() => setShowLiveLogs(prev => !prev)}
-                  className="text-xs text-neutral-400 hover:text-white transition-colors"
-                >
-                  {showLiveLogs ? 'Hide logs' : 'View technical logs'}
-                </button>
-              </div>
-
-              {/* Expandable live log output */}
+              {/* Live log drawer */}
               {showLiveLogs && (
-                <div className="w-full text-left bg-black/80 rounded-xl p-3 border border-white/10 font-mono text-[11px] max-h-48 overflow-y-auto space-y-1">
+                <div className="max-w-3xl w-full text-left bg-black/80 rounded-xl p-4 border border-white/10 font-mono text-[11px] max-h-56 overflow-y-auto space-y-1">
                   {logs.map((l, i) => (
                     <div key={i} className={l.level === 'error' ? 'text-red-400' : l.level === 'warn' ? 'text-amber-400' : l.level === 'success' ? 'text-emerald-400' : 'text-neutral-400'}>
                       {l.message}
@@ -587,34 +628,38 @@ export const RelinkerStudio: React.FC<RelinkerStudioProps> = ({
             </div>
           )}
 
-          {/* STATE 3: SUCCESS (After Backend Confirms Completion) */}
+          {/* STATE 3: SUCCESS (Only after backend confirms completion) */}
           {executionState === 'success' && (
-            <div className="w-full flex flex-col items-center text-center space-y-6 animate-fade-in py-6">
-              <div className="w-16 h-16 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 flex items-center justify-center shadow-lg shadow-emerald-500/10">
-                <CheckCircle2 className="w-8 h-8" />
+            <div className="space-y-8 animate-fade-in py-2">
+              <div className="flex items-start space-x-5 pb-6 border-b border-white/5">
+                <div className="w-12 h-12 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 flex items-center justify-center shrink-0">
+                  <CheckCircle2 className="w-6 h-6" />
+                </div>
+                <div>
+                  <span className="text-[11px] font-semibold text-emerald-400 uppercase tracking-wider block mb-0.5">
+                    Process Complete
+                  </span>
+                  <h2 className="text-2xl font-bold text-white tracking-tight">
+                    {selectedGame.title} is Ready to Play
+                  </h2>
+                  <p className="text-xs text-neutral-300 mt-1">
+                    Converted to a native 64-bit Windows executable with DirectX 12 & Vulkan driver support.
+                  </p>
+                </div>
               </div>
 
-              <div>
-                <h3 className="text-xl font-bold text-white tracking-tight mb-1">
-                  Relinking Complete!
-                </h3>
-                <p className="text-xs text-neutral-300 leading-relaxed max-w-sm">
-                  <strong className="text-white">{selectedGame.title}</strong> has been converted to a native Windows executable and is ready to play.
-                </p>
-              </div>
-
-              {/* Output Location */}
-              <div className="w-full p-3.5 rounded-xl bg-white/[0.03] border border-white/10 text-left">
-                <span className="text-[10px] uppercase font-bold text-neutral-400 tracking-wider block mb-1">
-                  Output Location
+              {/* Output Location & Details */}
+              <div className="max-w-2xl space-y-2">
+                <span className="text-xs font-semibold text-neutral-400 uppercase tracking-wider block">
+                  Native Output Location
                 </span>
-                <p className="text-xs font-mono text-emerald-300 break-all select-all">
+                <div className="p-3.5 rounded-xl bg-white/[0.03] border border-white/10 font-mono text-xs text-emerald-300 select-all break-all">
                   {selectedGame.path}\app.exe
-                </p>
+                </div>
               </div>
 
-              {/* Primary & Secondary Actions */}
-              <div className="w-full space-y-2.5 pt-2">
+              {/* Actions */}
+              <div className="pt-2 flex flex-wrap items-center gap-4">
                 {onLaunchGame && (
                   <button
                     type="button"
@@ -622,70 +667,70 @@ export const RelinkerStudio: React.FC<RelinkerStudioProps> = ({
                       audioService.playLaunch();
                       onLaunchGame(selectedGame);
                     }}
-                    className="w-full py-4 rounded-full bg-white text-black font-bold text-sm hover:bg-neutral-200 active:scale-[0.99] transition-all shadow-xl flex items-center justify-center space-x-2"
+                    className="px-8 py-3.5 rounded-full bg-white text-black font-bold text-sm hover:bg-neutral-200 active:scale-[0.98] transition-all shadow-xl flex items-center space-x-2"
                   >
                     <Play className="w-4 h-4 fill-black" />
                     <span>Play Game Now</span>
                   </button>
                 )}
 
-                <div className="flex items-center justify-center space-x-4 pt-1 text-xs text-neutral-400">
-                  {onNavigateToGames && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        audioService.playNavTick();
-                        onNavigateToGames();
-                      }}
-                      className="hover:text-white transition-colors"
-                    >
-                      Back to Games Library
-                    </button>
-                  )}
-                  <span className="text-neutral-700">•</span>
+                {onNavigateToGames && (
                   <button
                     type="button"
                     onClick={() => {
                       audioService.playNavTick();
-                      setExecutionState('idle');
+                      onNavigateToGames();
                     }}
-                    className="hover:text-white transition-colors"
+                    className="px-6 py-3.5 rounded-full bg-white/10 hover:bg-white/15 text-white font-medium text-xs transition-colors border border-white/10"
                   >
-                    Relink again
+                    Back to Games Library
                   </button>
-                </div>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    audioService.playNavTick();
+                    setExecutionState('idle');
+                  }}
+                  className="text-xs text-neutral-400 hover:text-white transition-colors ml-2"
+                >
+                  Relink again
+                </button>
               </div>
             </div>
           )}
 
           {/* STATE 4: ERROR (On Failure) */}
           {executionState === 'error' && (
-            <div className="w-full flex flex-col items-center text-center space-y-6 animate-fade-in py-6">
-              <div className="w-16 h-16 rounded-full bg-red-500/15 border border-red-500/30 text-red-400 flex items-center justify-center shadow-lg shadow-red-500/10">
-                <AlertTriangle className="w-8 h-8" />
+            <div className="space-y-8 animate-fade-in py-2">
+              <div className="flex items-start space-x-5 pb-6 border-b border-white/5">
+                <div className="w-12 h-12 rounded-xl bg-red-500/15 border border-red-500/30 text-red-400 flex items-center justify-center shrink-0">
+                  <AlertTriangle className="w-6 h-6" />
+                </div>
+                <div>
+                  <span className="text-[11px] font-semibold text-red-400 uppercase tracking-wider block mb-0.5">
+                    Relinking Halted
+                  </span>
+                  <h2 className="text-2xl font-bold text-white tracking-tight">
+                    Relinking Could Not Be Completed
+                  </h2>
+                  <p className="text-xs text-neutral-300 mt-1">
+                    {errorMessage?.summary || 'The relinker pipeline encountered an issue.'}
+                  </p>
+                </div>
               </div>
 
-              <div>
-                <h3 className="text-xl font-bold text-white tracking-tight mb-1">
-                  Relinking Could Not Be Completed
-                </h3>
-                <p className="text-xs text-neutral-300 leading-relaxed max-w-sm">
-                  {errorMessage?.summary || 'The relinker pipeline encountered an issue.'}
-                </p>
-              </div>
-
-              {/* Actionable recovery suggestion */}
-              <div className="w-full p-4 rounded-xl bg-red-950/20 border border-red-500/20 text-left space-y-1.5">
-                <span className="text-[11px] font-semibold text-red-300 block">
-                  Suggested Steps:
+              <div className="max-w-2xl p-4 rounded-xl bg-red-950/20 border border-red-500/20 text-xs space-y-2">
+                <span className="font-semibold text-red-300 block">
+                  Suggested Next Steps:
                 </span>
-                <p className="text-xs text-neutral-300 leading-relaxed whitespace-pre-line">
+                <p className="text-neutral-300 leading-relaxed whitespace-pre-line text-xs">
                   {errorMessage?.remedy || 'Check that game files are decrypted and not locked by another process.'}
                 </p>
               </div>
 
-              {/* Actions */}
-              <div className="w-full space-y-2.5 pt-2">
+              <div className="pt-2 flex flex-wrap items-center gap-4">
                 <button
                   type="button"
                   onClick={() => {
@@ -693,35 +738,33 @@ export const RelinkerStudio: React.FC<RelinkerStudioProps> = ({
                     setExecutionState('idle');
                     setErrorMessage(null);
                   }}
-                  className="w-full py-3.5 rounded-full bg-white text-black font-bold text-xs hover:bg-neutral-200 active:scale-[0.99] transition-all shadow-lg"
+                  className="px-8 py-3.5 rounded-full bg-white text-black font-bold text-xs hover:bg-neutral-200 active:scale-[0.98] transition-all shadow-lg"
                 >
                   Try Again
                 </button>
 
-                <div className="flex items-center justify-center space-x-4 pt-1 text-xs text-neutral-400">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      audioService.playNavTick();
-                      handleSetMode('advanced');
-                    }}
-                    className="hover:text-white transition-colors"
-                  >
-                    Open Advanced mode
-                  </button>
-                  <span className="text-neutral-700">•</span>
-                  <button
-                    type="button"
-                    onClick={() => setShowErrorLogs(prev => !prev)}
-                    className="hover:text-white transition-colors"
-                  >
-                    {showErrorLogs ? 'Hide error logs' : 'View error logs'}
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    audioService.playNavTick();
+                    handleSetMode('advanced');
+                  }}
+                  className="px-6 py-3.5 rounded-full bg-white/10 hover:bg-white/15 text-white font-medium text-xs transition-colors border border-white/10"
+                >
+                  Open Advanced Mode
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setShowErrorLogs(!showErrorLogs)}
+                  className="text-xs text-neutral-400 hover:text-white transition-colors ml-2"
+                >
+                  {showErrorLogs ? 'Hide error logs' : 'View error logs'}
+                </button>
               </div>
 
               {showErrorLogs && (
-                <div className="w-full text-left bg-black/80 rounded-xl p-3 border border-red-500/20 font-mono text-[11px] max-h-48 overflow-y-auto space-y-1">
+                <div className="max-w-3xl w-full text-left bg-black/80 rounded-xl p-4 border border-red-500/20 font-mono text-[11px] max-h-56 overflow-y-auto space-y-1">
                   {logs.map((l, i) => (
                     <div key={i} className={l.level === 'error' ? 'text-red-400 font-semibold' : 'text-neutral-400'}>
                       {l.message}
