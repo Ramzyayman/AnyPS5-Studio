@@ -318,37 +318,67 @@ function fixGameHierarchyInPlace(gameDir: string, sendLog: (msg: string, level?:
     }
   }
 
-  // 6. Clean and unwrap guest modules in sce_module/ (prevent ambiguous dependency collisions)
-  const sceModuleDir = path.join(app0Dir, 'sce_module');
-  if (fs.existsSync(sceModuleDir)) {
-    try {
-      const modFiles = fs.readdirSync(sceModuleDir);
-      const unwrapScript = path.resolve(appRootDir, 'tools/unwrap_self.py');
-      const backupDir = path.join(app0Dir, 'sce_module_backups');
+  // 6. Discover, clean and unwrap all guest modules across app0/ (including sce_module, games/, Plugins/, etc.)
+  const moduleDirs: string[] = [];
+  try {
+    const unwrapScript = path.resolve(appRootDir, 'tools/unwrap_self.py');
+    const discoveredDirs = new Set<string>();
 
-      // First pass: move any backup / non-prx files out of sce_module/
-      for (const mf of modFiles) {
-        const full = path.join(sceModuleDir, mf);
-        if (!fs.statSync(full).isFile()) continue;
+    function scanDirectory(currentDir: string) {
+      let entries: string[] = [];
+      try {
+        entries = fs.readdirSync(currentDir);
+      } catch {
+        return;
+      }
 
-        // Any backup or non-primary extension (.bak, .esbak, .bak_*, .old, etc.) must be moved out
-        const isBackup = mf.includes('.bak') || mf.includes('.esbak') || mf.includes('.old') || !mf.endsWith('.prx');
-        if (isBackup) {
-          if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true });
-          const targetBackup = path.join(backupDir, mf);
-          try {
-            if (fs.existsSync(targetBackup)) fs.unlinkSync(targetBackup);
-            fs.renameSync(full, targetBackup);
-            sendLog(`[AnyPS5] Moved backup module out of sce_module/: ${mf}`, 'info');
-          } catch {}
+      const prxFiles: string[] = [];
+      for (const entry of entries) {
+        const fullPath = path.join(currentDir, entry);
+        let stat: fs.Stats;
+        try {
+          stat = fs.statSync(fullPath);
+        } catch {
+          continue;
+        }
+
+        if (stat.isDirectory()) {
+          const lower = entry.toLowerCase();
+          if (!['sce_sys', 'sce_module_backups', 'module_backups', 'libs'].includes(lower) && !entry.startsWith('.')) {
+            scanDirectory(fullPath);
+          }
+        } else if (stat.isFile()) {
+          const lower = entry.toLowerCase();
+          if (lower.endsWith('.prx') || lower.endsWith('.sprx')) {
+            prxFiles.push(entry);
+          }
         }
       }
 
-      // Second pass: unwrap any encrypted SELF modules in-place (no .bak_self left in sce_module)
-      const remainingFiles = fs.readdirSync(sceModuleDir);
-      for (const mf of remainingFiles) {
-        if (mf.endsWith('.prx')) {
-          const fullPrx = path.join(sceModuleDir, mf);
+      if (prxFiles.length > 0) {
+        const backupDir = path.join(currentDir, 'module_backups');
+
+        // First pass: isolate any non-prx backup files (.bak, .esbak, .old, .elf duplicate)
+        for (const entry of entries) {
+          const fullPath = path.join(currentDir, entry);
+          if (!fs.statSync(fullPath).isFile()) continue;
+          const lower = entry.toLowerCase();
+          const isBackup = lower.includes('.bak') || lower.includes('.esbak') || lower.includes('.old') ||
+            (lower.endsWith('.elf') && prxFiles.some(p => p.slice(0, p.lastIndexOf('.')) === entry.slice(0, entry.lastIndexOf('.'))));
+          if (isBackup) {
+            if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true });
+            const target = path.join(backupDir, entry);
+            try {
+              if (fs.existsSync(target)) fs.unlinkSync(target);
+              fs.renameSync(fullPath, target);
+              sendLog(`[AnyPS5] Moved backup module out of ${path.relative(app0Dir, currentDir)}: ${entry}`, 'info');
+            } catch {}
+          }
+        }
+
+        // Second pass: unwrap any encrypted SELF modules in-place
+        for (const prx of prxFiles) {
+          const fullPrx = path.join(currentDir, prx);
           try {
             const buf = Buffer.alloc(4);
             const fd = fs.openSync(fullPrx, 'r');
@@ -360,20 +390,29 @@ function fixGameHierarchyInPlace(gameDir: string, sendLog: (msg: string, level?:
               const res = spawnSync('python', [unwrapScript, fullPrx, unwrapped]);
               if (res.status === 0 && fs.existsSync(unwrapped)) {
                 if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true });
-                fs.copyFileSync(fullPrx, path.join(backupDir, mf + '.self_orig'));
+                fs.copyFileSync(fullPrx, path.join(backupDir, prx + '.self_orig'));
                 fs.copyFileSync(unwrapped, fullPrx);
                 fs.unlinkSync(unwrapped);
-                sendLog(`[AnyPS5] Unwrapped encrypted module in-place: sce_module/${mf}`, 'info');
+                sendLog(`[AnyPS5] Unwrapped encrypted module: ${path.relative(app0Dir, fullPrx)}`, 'info');
               }
             }
           } catch (modErr: any) {
             console.error('Module unwrap error:', modErr);
           }
         }
+
+        // Register relative directory if outside standard sce_module
+        const rel = path.relative(app0Dir, currentDir).replace(/\\/g, '/');
+        if (rel && !['sce_module', 'sce_modules', 'prx'].includes(rel)) {
+          discoveredDirs.add(rel);
+        }
       }
-    } catch (sceErr) {
-      console.error('sce_module cleaning error:', sceErr);
     }
+
+    scanDirectory(app0Dir);
+    moduleDirs.push(...Array.from(discoveredDirs));
+  } catch (modScanErr) {
+    console.error('Guest module scan error:', modScanErr);
   }
 
   const outputExe = path.join(resolved, 'app.exe');
@@ -382,6 +421,7 @@ function fixGameHierarchyInPlace(gameDir: string, sendLog: (msg: string, level?:
     gameDir: resolved,
     inputElf,
     outputExe,
+    moduleDirs,
   };
 }
 
@@ -406,7 +446,7 @@ ipcMain.handle('anyps5:run-relinker', async (_, { game, options }) => {
     sendStage(1, 'active', 20);
 
     // Step 1: Fix folder hierarchy in-place in native location (no copying outside native folder)
-    const { gameDir, inputElf, outputExe } = fixGameHierarchyInPlace(game.path, sendLog);
+    const { gameDir, inputElf, outputExe, moduleDirs } = fixGameHierarchyInPlace(game.path, sendLog);
     game.path = gameDir;
     sendStage(1, 'completed', 100);
 
@@ -439,6 +479,12 @@ ipcMain.handle('anyps5:run-relinker', async (_, { game, options }) => {
     if (options.cpuTranslation === 'intel') args.push('--to-intel');
     if (options.cpuTranslation === 'rosetta') args.push('--to-rosetta');
     if (options.traceImports) args.push('--trace-imports');
+
+    // Register all discovered guest module directories (e.g. games, Media/Plugins, etc.)
+    for (const modDir of moduleDirs) {
+      args.push('--module-dir', modDir);
+      sendLog(`[AnyPS5] Registered guest plugin module directory: ${modDir}`, 'info');
+    }
 
     const filterValue = (options.unusedFilter === 'none' || options.unusedFilter === 0) ? '0' : '1';
     args.push(`unused-filter=${filterValue}`);
