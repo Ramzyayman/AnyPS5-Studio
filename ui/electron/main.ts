@@ -484,8 +484,14 @@ function fixGameHierarchyInPlace(gameDir: string, sendLog: (msg: string, level?:
 
         // Register relative directory if outside standard sce_module
         const rel = path.relative(app0Dir, currentDir).replace(/\\/g, '/');
-        if (rel && !['sce_module', 'sce_modules', 'prx'].includes(rel)) {
-          discoveredDirs.add(rel);
+        if (rel) {
+          if (!['sce_module', 'sce_modules', 'prx'].includes(rel)) {
+            discoveredDirs.add(rel);
+          }
+        } else {
+          // Bundled guest PRX modules located directly in app0/ root (e.g. libcohtml, libfmod in Minecraft)
+          // Per AnyPS5 specification: "--module-dir . is the parent itself, without the input ELF"
+          discoveredDirs.add('.');
         }
       }
     }
