@@ -2,9 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { 
   Gamepad2, 
   Settings, 
-  Plus
+  Plus,
+  Minus,
+  Square,
+  Copy,
+  X
 } from 'lucide-react';
 import { audioService } from '../services/audioService';
+import { apiBridge } from '../services/apiBridge';
 
 interface TopBarProps {
   activeTab: 'games' | 'relinker' | 'nid' | 'prx' | 'telemetry';
@@ -32,6 +37,7 @@ export const TopBar: React.FC<TopBarProps> = ({
   showAdvancedNav = false,
 }) => {
   const [time, setTime] = useState<string>('');
+  const [isMaximized, setIsMaximized] = useState<boolean>(false);
 
   const navItems = showAdvancedNav 
     ? ALL_NAV_ITEMS 
@@ -49,6 +55,14 @@ export const TopBar: React.FC<TopBarProps> = ({
     return () => clearInterval(interval);
   }, []);
 
+  useEffect(() => {
+    apiBridge.isWindowMaximized().then(setIsMaximized).catch(() => {});
+    const unsubscribe = apiBridge.onWindowMaximizedChange((maximized) => {
+      setIsMaximized(maximized);
+    });
+    return () => unsubscribe();
+  }, []);
+
   const handleTabClick = (tab: 'games' | 'relinker' | 'nid' | 'prx' | 'telemetry') => {
     if (tab !== activeTab) {
       audioService.playNavTick();
@@ -58,11 +72,12 @@ export const TopBar: React.FC<TopBarProps> = ({
 
   return (
     <header 
-      className="relative z-30 h-16 flex items-center justify-between px-8 md:px-12 bg-transparent select-none"
-      style={{ backgroundColor: 'transparent' }}
+      onDoubleClick={() => apiBridge.maximizeWindow()}
+      className="relative z-30 h-16 flex items-center justify-between px-8 md:px-12 bg-transparent select-none cursor-default"
+      style={{ WebkitAppRegion: 'drag' } as any}
     >
       {/* Left: Compact AnyPS5 Console Identity & PS5 Typography Navigation */}
-      <div className="flex items-center space-x-8 md:space-x-12">
+      <div className="flex items-center space-x-8 md:space-x-12" style={{ WebkitAppRegion: 'no-drag' } as any}>
         {/* Compact Console Brand Mark */}
         <div className="flex items-center space-x-2">
           <div className="w-5 h-5 rounded-[4px] bg-white flex items-center justify-center">
@@ -96,8 +111,8 @@ export const TopBar: React.FC<TopBarProps> = ({
         </nav>
       </div>
 
-      {/* Right: Small, Understated Console Controls */}
-      <div className="flex items-center space-x-5 text-neutral-300">
+      {/* Right: Small, Understated Console Controls & Window Controls */}
+      <div className="flex items-center space-x-5 text-neutral-300" style={{ WebkitAppRegion: 'no-drag' } as any}>
         {/* Import Game Button */}
         <button
           onClick={() => {
@@ -136,6 +151,43 @@ export const TopBar: React.FC<TopBarProps> = ({
         <span className="text-xs font-medium tracking-wider text-white/70 pl-1">
           {time}
         </span>
+
+        {/* Minimal Frameless Window Controls */}
+        <div className="flex items-center space-x-0.5 pl-2 border-l border-white/10">
+          <button
+            type="button"
+            onClick={() => apiBridge.minimizeWindow()}
+            className="w-7 h-7 flex items-center justify-center rounded-lg text-white/50 hover:text-white hover:bg-white/10 transition-colors focus:outline-none"
+            title="Minimize"
+            aria-label="Minimize Window"
+          >
+            <Minus className="w-3.5 h-3.5" />
+          </button>
+
+          <button
+            type="button"
+            onClick={() => apiBridge.maximizeWindow()}
+            className="w-7 h-7 flex items-center justify-center rounded-lg text-white/50 hover:text-white hover:bg-white/10 transition-colors focus:outline-none"
+            title={isMaximized ? "Restore" : "Maximize"}
+            aria-label={isMaximized ? "Restore Window" : "Maximize Window"}
+          >
+            {isMaximized ? (
+              <Copy className="w-3 h-3 rotate-180" />
+            ) : (
+              <Square className="w-3 h-3" />
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => apiBridge.closeWindow()}
+            className="w-7 h-7 flex items-center justify-center rounded-lg text-white/50 hover:text-white hover:bg-red-500/80 transition-colors focus:outline-none"
+            title="Close"
+            aria-label="Close Window"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
       </div>
     </header>
   );

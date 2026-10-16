@@ -32,5 +32,16 @@ contextBridge.exposeInMainWorld('anyps5', {
       ipcRenderer.removeListener('anyps5:game-exit', handler);
     };
   },
+  minimizeWindow: () => ipcRenderer.invoke('anyps5:minimize-window'),
+  maximizeWindow: () => ipcRenderer.invoke('anyps5:maximize-window'),
+  closeWindow: () => ipcRenderer.invoke('anyps5:close-window'),
+  isWindowMaximized: () => ipcRenderer.invoke('anyps5:is-maximized'),
+  onWindowMaximizedChange: (callback: (isMaximized: boolean) => void) => {
+    const handler = (_: unknown, isMax: boolean) => callback(isMax);
+    ipcRenderer.on('anyps5:window-maximized-change', handler);
+    return () => {
+      ipcRenderer.removeListener('anyps5:window-maximized-change', handler);
+    };
+  },
 });
 

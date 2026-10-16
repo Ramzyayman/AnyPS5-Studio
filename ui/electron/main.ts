@@ -13,6 +13,8 @@ function createWindow() {
     height: 820,
     minWidth: 1024,
     minHeight: 680,
+    frame: false,
+    autoHideMenuBar: true,
     backgroundColor: '#04060a',
     title: 'AnyPS5 · PlayStation 5 Studio',
     webPreferences: {
@@ -22,6 +24,16 @@ function createWindow() {
       sandbox: false,
     },
     show: true,
+  });
+
+  mainWindow.removeMenu();
+
+  mainWindow.on('maximize', () => {
+    mainWindow?.webContents.send('anyps5:window-maximized-change', true);
+  });
+
+  mainWindow.on('unmaximize', () => {
+    mainWindow?.webContents.send('anyps5:window-maximized-change', false);
   });
 
   const distPath = path.join(__dirname, '../dist/index.html');
@@ -923,5 +935,26 @@ ipcMain.handle('anyps5:get-telemetry', async () => {
     recommendedCpuTranslation,
     recommendationReason,
   };
+});
+
+// Window Control IPC Handlers (Frameless Window)
+ipcMain.handle('anyps5:minimize-window', () => {
+  mainWindow?.minimize();
+});
+
+ipcMain.handle('anyps5:maximize-window', () => {
+  if (mainWindow?.isMaximized()) {
+    mainWindow.unmaximize();
+  } else {
+    mainWindow?.maximize();
+  }
+});
+
+ipcMain.handle('anyps5:close-window', () => {
+  mainWindow?.close();
+});
+
+ipcMain.handle('anyps5:is-maximized', () => {
+  return mainWindow?.isMaximized() ?? false;
 });
 

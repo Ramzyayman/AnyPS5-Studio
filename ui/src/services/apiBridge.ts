@@ -34,6 +34,11 @@ declare global {
       onGameExit?: (
         callback: (data: { code: number | null; exitCodeHex: string; isCrash: boolean }) => void
       ) => () => void;
+      minimizeWindow?: () => Promise<void>;
+      maximizeWindow?: () => Promise<void>;
+      closeWindow?: () => Promise<void>;
+      isWindowMaximized?: () => Promise<boolean>;
+      onWindowMaximizedChange?: (callback: (isMax: boolean) => void) => () => void;
     };
   }
 }
@@ -145,6 +150,38 @@ class ApiBridge {
   public onGameExit(callback: (data: { code: number | null; exitCodeHex: string; isCrash: boolean }) => void): () => void {
     if (window.anyps5?.onGameExit) {
       return window.anyps5.onGameExit(callback);
+    }
+    return () => {};
+  }
+
+  public async minimizeWindow(): Promise<void> {
+    if (window.anyps5?.minimizeWindow) {
+      await window.anyps5.minimizeWindow();
+    }
+  }
+
+  public async maximizeWindow(): Promise<void> {
+    if (window.anyps5?.maximizeWindow) {
+      await window.anyps5.maximizeWindow();
+    }
+  }
+
+  public async closeWindow(): Promise<void> {
+    if (window.anyps5?.closeWindow) {
+      await window.anyps5.closeWindow();
+    }
+  }
+
+  public async isWindowMaximized(): Promise<boolean> {
+    if (window.anyps5?.isWindowMaximized) {
+      return await window.anyps5.isWindowMaximized();
+    }
+    return false;
+  }
+
+  public onWindowMaximizedChange(callback: (isMax: boolean) => void): () => void {
+    if (window.anyps5?.onWindowMaximizedChange) {
+      return window.anyps5.onWindowMaximizedChange(callback);
     }
     return () => {};
   }
