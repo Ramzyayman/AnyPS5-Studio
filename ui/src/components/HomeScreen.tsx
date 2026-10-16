@@ -93,6 +93,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   };
 
   const formatSize = (bytes: number) => {
+    if (!bytes || bytes <= 0) return '0 MB';
     if (bytes >= 1024 * 1024 * 1024) {
       return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
     }

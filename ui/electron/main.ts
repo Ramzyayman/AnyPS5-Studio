@@ -68,6 +68,36 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 
+// Recursive helper to calculate accurate size of game directory/file on disk
+function getFolderSize(targetPath: string): number {
+  try {
+    if (!targetPath || !fs.existsSync(targetPath)) return 0;
+    const stat = fs.statSync(targetPath);
+    if (!stat.isDirectory()) {
+      const base = path.basename(targetPath).toLowerCase();
+      if (base === 'eboot.bin' || base === 'eboot.elf' || base === 'app.exe') {
+        return getFolderSize(path.dirname(targetPath));
+      }
+      return stat.size;
+    }
+    let total = 0;
+    const entries = fs.readdirSync(targetPath, { withFileTypes: true });
+    for (const entry of entries) {
+      const full = path.join(targetPath, entry.name);
+      try {
+        if (entry.isDirectory() && !entry.isSymbolicLink()) {
+          total += getFolderSize(full);
+        } else if (entry.isFile()) {
+          total += fs.statSync(full).size;
+        }
+      } catch {}
+    }
+    return total;
+  } catch {
+    return 0;
+  }
+}
+
 // IPC Handler: Persistent Games Storage
 const gamesStorePath = path.join(app.getPath('userData'), 'anyps5_games.json');
 
@@ -75,7 +105,28 @@ ipcMain.handle('anyps5:get-games', async () => {
   try {
     if (fs.existsSync(gamesStorePath)) {
       const data = fs.readFileSync(gamesStorePath, 'utf8');
-      return JSON.parse(data);
+      const games = JSON.parse(data);
+      if (Array.isArray(games)) {
+        let changed = false;
+        for (const g of games) {
+          if (g && g.path && fs.existsSync(g.path)) {
+            const actualSize = getFolderSize(g.path);
+            if (actualSize > 0 && g.sizeBytes !== actualSize) {
+              g.sizeBytes = actualSize;
+              changed = true;
+            }
+          }
+        }
+        if (changed) {
+          try {
+            fs.writeFileSync(gamesStorePath, JSON.stringify(games, null, 2), 'utf8');
+          } catch (writeErr) {
+            console.error('Failed to update games.json with accurate sizes:', writeErr);
+          }
+        }
+        return games;
+      }
+      return games;
     }
   } catch (err) {
     console.error('Failed to read games.json:', err);
@@ -85,6 +136,14 @@ ipcMain.handle('anyps5:get-games', async () => {
 
 ipcMain.handle('anyps5:save-games', async (_, games) => {
   try {
+    if (Array.isArray(games)) {
+      for (const g of games) {
+        if (g && g.path && (!g.sizeBytes || g.sizeBytes === 15 * 1024 * 1024 * 1024) && fs.existsSync(g.path)) {
+          const actual = getFolderSize(g.path);
+          if (actual > 0) g.sizeBytes = actual;
+        }
+      }
+    }
     fs.writeFileSync(gamesStorePath, JSON.stringify(games, null, 2), 'utf8');
   } catch (err) {
     console.error('Failed to write games.json:', err);
@@ -171,6 +230,8 @@ function inspectGameFolder(folderPath: string) {
 
     walk(folderPath, 0);
 
+    const sizeBytes = getFolderSize(folderPath);
+
     return {
       title: titleName,
       titleId,
@@ -178,6 +239,7 @@ function inspectGameFolder(folderPath: string) {
       iconUrl: iconDataUrl,
       backdropUrl: backdropDataUrl,
       hasEboot,
+      sizeBytes,
     };
   } catch (err) {
     console.error('Inspect folder error:', err);

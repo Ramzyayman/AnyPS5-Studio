@@ -22,6 +22,7 @@ export const AddGameModal: React.FC<AddGameModalProps> = ({ isOpen, onClose, onA
   const [folderPath, setFolderPath] = useState<string>('C:/Games/PS5/NewTitle');
   const [iconUrl, setIconUrl] = useState<string>('https://images.unsplash.com/photo-1550745165-9bc0b252726f?auto=format&fit=crop&w=400&q=80');
   const [backdropUrl, setBackdropUrl] = useState<string>('https://images.unsplash.com/photo-1518709268805-4e9042af9f23?auto=format&fit=crop&w=1920&q=80');
+  const [sizeBytes, setSizeBytes] = useState<number>(0);
   const [detectedBadge, setDetectedBadge] = useState<string | null>(null);
 
   if (!isOpen) return null;
@@ -39,6 +40,7 @@ export const AddGameModal: React.FC<AddGameModalProps> = ({ isOpen, onClose, onA
         if (inspected.titleId) setTitleId(inspected.titleId);
         if (inspected.iconUrl) setIconUrl(inspected.iconUrl);
         if (inspected.backdropUrl) setBackdropUrl(inspected.backdropUrl);
+        if (inspected.sizeBytes) setSizeBytes(inspected.sizeBytes);
         setDetectedBadge(`PlayStation 5 Title Detected · ${inspected.title || 'App'} (${inspected.titleId || 'PPSA'})`);
       } else {
         const folderName = selected.split(/[\/\\]/).filter(Boolean).pop() || '';
@@ -67,7 +69,7 @@ export const AddGameModal: React.FC<AddGameModalProps> = ({ isOpen, onClose, onA
       targetPlatform: 'windows',
       iconUrl: iconUrl || 'https://images.unsplash.com/photo-1550745165-9bc0b252726f?auto=format&fit=crop&w=400&q=80',
       backdropUrl: backdropUrl || 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?auto=format&fit=crop&w=1920&q=80',
-      sizeBytes: 15 * 1024 * 1024 * 1024,
+      sizeBytes: sizeBytes || 0,
       sdkVersion: '05.000.001',
       minHostCpu: 'AMD Zen2 / Intel AVX2',
       compatibility: {

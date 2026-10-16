@@ -12,6 +12,7 @@ declare global {
         iconUrl?: string;
         backdropUrl?: string;
         hasEboot?: boolean;
+        sizeBytes?: number;
       } | null>;
       getGames: () => Promise<GameItem[]>;
       saveGames: (games: GameItem[]) => Promise<void>;
@@ -79,6 +80,7 @@ class ApiBridge {
     iconUrl?: string;
     backdropUrl?: string;
     hasEboot?: boolean;
+    sizeBytes?: number;
   } | null> {
     if (window.anyps5?.inspectFolder) {
       return await window.anyps5.inspectFolder(folderPath);
