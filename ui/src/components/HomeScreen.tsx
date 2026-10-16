@@ -199,8 +199,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           )}
         </div>
 
-        {/* Shelf scroll container with 25% larger box art covers */}
-        <div className="flex items-center space-x-5 md:space-x-6 overflow-x-auto pb-5 pt-2 px-1 scrollbar-none scroll-smooth">
+        {/* Shelf scroll container with 25% larger box art covers and generous outline padding */}
+        <div className="flex items-center space-x-5 md:space-x-6 overflow-x-auto pb-6 pt-3 px-4 -mx-4 scrollbar-none scroll-smooth">
           {games.map((game, idx) => {
             const isSelected = idx === selectedGameIndex;
             return (
