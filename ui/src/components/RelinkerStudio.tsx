@@ -295,9 +295,7 @@ export const RelinkerStudio: React.FC<RelinkerStudioProps> = ({
     <div className="relative w-full h-full flex flex-col pt-24 px-8 md:px-12 lg:px-16 pb-12 overflow-y-auto select-none">
       
       {/* Console Header: Title & Clean Mode Toggle */}
-      <div className={`w-full flex items-center justify-between mb-8 pb-4 border-b border-white/5 ${
-        mode === 'simple' ? 'max-w-[1280px] mx-auto' : 'max-w-[1160px]'
-      }`}>
+      <div className="w-full max-w-[1280px] mx-auto flex items-center justify-between mb-8 pb-4 border-b border-white/5">
         <div>
           <span className="text-[11px] font-medium text-neutral-400 uppercase tracking-wider block mb-1">
             System Software / Relinker Studio
@@ -764,7 +762,7 @@ export const RelinkerStudio: React.FC<RelinkerStudioProps> = ({
       {/* ADVANCED MODE (Full Technical Controls for Developers)        */}
       {/* ============================================================== */}
       {mode === 'advanced' && (
-        <div className="max-w-[1160px] w-full grid grid-cols-1 lg:grid-cols-12 gap-8 flex-1 min-h-0">
+        <div className="max-w-[1280px] w-full mx-auto grid grid-cols-1 lg:grid-cols-12 gap-8 flex-1 min-h-0 animate-fade-in">
           
           {/* Left Column: Technical Controls */}
           <div className="lg:col-span-5 flex flex-col space-y-5">
