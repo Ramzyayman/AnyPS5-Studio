@@ -3,6 +3,7 @@ import path from 'path';
 import { spawn, spawnSync, ChildProcess } from 'child_process';
 import os from 'os';
 import fs from 'fs';
+import { autoUpdater } from 'electron-updater';
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -57,6 +58,36 @@ if (!gotTheLock) {
 
   app.whenReady().then(() => {
     createWindow();
+
+    // Background auto-updater for GitHub Releases
+    if (app.isPackaged) {
+      try {
+        autoUpdater.autoDownload = true;
+        autoUpdater.autoInstallOnAppQuit = true;
+
+        autoUpdater.on('update-downloaded', (info) => {
+          if (mainWindow) {
+            dialog.showMessageBox(mainWindow, {
+              type: 'info',
+              title: 'AnyPS5 Studio Update Ready',
+              message: `Version ${info.version} has been downloaded in the background and will be applied when you restart the application.`,
+              buttons: ['Restart Now', 'Later'],
+              defaultId: 0,
+            }).then((res) => {
+              if (res.response === 0) {
+                autoUpdater.quitAndInstall();
+              }
+            });
+          }
+        });
+
+        autoUpdater.checkForUpdatesAndNotify().catch((err) => {
+          console.warn('Auto-updater background check:', err?.message || err);
+        });
+      } catch (updaterErr) {
+        console.warn('AutoUpdater initialization error:', updaterErr);
+      }
+    }
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -247,7 +278,9 @@ function inspectGameFolder(folderPath: string) {
   }
 }
 
-const appRootDir = path.resolve(__dirname, '../..');
+const appRootDir = app.isPackaged
+  ? process.resourcesPath
+  : path.resolve(__dirname, '../..');
 
 function fixGameHierarchyInPlace(gameDir: string, sendLog: (msg: string, level?: string) => void) {
   const resolved = path.resolve(gameDir);
