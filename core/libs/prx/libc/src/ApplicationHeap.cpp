@@ -147,6 +147,11 @@ void ApplicationHeapRegister_nid_no_patch(void* const* api) {
 void ApplicationHeapInitialize_nid_no_patch(const void* processParameters) {
     std::call_once(heapInitialization, [processParameters] {
         try {
+            if (processParameters == nullptr) {
+                const auto api = defaultApi();
+                ApplicationHeapRegister_nid_no_patch(api.data());
+                return;
+            }
             if (read<std::uint64_t>(processParameters, 0) < 0x40 || read<std::uint32_t>(processParameters, 8) != 0x4942524f) throw std::runtime_error("application heap: invalid process parameters");
             const auto* libcParameters = read<const void*>(processParameters, 0x38);
             if (read<std::uint64_t>(libcParameters, 0) < 0x38) throw std::runtime_error("application heap: invalid libc parameters");
