@@ -87,7 +87,7 @@ ui/
 │   │   ├── TelemetryPanel.tsx   # Zen2 CPU & Vulkan diagnostic suite
 │   │   ├── GameLauncherModal.tsx# Running game process HUD
 │   │   ├── AddGameModal.tsx     # Game import wizard
-│   │   └── SettingsModal.tsx    # Configuration preferences
+│   │   └── SettingsPage.tsx     # In-app configuration preferences
 │   ├── services/
 │   │   ├── audioService.ts      # Web Audio API PS5 sound synthesizer
 │   │   ├── apiBridge.ts         # Cross-environment Electron / Web API

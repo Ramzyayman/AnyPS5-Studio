@@ -12,8 +12,8 @@ import { audioService } from '../services/audioService';
 import { apiBridge } from '../services/apiBridge';
 
 interface TopBarProps {
-  activeTab: 'games' | 'relinker' | 'community' | 'nid' | 'prx' | 'telemetry';
-  onTabChange: (tab: 'games' | 'relinker' | 'community' | 'nid' | 'prx' | 'telemetry') => void;
+  activeTab: 'games' | 'relinker' | 'community' | 'nid' | 'prx' | 'telemetry' | 'settings';
+  onTabChange: (tab: 'games' | 'relinker' | 'community' | 'nid' | 'prx' | 'telemetry' | 'settings') => void;
   onOpenAddGame: () => void;
   onOpenSettings: () => void;
   gamepadConnected: boolean;
@@ -142,7 +142,11 @@ export const TopBar: React.FC<TopBarProps> = ({
             audioService.playConfirm();
             onOpenSettings();
           }}
-          className="p-1 text-white/50 hover:text-white transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-white/50 focus-visible:rounded shrink-0"
+          className={`p-1.5 rounded-full transition-all focus:outline-none focus-visible:ring-1 focus-visible:ring-white/50 shrink-0 ${
+            activeTab === 'settings'
+              ? 'text-white bg-white/20 ring-1 ring-white/30'
+              : 'text-white/50 hover:text-white hover:bg-white/10'
+          }`}
           title="System Settings"
         >
           <Settings className="w-4 h-4" />

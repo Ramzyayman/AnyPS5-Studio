@@ -7,7 +7,7 @@ import { PrxManager } from './components/PrxManager';
 import { TelemetryPanel } from './components/TelemetryPanel';
 import { GameLauncherModal } from './components/GameLauncherModal';
 import { AddGameModal } from './components/AddGameModal';
-import { SettingsModal } from './components/SettingsModal';
+import { SettingsPage } from './components/SettingsPage';
 import { CommunityPRBuilds } from './components/CommunityPRBuilds';
 import { GameItem } from './types';
 import { apiBridge } from './services/apiBridge';
@@ -16,13 +16,14 @@ import { CheckCircle2, X } from 'lucide-react';
 
 import { INITIAL_GAMES } from './services/sampleData';
 
+export type ActiveTab = 'games' | 'relinker' | 'community' | 'nid' | 'prx' | 'telemetry' | 'settings';
+
 export const App: React.FC = () => {
   const [games, setGames] = useState<GameItem[]>([]);
   const [selectedGameIndex, setSelectedGameIndex] = useState<number>(0);
-  const [activeTab, setActiveTab] = useState<'games' | 'relinker' | 'community' | 'nid' | 'prx' | 'telemetry'>('games');
+  const [activeTab, setActiveTab] = useState<ActiveTab>('games');
   const [activeRunningGame, setActiveRunningGame] = useState<GameItem | null>(null);
   const [isAddGameOpen, setIsAddGameOpen] = useState<boolean>(false);
-  const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [gamepadConnected, setGamepadConnected] = useState<boolean>(false);
   const [downloadedUpdateVersion, setDownloadedUpdateVersion] = useState<string | null>(null);
   const [showUpdateToast, setShowUpdateToast] = useState<boolean>(false);
@@ -82,12 +83,12 @@ export const App: React.FC = () => {
   // Keyboard navigation for authentic console feel
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (isAddGameOpen || isSettingsOpen || activeRunningGame) return;
+      if (isAddGameOpen || activeRunningGame) return;
 
       // Tab switching via Q/E or [ / ]
       if ((e.key === 'q' || e.key === 'Q' || e.key === '[') && !['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) {
         setActiveTab((prev) => {
-          const idx = availableTabs.indexOf(prev);
+          const idx = availableTabs.indexOf(prev as any);
           const currentIdx = idx === -1 ? 0 : idx;
           const next = availableTabs[(currentIdx - 1 + availableTabs.length) % availableTabs.length];
           audioService.playNavTick();
@@ -98,7 +99,7 @@ export const App: React.FC = () => {
 
       if ((e.key === 'e' || e.key === 'E' || e.key === ']') && !['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) {
         setActiveTab((prev) => {
-          const idx = availableTabs.indexOf(prev);
+          const idx = availableTabs.indexOf(prev as any);
           const currentIdx = idx === -1 ? 0 : idx;
           const next = availableTabs[(currentIdx + 1) % availableTabs.length];
           audioService.playNavTick();
@@ -142,7 +143,7 @@ export const App: React.FC = () => {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [games, selectedGameIndex, activeTab, isAddGameOpen, isSettingsOpen, activeRunningGame, availableTabs]);
+  }, [games, selectedGameIndex, activeTab, isAddGameOpen, activeRunningGame, availableTabs]);
 
   // Gamepad API Polling
   useEffect(() => {
@@ -155,7 +156,7 @@ export const App: React.FC = () => {
       const gp = gamepads[0];
       setGamepadConnected(Boolean(gp));
 
-      if (gp && !isAddGameOpen && !isSettingsOpen && !activeRunningGame) {
+      if (gp && !isAddGameOpen && activeTab !== 'settings' && !activeRunningGame) {
         // L1 / LB (Button 4) and R1 / RB (Button 5) tab navigation
         const l1Pressed = gp.buttons[4]?.pressed;
         const r1Pressed = gp.buttons[5]?.pressed;
@@ -163,7 +164,7 @@ export const App: React.FC = () => {
         if (l1Pressed && !lastBumperState) {
           lastBumperState = true;
           setActiveTab((prev) => {
-            const idx = availableTabs.indexOf(prev);
+            const idx = availableTabs.indexOf(prev as any);
             const currentIdx = idx === -1 ? 0 : idx;
             const next = availableTabs[(currentIdx - 1 + availableTabs.length) % availableTabs.length];
             audioService.playNavTick();
@@ -172,7 +173,7 @@ export const App: React.FC = () => {
         } else if (r1Pressed && !lastBumperState) {
           lastBumperState = true;
           setActiveTab((prev) => {
-            const idx = availableTabs.indexOf(prev);
+            const idx = availableTabs.indexOf(prev as any);
             const currentIdx = idx === -1 ? 0 : idx;
             const next = availableTabs[(currentIdx + 1) % availableTabs.length];
             audioService.playNavTick();
@@ -225,7 +226,7 @@ export const App: React.FC = () => {
 
     animationFrameId = requestAnimationFrame(pollGamepads);
     return () => cancelAnimationFrame(animationFrameId);
-  }, [games, selectedGameIndex, activeTab, isAddGameOpen, isSettingsOpen, activeRunningGame, availableTabs]);
+  }, [games, selectedGameIndex, activeTab, isAddGameOpen, activeRunningGame, availableTabs]);
 
   const handleUpdateGameStatus = (gameId: string, status: 'ported', updatedGame?: GameItem) => {
     setGames((prev) => {
@@ -286,7 +287,7 @@ export const App: React.FC = () => {
           activeTab={activeTab}
           onTabChange={setActiveTab}
           onOpenAddGame={() => setIsAddGameOpen(true)}
-          onOpenSettings={() => setIsSettingsOpen(true)}
+          onOpenSettings={() => setActiveTab((prev) => (prev === 'settings' ? 'games' : 'settings'))}
           gamepadConnected={gamepadConnected}
           showAdvancedNav={showAdvancedNav}
         />
@@ -359,6 +360,14 @@ export const App: React.FC = () => {
         {activeTab === 'prx' && <PrxManager />}
 
         {activeTab === 'telemetry' && <TelemetryPanel />}
+
+        {activeTab === 'settings' && (
+          <SettingsPage
+            onNavigateBack={() => setActiveTab('games')}
+            showAdvancedNav={showAdvancedNav}
+            onToggleAdvancedNav={handleToggleAdvancedNav}
+          />
+        )}
       </main>
 
       {/* Game Running Modal */}
@@ -389,14 +398,6 @@ export const App: React.FC = () => {
         isOpen={isAddGameOpen}
         onClose={() => setIsAddGameOpen(false)}
         onAddGame={handleAddGame}
-      />
-
-      {/* Configuration / Settings Modal */}
-      <SettingsModal
-        isOpen={isSettingsOpen}
-        onClose={() => setIsSettingsOpen(false)}
-        showAdvancedNav={showAdvancedNav}
-        onToggleAdvancedNav={handleToggleAdvancedNav}
       />
 
       {/* PS5 Notification Toast: Update Ready */}
