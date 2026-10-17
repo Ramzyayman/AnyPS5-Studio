@@ -1,6 +1,20 @@
+if(BUILD_TESTING)
+    add_test_executable(guest_safe_error_tests ${LIBS_INCLUDE_DIR}/tests/GuestSafeErrors.cpp)
+    target_include_directories(guest_safe_error_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(guest_safe_error_tests PRIVATE libc)
+    configure_windows_unwind(guest_safe_error_tests)
+    add_test(NAME guest_safe_errors COMMAND guest_safe_error_tests)
+    set_tests_properties(guest_safe_errors PROPERTIES TIMEOUT 10)
+    if(WIN32)
+        set_tests_properties(guest_safe_errors PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
+    endif()
+endif()
+
 target_sources(libc PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/Export.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/General.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/AppArchive.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/CreationMask.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/FailureReport.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/specifics/gcc/StackGuard.cpp
@@ -57,6 +71,8 @@ target_include_directories(libc PRIVATE
         ${LIBS_INCLUDE_DIR}
 )
 
+target_link_libraries(libc PRIVATE zarchive)
+
 if(WIN32)
     target_link_libraries(libc PRIVATE advapi32 ws2_32 iphlpapi)
 endif()
@@ -71,6 +87,20 @@ if(BUILD_TESTING)
         set_tests_properties(guest_allocating_strings PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
     endif()
+
+    add_test_executable(guest_app_archive_tests ${LIBS_INCLUDE_DIR}/tests/GuestAppArchive.cpp)
+    target_include_directories(guest_app_archive_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(guest_app_archive_tests PRIVATE libc zarchive)
+    configure_windows_unwind(guest_app_archive_tests)
+    foreach(mode present absent damaged invalid)
+        add_test(NAME guest_app_archive_${mode} COMMAND guest_app_archive_tests ${mode})
+        set_tests_properties(guest_app_archive_${mode} PROPERTIES TIMEOUT 20)
+        if(WIN32)
+            set_tests_properties(guest_app_archive_${mode} PROPERTIES ENVIRONMENT_MODIFICATION
+                "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
+        endif()
+    endforeach()
+
     add_test_executable(guest_array_callbacks_tests ${LIBS_INCLUDE_DIR}/tests/GuestArrayCallbacks.cpp)
     target_include_directories(guest_array_callbacks_tests PRIVATE ${LIBS_INCLUDE_DIR})
     target_link_libraries(guest_array_callbacks_tests PRIVATE libc)
@@ -726,6 +756,7 @@ if(MINGW)
         target_link_libraries(guest_message_destructor_abi_tests PRIVATE libc)
         configure_windows_unwind(guest_message_destructor_abi_tests)
         foreach(mode IN ITEMS control decoy zero release regex-decoy regex-zero
+                runtime-decoy runtime-zero doraise-decoy doraise-zero
                 unshared-decoy unshared-zero regex-unshared-decoy regex-unshared-zero)
             add_test(NAME guest_message_destructor_${mode} COMMAND guest_message_destructor_abi_tests ${mode})
             set_tests_properties(guest_message_destructor_${mode} PROPERTIES TIMEOUT 10

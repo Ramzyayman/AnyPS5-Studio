@@ -9,6 +9,7 @@ import urllib.request
 import zipfile
 
 ROOT = Path(__file__).resolve().parent.parent
+MAX_EXPANDED_BYTES = 512 * 1024 * 1024
 
 
 def copy_sources(output):
@@ -70,10 +71,12 @@ def publish_libraries(output):
                     if name in names:
                         raise ValueError(f"Duplicate library archive path: {file.filename}")
                     names.add(name)
+                expanded = sum(file.file_size for file in files)
+                if expanded > MAX_EXPANDED_BYTES:
+                    raise ValueError("Release archive exceeds maximum expanded size")
                 corrupt = archive.testzip()
                 if corrupt:
                     raise ValueError(f"Corrupt release entry: {corrupt}")
-                expanded = sum(file.file_size for file in files)
             path = f"libraries/{platform}-{checksum}.zip"
             temporary.replace(output / path)
             manifest["platforms"][platform] = {"path": path, "size": size, "expandedBytes": expanded, "sha256": checksum}

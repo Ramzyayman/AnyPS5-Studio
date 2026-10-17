@@ -8,6 +8,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+from urllib.parse import unquote, urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import pr_overlap
@@ -238,7 +239,7 @@ class UnicodePathTests(unittest.TestCase):
                      "-c", "commit.gpgsign=false", *args], cwd=root,
                     capture_output=True, text=True, encoding="utf-8", check=True).stdout.strip()
 
-            filename = "core/libs/prx/libSceExample/caf\u00e9.cpp"
+            filename = "core/libs/prx/libSceExample/caf\u00e9 #1 (%20).cpp"
             source = root / filename
             source.parent.mkdir(parents=True)
             source.write_text("int value = 0;\n", encoding="utf-8")
@@ -261,6 +262,13 @@ class UnicodePathTests(unittest.TestCase):
                 self.assertEqual(left["files"], {filename})
                 self.assertEqual(right["files"], {filename})
                 self.assertEqual(pr_overlap.conflicts(left, right), {filename: [(1, 1)]})
+                blob = f"https://github.com/owner/project/blob/{base}"
+                message = pr_overlap.report({7: {"conflicts": pr_overlap.conflicts(left, right), "added": set()}}, blob)
+                link = message.split("[L1](", 1)[1].split(")", 1)[0]
+                parsed = urlsplit(link)
+                self.assertEqual(unquote(parsed.path), f"/owner/project/blob/{base}/{filename}")
+                self.assertEqual(parsed.fragment, "L1")
+                self.assertEqual(parsed.query, "")
             finally:
                 os.chdir(previous)
 
@@ -292,8 +300,8 @@ class CommentStateTests(unittest.TestCase):
         return pr_overlap.report(found, f"https://github.com/owner/project/blob/{commit}")
 
     def run_step(self, report, comment):
-        (self.root / "overlap" / "42.md").write_text(report, encoding="utf-8", newline="\n")
-        (self.root / "comment").write_text(json.dumps([5, comment]) + "\n" if comment else "", encoding="utf-8", newline="\n")
+        (self.root / "overlap" / "42.md").write_bytes(report.encode("utf-8"))
+        (self.root / "comment").write_bytes((json.dumps([5, comment]) + "\n" if comment else "").encode("utf-8"))
         calls = self.root / "calls"
         calls.write_text("", encoding="utf-8")
         script = "\n".join([
@@ -302,7 +310,7 @@ class CommentStateTests(unittest.TestCase):
             'gh() { printf \'%s\\n\' "$*" >> "$RUNNER_TEMP/calls"; case "$*" in "api repos/"*) cat "$RUNNER_TEMP/comment";; esac; }',
             self.step,
         ])
-        (self.root / "step.sh").write_text(script, encoding="utf-8", newline="\n")
+        (self.root / "step.sh").write_bytes(script.encode("utf-8"))
         environment = dict(os.environ, RUNNER_TEMP=str(self.root), GH_REPO="owner/project")
         result = subprocess.run(["bash", "step.sh"], cwd=self.root, env=environment, capture_output=True, text=True, timeout=20)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)

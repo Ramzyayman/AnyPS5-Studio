@@ -81,6 +81,7 @@ void CheckProfile() {
     invalid([](auto& value) { value.bda.bufferDeviceAddress = VK_FALSE; }, "bufferDeviceAddress");
     invalid([](auto& value) { value.device.pNext = nullptr; }, "bufferDeviceAddress");
     invalid([](auto& value) { value.core.shaderInt64 = VK_FALSE; }, "shaderInt64");
+    invalid([](auto& value) { value.capabilities.push_back(spv::CapabilityGeometry); }, "geometryShader");
     invalid([](auto& value) { value.bytes.storageBuffer8BitAccess = VK_FALSE; }, "storageBuffer8BitAccess");
     ProfileInput withoutNull;
     withoutNull.robustness.nullDescriptor = VK_FALSE;
@@ -126,6 +127,11 @@ void CheckProfile() {
     disabled.device.pNext = &disabledTerminate;
     disabled.extensions.push_back("SPV_KHR_terminate_invocation");
     Reject([&] { AgcDriver::ShaderDeviceProfile rejected(disabled.Target(), disabled.device, disabled.limits); }, "shaderTerminateInvocation");
+    ProfileInput geometryEnabled;
+    geometryEnabled.capabilities.push_back(spv::CapabilityGeometry);
+    geometryEnabled.core.geometryShader = VK_TRUE;
+    const AgcDriver::ShaderDeviceProfile geometryAccepted(geometryEnabled.Target(), geometryEnabled.device, geometryEnabled.limits);
+    Require(std::ranges::find(geometryAccepted.Target().supportedCapabilities, spv::CapabilityGeometry) != geometryAccepted.Target().supportedCapabilities.end(), "enabled geometry shaders were rejected");
 }
 
 void CheckAbi() {
@@ -162,6 +168,11 @@ void CheckHeaps() {
     const auto single = allocate(image, 1u);
     const auto sixteenSamplers = allocate(image, 1u, 16u);
     Require(BindingAllocator{}.FindBinding(sixteenSamplers.layout, DescriptorBindingKind::Samplers).resources.size() == 32u, "sixteen logical samplers must fit with both descriptor variants");
+    Require(BindingAllocator{}.FindBinding(allocate(image, 1u, 17u).layout, DescriptorBindingKind::Samplers).resources.size() == 34u, "seventeen logical samplers must fit with both descriptor variants");
+    const auto twentySamplers = allocate(image, 1u, 20u);
+    Require(BindingAllocator{}.FindBinding(twentySamplers.layout, DescriptorBindingKind::Samplers).resources.size() == 40u, "twenty logical samplers must fit with both descriptor variants");
+    const auto thirtyTwoSamplers = allocate(image, 1u, 32u);
+    Require(BindingAllocator{}.FindBinding(thirtyTwoSamplers.layout, DescriptorBindingKind::Samplers).resources.size() == 64u, "thirty-two logical samplers must fit with both descriptor variants");
     const auto full = allocate(image, RuntimeAbi::SampledHeapCapacity, RuntimeAbi::SamplerHeapCapacity / 2u);
     Require(single.layout.ShaderDataDwords() == full.layout.ShaderDataDwords() && single.layout.memoryOffsetDword == full.layout.memoryOffsetDword && !full.layout.UsesPushData(), "runtime layout depends on resource count");
     Require(full.layout.memoryOffsetDword == 0u && full.layout.DispatchThreadLimitDword() == 0u && full.layout.ShaderDataDwords() == 0u, "direct image resources allocated runtime metadata");

@@ -179,10 +179,10 @@ PadData BuildData(const PadInputState& state, std::uint64_t changeTime, std::uin
         }
         ++touchNum;
     }
-    if (touchNum == 0 && (state.touchLeft || state.touchRight)) {
+    if (touchNum == 0 && (state.touchLeft || state.touchRight || injected.touchLeft || injected.touchRight)) {
         data.buttons |= 0x100000;
         touchNum = 1;
-        data.touch_data_touch0_x = state.touchRight ? 1440 : 480;
+        data.touch_data_touch0_x = state.touchRight || injected.touchRight ? 1440 : 480;
         data.touch_data_touch0_y = 471;
         data.touch_data_touch0_id = 0;
     }
@@ -191,7 +191,14 @@ PadData BuildData(const PadInputState& state, std::uint64_t changeTime, std::uin
 }
 
 Pad::InputCommandFile::Input InjectedInput(std::uint64_t now) {
-    static Pad::InputCommandFile commands(std::getenv("APS5_PAD_INPUT_FILE"));
+    static Pad::InputCommandFile commands([] {
+#ifdef _WIN32
+        const auto* path = _wgetenv(L"APS5_PAD_INPUT_FILE");
+#else
+        const auto* path = std::getenv("APS5_PAD_INPUT_FILE");
+#endif
+        return path ? std::filesystem::path(path) : std::filesystem::path{};
+    }());
     static Pad::InputCommandFile::Input lastInjected;
     const auto injected = commands.Poll(now);
     if (injected != lastInjected) {

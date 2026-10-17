@@ -49,6 +49,8 @@ void* AllocateAligned(std::size_t size, std::size_t alignment) {
         } catch (const std::length_error&) {
             handler = g_newHandler.load();
             if (handler == nullptr) throw std::bad_alloc();
+        } catch (const std::invalid_argument&) {
+            throw std::bad_alloc();
         }
         handler();
     }
@@ -103,6 +105,10 @@ void* APS5_VABI _Znwm_nid_postfix(std::size_t size) {
 
 void* APS5_VABI _Znam_nid_postfix(std::size_t size) {
     return Allocate(size);
+}
+
+void* APS5_VABI _ZnwmSt11align_val_t_nid_postfix(std::size_t size, std::size_t alignment) {
+    return AllocateAligned(size, alignment);
 }
 
 void* APS5_VABI _ZnwmRKSt9nothrow_t_nid_postfix(std::size_t size, const void*) noexcept {

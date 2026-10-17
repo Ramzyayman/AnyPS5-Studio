@@ -165,6 +165,28 @@ long double AsinDenominator(long double t) {
     return 1.0L + t * (q[0] + t * (q[1] + t * (q[2] + t * (q[3] + t * q[4]))));
 }
 
+template<typename T>
+T GuestFmin(T x, T y) {
+    if (std::isnan(x))
+        return y;
+    if (std::isnan(y))
+        return x;
+    if (std::signbit(x) != std::signbit(y))
+        return std::signbit(x) ? x : y;
+    return x < y ? x : y;
+}
+
+template<typename T>
+T GuestFmax(T x, T y) {
+    if (std::isnan(x))
+        return y;
+    if (std::isnan(y))
+        return x;
+    if (std::signbit(x) != std::signbit(y))
+        return std::signbit(x) ? y : x;
+    return x < y ? y : x;
+}
+
 }
 
 extern "C" {
@@ -256,6 +278,12 @@ float APS5_VABI truncf_nid_postfix(float x) { return std::trunc(x); }
 float APS5_VABI ceilf_nid_postfix(float x) { return std::ceil(x); }
 float APS5_VABI floorf_nid_postfix(float x) { return std::floor(x); }
 double APS5_VABI fma_nid_postfix(double x, double y, double z) { return std::fma(x, y, z); }
+double APS5_VABI fmin_nid_postfix(double x, double y) { return GuestFmin(x, y); }
+float APS5_VABI fminf_nid_postfix(float x, float y) { return GuestFmin(x, y); }
+long double APS5_VABI fminl_nid_postfix(long double x, long double y) { return GuestFmin(x, y); }
+double APS5_VABI fmax_nid_postfix(double x, double y) { return GuestFmax(x, y); }
+float APS5_VABI fmaxf_nid_postfix(float x, float y) { return GuestFmax(x, y); }
+long double APS5_VABI fmaxl_nid_postfix(long double x, long double y) { return GuestFmax(x, y); }
 long double APS5_VABI acosl_nid_postfix(long double x) { return std::acos(x); }
 
 long double APS5_VABI asinl_nid_postfix(long double x) {
@@ -302,7 +330,12 @@ float APS5_VABI log1pf_nid_postfix(float x) { return std::log1p(x); }
 double APS5_VABI expm1_nid_postfix(double x) { return std::expm1(x); }
 float APS5_VABI expm1f_nid_postfix(float x) { return std::expm1(x); }
 float APS5_VABI erff_nid_postfix(float x) { return std::erf(x); }
+int signgam_nid_postfix = 0;
+
 double APS5_VABI lgamma_nid_postfix(double x) {
+    const double whole = std::floor(x);
+    if (x == 0) signgam_nid_postfix = std::signbit(x) ? -1 : 1;
+    else signgam_nid_postfix = x < 0 && whole != x && std::fmod(whole, 2.0) != 0 ? -1 : 1;
     const std::uint64_t magnitude = std::bit_cast<std::uint64_t>(x) & 0x7fffffffffffffffull;
     if (magnitude != 0 && magnitude < 0x3c70000000000000ull) return -std::log(std::fabs(x));
     return std::lgamma(x);

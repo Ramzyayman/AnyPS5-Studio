@@ -79,6 +79,35 @@ class OracleCacheTests(unittest.TestCase):
 
 
 class InputRowsTests(unittest.TestCase):
+    def test_successful_dispatch_without_output_cannot_reuse_previous_results(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runner = Path(directory) / "runner.py"
+            runner.write_text(
+                "import sys\nfrom pathlib import Path\n"
+                "output = Path(sys.argv[3])\n"
+                "marker = output.with_suffix('.seen')\n"
+                "if not marker.exists():\n"
+                "    output.write_bytes(bytes(int(sys.argv[1]) * 64))\n"
+                "    marker.touch()\n", encoding="utf-8")
+            for wave64 in (False, True):
+                with self.subTest(wave64=wave64), patch.object(hw_oracle, "assemble", return_value=runner), \
+                        patch.object(hw_oracle, "oracle", return_value=sys.executable):
+                    with self.assertRaises(FileNotFoundError):
+                        hw_oracle.run("s_nop 0", [(0, 0, 0, 0)] * 1025, wave64=wave64, **MODES)
+
+
+    def test_oracle_output_must_match_the_padded_dispatch_size(self):
+        for delta in (-1, 1, 64):
+            def dispatch(command, **kwargs):
+                Path(command[4]).write_bytes(bytes(int(command[2]) * 64 + delta))
+
+            with self.subTest(delta=delta), patch.object(hw_oracle, "assemble", return_value="kernel.co"), \
+                    patch.object(hw_oracle, "oracle", return_value="oracle"), \
+                    patch.object(hw_oracle.subprocess, "run", side_effect=dispatch):
+                with self.assertRaisesRegex(ValueError, "Oracle output size"):
+                    hw_oracle.run("s_nop 0", [(0, 0, 0, 0)], **MODES)
+
+
     def test_invalid_rows_fail_before_assembler_or_gpu_lookup(self):
         for row in ((1, 2, 3), (1, 2, 3, 4, 5), (-1, 0, 0, 0),
                     (0x100000000, 0, 0, 0), (1.5, 0, 0, 0), ("1", 0, 0, 0)):
@@ -86,6 +115,28 @@ class InputRowsTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "row 1"):
                     hw_oracle.run("s_nop 0", [row], **MODES)
                 assemble.assert_not_called()
+
+    def test_cli_rejects_empty_rows_before_running_tools(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            body, rows = Path(tmp) / "body.s", Path(tmp) / "rows.txt"
+            body.write_text("s_nop 0", encoding="utf-8")
+            argv = ["hw_oracle.py", str(body), str(rows), "--json"]
+            argv += [part for name, value in MODES.items()
+                     for part in ["--" + name.replace("_", "-"), str(value)]]
+            for contents in ("", "\n \t\n"):
+                with self.subTest(contents=contents):
+                    rows.write_text(contents, encoding="utf-8")
+                    with patch("sys.argv", argv), patch.object(hw_oracle, "run", return_value=[]) as run, \
+                            patch.object(hw_oracle, "target", return_value="gfx1030") as target, \
+                            contextlib.redirect_stdout(io.StringIO()) as output, \
+                            contextlib.redirect_stderr(io.StringIO()) as errors, \
+                            self.assertRaises(SystemExit) as exited:
+                        hw_oracle.main()
+                    self.assertEqual(exited.exception.code, 2)
+                    self.assertIn("at least one input row", errors.getvalue())
+                    self.assertEqual(output.getvalue(), "")
+                    run.assert_not_called()
+                    target.assert_not_called()
 
     def test_unsigned_bits_and_indexable_values_are_preserved(self):
         class Indexable:
@@ -278,6 +329,39 @@ class TargetOverrideTests(unittest.TestCase):
                 self.assertEqual(hw_oracle.target(), "gfx1030")
             with patch.dict(os.environ, {"HW_ORACLE_TARGET": "gfx1100"}):
                 self.assertEqual(hw_oracle.target(), "gfx1100")
+
+    def test_device_selection_uses_its_own_cached_target(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runner = root / "probe.py"
+            runner.write_text(
+                "import os\nfrom pathlib import Path\n"
+                "visible = os.environ.get('ROCR_VISIBLE_DEVICES', 'unset')\n"
+                "with Path(__file__).with_name('probes.txt').open('a', encoding='utf-8') as log:\n"
+                "    log.write(visible + '\\n')\n"
+                "print({'0': 'gfx1030', '1': 'gfx1100', 'unset': 'gfx900'}[visible])\n",
+                encoding="utf-8")
+            binary = root / ("oracle.cmd" if os.name == "nt" else "oracle")
+            if os.name == "nt":
+                binary.write_text(f'@"{sys.executable}" "{runner}" %*\n', encoding="utf-8")
+            else:
+                binary.write_text(f'#!/bin/sh\nexec {shlex.quote(sys.executable)} {shlex.quote(str(runner))} "$@"\n',
+                                  encoding="utf-8")
+                binary.chmod(0o755)
+            with patch.object(hw_oracle, "oracle", return_value=binary), \
+                    patch.dict(os.environ, {"HW_ORACLE_TARGET": ""}):
+                os.environ["ROCR_VISIBLE_DEVICES"] = "0"
+                self.assertEqual(hw_oracle.detected_target(binary, "1"), "gfx1100")
+                for visible, expected in (("0", "gfx1030"), ("0", "gfx1030"),
+                                          ("1", "gfx1100"), ("1", "gfx1100"),
+                                          ("0", "gfx1030"), (None, "gfx900"), (None, "gfx900")):
+                    if visible is None:
+                        os.environ.pop("ROCR_VISIBLE_DEVICES", None)
+                    else:
+                        os.environ["ROCR_VISIBLE_DEVICES"] = visible
+                    self.assertEqual(hw_oracle.target(), expected)
+            self.assertEqual((root / "probes.txt").read_text(encoding="utf-8").splitlines(),
+                             ["1", "0", "unset"])
 
     def test_removing_override_restores_cached_detection_for_that_binary(self):
         reply = subprocess.CompletedProcess([], 0, "gfx1030\n", "")

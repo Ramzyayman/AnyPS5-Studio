@@ -117,7 +117,9 @@ void SubmitRegistrationPreparation(std::function<void()> task, const PreparedSha
 void PrioritizeRegistrationPreparation(PreparedShaders& prepared);
 void AwaitRegistrationPreparation();
 void SubmitLibraryPrebuild(std::function<void()> task);
+void AwaitLibraryPrebuilds();
 void CloseRegistrationPreparation();
+unsigned RegistrationPreparationThreads();
 
 void ResolvePreparedGraphics(const ShaderSnapshot& front, const std::shared_ptr<const ShaderSnapshot>& fragment, std::uint32_t primitiveType, const ShaderRecompiler::SpirvTarget& target);
 

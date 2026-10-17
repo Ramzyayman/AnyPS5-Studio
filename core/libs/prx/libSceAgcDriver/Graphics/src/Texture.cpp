@@ -978,6 +978,10 @@ bool StorageFormatAvailable(const Context& context, std::uint32_t guestFormat) {
     }
 }
 
+VkFormat HostStorageFormat(const Context& context, VkFormat format) {
+    return StorageFormatOrUndefined(context, format);
+}
+
 bool IntegerFormat(VkFormat format) {
     switch (format) {
         case VK_FORMAT_R8_UINT: case VK_FORMAT_R8_SINT: case VK_FORMAT_R8G8_UINT: case VK_FORMAT_R8G8_SINT:

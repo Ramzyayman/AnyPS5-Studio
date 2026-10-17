@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <fstream>
 #include <sstream>
+#include <filesystem>
 #include <string>
 
 namespace Pad {
@@ -15,11 +16,13 @@ public:
         std::uint32_t buttons = 0;
         bool hasSticks = false;
         std::array<std::uint8_t, 4> sticks{};
+        bool touchLeft = false;
+        bool touchRight = false;
 
         bool operator==(const Input&) const = default;
     };
 
-    explicit InputCommandFile(const char* path) : path(path != nullptr ? path : "") {
+    explicit InputCommandFile(const std::filesystem::path& path) : path(path) {
         if (!this->path.empty()) lastSequence = read().sequence;
     }
 
@@ -64,10 +67,12 @@ private:
             const auto parsed = std::from_chars(first, last, values[i]);
             if (first == last || parsed.ec != std::errc{} || parsed.ptr != last) return {};
         }
-        if (values[0] == 0 || (values[1] & ~0x10fffeull) != 0 || values[2] == 0 || values[2] > 5000) return {};
+        if (values[0] == 0 || (values[1] & ~(0x10fffeull | TouchLeftBit | TouchRightBit)) != 0 || values[2] == 0 || values[2] > 5000) return {};
         Command command;
         command.sequence = values[0];
-        command.input.buttons = static_cast<std::uint32_t>(values[1]);
+        command.input.buttons = static_cast<std::uint32_t>(values[1] & 0x10fffeull);
+        command.input.touchLeft = (values[1] & TouchLeftBit) != 0;
+        command.input.touchRight = (values[1] & TouchRightBit) != 0;
         command.durationMs = static_cast<std::uint32_t>(values[2]);
         for (int i = 3; i < count; ++i) {
             if (values[i] > 255) return {};
@@ -77,7 +82,10 @@ private:
         return command;
     }
 
-    std::string path;
+    static constexpr std::uint64_t TouchLeftBit = 0x200000;
+    static constexpr std::uint64_t TouchRightBit = 0x400000;
+
+    std::filesystem::path path;
     std::uint64_t lastSequence = 0;
     std::uint64_t nextPoll = 0;
     std::uint64_t until = 0;

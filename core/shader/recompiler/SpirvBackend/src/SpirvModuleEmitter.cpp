@@ -51,7 +51,7 @@ std::uint32_t EmitBuiltinU32(SpirvEmitterState& state, StageInputKind kind, std:
     if (kind == StageInputKind::LayerExported) {
         return state.module.SpecializationConstant(TypeU32(state), PipelineSpecialization::LayerExported, 0u);
     }
-    if (state.laneCount == 2 && (kind == StageInputKind::LocalInvocationId || kind == StageInputKind::GlobalInvocationId)) {
+    if ((state.laneCount == 2 || state.spannedWave) && (kind == StageInputKind::LocalInvocationId || kind == StageInputKind::GlobalInvocationId)) {
         const auto* workgroup = ShaderWorkgroupInputFor(state);
         if (workgroup == nullptr) {
             throw std::runtime_error("workgroup input info is missing for a local/global invocation builtin");

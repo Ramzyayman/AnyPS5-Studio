@@ -130,16 +130,14 @@ int APS5_VABI scePthreadCondattrInit(PthreadCondattr* attr) {
 }
 
 int APS5_VABI scePthreadCondattrDestroy(PthreadCondattr* attr) {
-    if (!attr || !*attr)
-        throw std::invalid_argument("Condition attributes are not initialized");
+    if (!attr || !*attr) return SCE_KERNEL_ERROR_EINVAL;
     delete *attr;
     *attr = nullptr;
     return 0;
 }
 
 int APS5_VABI scePthreadCondattrSetclock(PthreadCondattr* attr, KernelClockid clockId) {
-    if (!attr || !*attr)
-        throw std::invalid_argument("Condition attributes are not initialized");
+    if (!attr || !*attr) return SCE_KERNEL_ERROR_EINVAL;
     (*attr)->_clockid = static_cast<int>(clockId);
     return 0;
 }

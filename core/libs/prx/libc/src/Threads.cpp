@@ -246,7 +246,8 @@ int APS5_VABI _Cnd_timedwait_nid_postfix(void** conditionHandle, void** mutexHan
     bool timeout = false;
     try {
         const auto deadlineTime = std::chrono::system_clock::time_point(
-            std::chrono::seconds(deadline.tv_sec) + std::chrono::nanoseconds(deadline.tv_nsec));
+            std::chrono::seconds(deadline.tv_sec) +
+            std::chrono::ceil<std::chrono::system_clock::duration>(std::chrono::nanoseconds(deadline.tv_nsec)));
         timeout = (condition->native.wait_until(lock, deadlineTime) == std::cv_status::timeout);
     } catch (const std::system_error&) {
         lock.release();

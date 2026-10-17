@@ -1,3 +1,4 @@
+#include <cstddef>
 #include <cstdint>
 #include <stdexcept>
 #include <string>
@@ -35,7 +36,12 @@ int APS5_VABI sceNpTrophy2UnregisterUnlockCallback() {
 }
 
 
-int APS5_VABI sceNpTrophy2GetRewardIcon(void) {
+int APS5_VABI sceNpTrophy2GetRewardIcon(int context, int handle, int reward_id, void* buffer, size_t* size) {
+    (void)context;
+    (void)handle;
+    (void)reward_id;
+    (void)buffer;
+    (void)size;
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }

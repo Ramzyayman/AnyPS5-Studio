@@ -107,6 +107,9 @@ int main() {
         free_nid_postfix(block);
     }
 
+#ifdef ANYPS5_ENABLE_ASAN
+    std::fputs("skipped: AddressSanitizer cannot map the shadow of a 300 GiB commit under a 128 MiB RLIMIT_DATA, so the failed commit and arena release checks did not run\n", stderr);
+#else
     if (GuestArena::GuestArenaAvailable_nid_postfix()) {
 #ifdef __linux__
         rlimit originalLimit{};
@@ -175,6 +178,7 @@ int main() {
         if (large == nullptr) report("malloc(1 MiB) after a failed huge malloc", "returned NULL");
         free_nid_postfix(large);
     }
+#endif
 
     void* untouched = &failures;
     *__error_nid_postfix() = 77;

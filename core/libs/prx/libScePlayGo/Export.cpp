@@ -2,6 +2,7 @@
 #include <cstddef>
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -86,11 +87,30 @@ static const ChunkTable& Chunks() {
     return chunks;
 }
 
+enum class UnlistedChunkAnswer { Stop, Installed, Absent };
+
+static UnlistedChunkAnswer UnlistedChunks() {
+    static const UnlistedChunkAnswer answer = [] {
+        const char* text = std::getenv("APS5_PLAYGO_UNLISTED_CHUNKS");
+        if (text == nullptr || text[0] == '\0') return UnlistedChunkAnswer::Stop;
+        const std::string value(text);
+        if (value == "installed") return UnlistedChunkAnswer::Installed;
+        if (value == "absent") return UnlistedChunkAnswer::Absent;
+        throw std::runtime_error("scePlayGo: APS5_PLAYGO_UNLISTED_CHUNKS must be installed or absent, not \"" + value + "\"");
+    }();
+    return answer;
+}
+
 static bool IsKnownChunk(uint16_t id) {
     const auto& chunks = Chunks();
     if (chunks.defined) return chunks.ids.contains(id);
     if (chunks.scenario || id == 0) return true;
-    throw std::runtime_error("scePlayGo: sce_sys/playgo-chunk.dat and sce_sys/playgo-scenario.json are missing, so chunk ID " + std::to_string(id) + " cannot be checked");
+    switch (UnlistedChunks()) {
+    case UnlistedChunkAnswer::Installed: return true;
+    case UnlistedChunkAnswer::Absent: return false;
+    case UnlistedChunkAnswer::Stop: break;
+    }
+    throw std::runtime_error("scePlayGo: sce_sys/playgo-chunk.dat and sce_sys/playgo-scenario.json are missing, so chunk ID " + std::to_string(id) + " cannot be checked; set APS5_PLAYGO_UNLISTED_CHUNKS=installed or =absent to answer for this dump");
 }
 
 static int ValidateChunks(const uint16_t* chunk_ids, uint32_t number_of_entries) {

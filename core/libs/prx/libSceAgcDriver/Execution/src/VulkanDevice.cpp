@@ -9,6 +9,7 @@
 #include "prx/libSceAgcDriver/Graphics/include/PipelineJournal.hpp"
 #include "prx/libSceAgcDriver/Execution/include/VulkanDevice.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Driver.hpp"
+#include "prx/libSceAgcDriver/Execution/include/Driver/Shaders/ShaderRegistry.hpp"
 #include "prx/libSceAgcDriver/Execution/include/PerformanceTimer.hpp"
 #include "prx/libSceAgcDriver/Execution/include/BdaFeatures.hpp"
 #include "prx/libSceAgcDriver/Execution/include/DeviceFault.hpp"
@@ -292,6 +293,7 @@ struct VulkanDevice::State {
     bool shaderTerminateInvocation = false;
     bool geometryShader = false;
     bool sampleRateShading = false;
+    bool storageImageMultisample = false;
     bool shaderClipDistance = false;
     bool shaderCullDistance = false;
     bool shaderClock = false;
@@ -353,6 +355,8 @@ struct VulkanDevice::State {
     bool computeWave32 = false;
     bool meshWave32 = false;
     std::uint32_t maxComputeSubgroupSize = 0;
+    bool computeFullSubgroups = false;
+    bool spannedWaves = false;
     // Indirect draw features enabled (see Graphics::Context).
     bool drawIndirectFirstInstance = false;
     bool multiDrawIndirect = false;
@@ -821,6 +825,7 @@ ComputePipelineReplayResult VulkanDevice::ReplayComputePipeline(const ComputePip
         VkPhysicalDeviceSubgroupSizeControlPropertiesEXT subgroup{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_PROPERTIES_EXT};
         VkPhysicalDeviceProperties2 properties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, &subgroup};
         state->InstanceFunction<PFN_vkGetPhysicalDeviceProperties2>("vkGetPhysicalDeviceProperties2")(state->physical, &properties);
+        require(capture.stageFlags == 0 || state->computeFullSubgroups, "captured full compute subgroups are unsupported");
         require(state->computeWave32 && capture.requiredSubgroupSize >= subgroup.minSubgroupSize && capture.requiredSubgroupSize <= subgroup.maxSubgroupSize && (subgroup.requiredSubgroupSizeStages & VK_SHADER_STAGE_COMPUTE_BIT) != 0, "captured required subgroup size is unsupported");
     }
     const auto target = Target();
@@ -1299,7 +1304,7 @@ VulkanDevice::VulkanDevice(const PresentationWindow* window, bool compileOnly) :
         state->InstanceFunction<PFN_vkGetPhysicalDeviceProperties2>("vkGetPhysicalDeviceProperties2")(selected, &properties);
         if (locations.sampleLocationSubPixelBits >= 4 && locations.sampleLocationCoordinateRange[0] <= 0.0f && locations.sampleLocationCoordinateRange[1] >= 15.0f / 16.0f) {
             const auto multisampleProperties = state->InstanceFunction<PFN_vkGetPhysicalDeviceMultisamplePropertiesEXT>("vkGetPhysicalDeviceMultisamplePropertiesEXT");
-            for (const auto samples : {VK_SAMPLE_COUNT_2_BIT, VK_SAMPLE_COUNT_4_BIT, VK_SAMPLE_COUNT_8_BIT}) {
+            for (const auto samples : {VK_SAMPLE_COUNT_1_BIT, VK_SAMPLE_COUNT_2_BIT, VK_SAMPLE_COUNT_4_BIT, VK_SAMPLE_COUNT_8_BIT}) {
                 if ((locations.sampleLocationSampleCounts & samples) == 0) continue;
                 VkMultisamplePropertiesEXT multisample{VK_STRUCTURE_TYPE_MULTISAMPLE_PROPERTIES_EXT};
                 multisampleProperties(selected, samples, &multisample);
@@ -1459,29 +1464,37 @@ VulkanDevice::VulkanDevice(const PresentationWindow* window, bool compileOnly) :
     queueInfo.queueFamilyIndex = family;
     queueInfo.queueCount = 1;
     queueInfo.pQueuePriorities = &priority;
-#ifdef _WIN32
     const float priorities[2]{1.0f, 1.0f};
     bool settleQueue = false;
     std::uint32_t settleFamily = family;
-    std::uint32_t families = 0;
-    auto getFamilies = state->InstanceFunction<PFN_vkGetPhysicalDeviceQueueFamilyProperties>("vkGetPhysicalDeviceQueueFamilyProperties");
-    getFamilies(selected, &families, nullptr);
-    std::vector<VkQueueFamilyProperties> queues(families);
-    getFamilies(selected, &families, queues.data());
-    if (family < families && queues[family].queueCount >= 2) {
-        queueInfo.queueCount = 2;
-        queueInfo.pQueuePriorities = priorities;
-        settleQueue = true;
-    } else {
-        const auto copies = [&](std::uint32_t index) { return index != family && queues[index].queueCount != 0 && (queues[index].queueFlags & (VK_QUEUE_TRANSFER_BIT | VK_QUEUE_COMPUTE_BIT | VK_QUEUE_GRAPHICS_BIT)) != 0; };
-        for (std::uint32_t i = 0; i < families && !settleQueue; ++i) {
-            if (copies(i) && (queues[i].queueFlags & (VK_QUEUE_COMPUTE_BIT | VK_QUEUE_GRAPHICS_BIT)) == 0) settleFamily = i, settleQueue = true;
-        }
-        for (std::uint32_t i = 0; i < families && !settleQueue; ++i) {
-            if (copies(i)) settleFamily = i, settleQueue = true;
+    std::uint32_t settleIndex = 0;
+    std::vector<VkQueueFamilyProperties> queues;
+#ifdef _WIN32
+    const bool settles = true;
+#else
+    const bool settles = state->dmaBufImport;
+#endif
+    if (settles) {
+        std::uint32_t families = 0;
+        auto getFamilies = state->InstanceFunction<PFN_vkGetPhysicalDeviceQueueFamilyProperties>("vkGetPhysicalDeviceQueueFamilyProperties");
+        getFamilies(selected, &families, nullptr);
+        queues.resize(families);
+        getFamilies(selected, &families, queues.data());
+        if (family < families && queues[family].queueCount >= 2) {
+            queueInfo.queueCount = 2;
+            queueInfo.pQueuePriorities = priorities;
+            settleQueue = true;
+            settleIndex = 1;
+        } else {
+            const auto copies = [&](std::uint32_t index) { return index != family && queues[index].queueCount != 0 && (queues[index].queueFlags & (VK_QUEUE_TRANSFER_BIT | VK_QUEUE_COMPUTE_BIT | VK_QUEUE_GRAPHICS_BIT)) != 0; };
+            for (std::uint32_t i = 0; i < families && !settleQueue; ++i) {
+                if (copies(i) && (queues[i].queueFlags & (VK_QUEUE_COMPUTE_BIT | VK_QUEUE_GRAPHICS_BIT)) == 0) settleFamily = i, settleQueue = true;
+            }
+            for (std::uint32_t i = 0; i < families && !settleQueue; ++i) {
+                if (copies(i)) settleFamily = i, settleQueue = true;
+            }
         }
     }
-#endif
     VkDeviceCreateInfo deviceInfo{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
     deviceInfo.queueCreateInfoCount = 1;
     deviceInfo.pQueueCreateInfos = &queueInfo;
@@ -1515,7 +1528,7 @@ VulkanDevice::VulkanDevice(const PresentationWindow* window, bool compileOnly) :
     // Guest shaders routinely read past descriptor ranges; robust access turns that into zeros
     // instead of a GPU fault that loses the device.
     enabled.robustBufferAccess = available.robustBufferAccess;
-    VkDeviceQueueCreateInfo queueInfos[2]{queueInfo, {VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO}};
+    VkDeviceQueueCreateInfo queueInfos[3]{queueInfo, {VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO}, {VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO}};
     if (available.sparseBinding && state->dmaBufImport) {
         std::uint32_t families = 0;
         auto getFamilies = state->InstanceFunction<PFN_vkGetPhysicalDeviceQueueFamilyProperties>("vkGetPhysicalDeviceQueueFamilyProperties");
@@ -1543,19 +1556,22 @@ VulkanDevice::VulkanDevice(const PresentationWindow* window, bool compileOnly) :
         enabled.sparseBinding = state->sparseBinding ? VK_TRUE : VK_FALSE;
     }
     deviceInfo.pQueueCreateInfos = queueInfos;
-#ifdef _WIN32
     if (settleQueue && settleFamily != family) {
-        if (deviceInfo.queueCreateInfoCount == 1) {
-            queueInfos[1] = {VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO};
-            queueInfos[1].queueFamilyIndex = settleFamily;
-            queueInfos[1].queueCount = 1;
-            queueInfos[1].pQueuePriorities = &priority;
-            deviceInfo.queueCreateInfoCount = 2;
+        if (deviceInfo.queueCreateInfoCount == 2 && queueInfos[1].queueFamilyIndex == settleFamily) {
+            settleQueue = queues[settleFamily].queueCount >= 2;
+            if (settleQueue) {
+                queueInfos[1].queueCount = 2;
+                queueInfos[1].pQueuePriorities = priorities;
+                settleIndex = 1;
+            }
         } else {
-            settleQueue = false;
+            auto& settleInfo = queueInfos[deviceInfo.queueCreateInfoCount++];
+            settleInfo = {VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO};
+            settleInfo.queueFamilyIndex = settleFamily;
+            settleInfo.queueCount = 1;
+            settleInfo.pQueuePriorities = &priority;
         }
     }
-#endif
     // Indirect draw records with a non-zero first instance, and several records per call.
     enabled.drawIndirectFirstInstance = available.drawIndirectFirstInstance;
     enabled.multiDrawIndirect = available.multiDrawIndirect;
@@ -1574,6 +1590,7 @@ VulkanDevice::VulkanDevice(const PresentationWindow* window, bool compileOnly) :
     state->occlusionQueryPrecise = enabled.occlusionQueryPrecise == VK_TRUE;
     // Recompiled storage-image access declares no format (the guest descriptor decides it).
     enabled.shaderStorageImageMultisample = available.shaderStorageImageMultisample;
+    state->storageImageMultisample = enabled.shaderStorageImageMultisample == VK_TRUE;
     if (enabled.shaderStorageImageMultisample) state->capabilities.push_back(spv::CapabilityStorageImageMultisample);
     state->capabilities.push_back(spv::CapabilityImageMSArray);
     enabled.shaderStorageImageWriteWithoutFormat = available.shaderStorageImageWriteWithoutFormat;
@@ -1747,16 +1764,22 @@ VulkanDevice::VulkanDevice(const PresentationWindow* window, bool compileOnly) :
         state->meshWave32 = state->meshShader && subgroupSizeFeatures.subgroupSizeControl == VK_TRUE && subgroupSize.minSubgroupSize <= 32u && subgroupSize.maxSubgroupSize >= 32u &&
             (subgroupSize.requiredSubgroupSizeStages & VK_SHADER_STAGE_MESH_BIT_EXT) != 0;
         state->maxComputeSubgroupSize = subgroupSize.maxSubgroupSize;
+        state->computeFullSubgroups = state->computeWave32 && subgroupSizeFeatures.computeFullSubgroups == VK_TRUE;
     }
     if (state->computeWave32 || state->meshWave32) {
         subgroupSizeFeatures = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_FEATURES_EXT};
         subgroupSizeFeatures.subgroupSizeControl = VK_TRUE;
+        subgroupSizeFeatures.computeFullSubgroups = state->computeFullSubgroups ? VK_TRUE : VK_FALSE;
         deviceExtensions.push_back(VK_EXT_SUBGROUP_SIZE_CONTROL_EXTENSION_NAME);
         deviceInfo.enabledExtensionCount = static_cast<std::uint32_t>(deviceExtensions.size());
         deviceInfo.ppEnabledExtensionNames = deviceExtensions.data();
         subgroupSizeFeatures.pNext = byteFeatures.pNext;
         byteFeatures.pNext = &subgroupSizeFeatures;
         APS5_LOG_OUT("Wave32 programs run on subgroups of %u: compute %d, mesh %d", 32u, state->computeWave32, state->meshWave32);
+    }
+    if (std::getenv("APS5_SPANNED_WAVE") != nullptr) {
+        state->spannedWaves = state->computeFullSubgroups;
+        APS5_LOG_OUT("APS5_SPANNED_WAVE: single-wave wave64 compute spans two full 32-lane subgroups: %d", state->spannedWaves);
     }
     timelineFeatures = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES_KHR};
     timelineFeatures.timelineSemaphore = VK_TRUE;
@@ -1845,12 +1868,10 @@ VulkanDevice::VulkanDevice(const PresentationWindow* window, bool compileOnly) :
     }
     state->DeviceFunction<PFN_vkGetDeviceQueue>("vkGetDeviceQueue")(state->device, family, 0, &state->queue);
     state->queueFamily = family;
-#ifdef _WIN32
     if (settleQueue) {
         state->settleFamily = settleFamily;
-        state->DeviceFunction<PFN_vkGetDeviceQueue>("vkGetDeviceQueue")(state->device, settleFamily, settleFamily == family ? 1 : 0, &state->settleQueue);
+        state->DeviceFunction<PFN_vkGetDeviceQueue>("vkGetDeviceQueue")(state->device, settleFamily, settleIndex, &state->settleQueue);
     }
-#endif
     if (state->sparseFamily != VK_QUEUE_FAMILY_IGNORED) state->DeviceFunction<PFN_vkGetDeviceQueue>("vkGetDeviceQueue")(state->device, state->sparseFamily, 0, &state->sparseQueue);
     if (checkpoints) state->checkpointMarker = state->DeviceFunction<PFN_vkCmdSetCheckpointNV>("vkCmdSetCheckpointNV");
     if (deviceFault || checkpoints) {
@@ -1988,6 +2009,16 @@ std::uint32_t VulkanDevice::computeSubgroupSize(const ShaderRecompiler::Recompil
     return state->computeWave32 && (shader.hostSubgroupSize == 32u || shader.hostSubgroupSize > state->maxComputeSubgroupSize) ? std::min(shader.hostSubgroupSize, state->maxComputeSubgroupSize) : 0u;
 }
 
+VkPipelineShaderStageCreateFlags VulkanDevice::computeStageFlags(const ShaderRecompiler::RecompileResult& shader) const {
+    if (!shader.fullSubgroups) return 0;
+    require(state->computeFullSubgroups && computeSubgroupSize(shader) == 32u, "a spanned wave64 program needs full 32-lane compute subgroups");
+    return VK_PIPELINE_SHADER_STAGE_CREATE_REQUIRE_FULL_SUBGROUPS_BIT;
+}
+
+bool VulkanDevice::ComputeFullSubgroups() const {
+    return state->computeFullSubgroups;
+}
+
 void VulkanDevice::WaitForPipelineJournalReplay() {
     startJournalReplay();
     if (state->journalReplay != nullptr) state->journalReplay->Wait();
@@ -2027,6 +2058,7 @@ void VulkanDevice::PrepareForReplacement() {
         state->journalReplay->Wait();
         state->journalReplay.reset();
     }
+    DriverDetail::AwaitLibraryPrebuilds();
     Graphics::FlushCachedTextures(state->device);
     Graphics::PublishAllShadows(state->context, Graphics::PublishReason::Teardown);
     WaitIdle();
@@ -3456,6 +3488,7 @@ ShaderRecompiler::SpirvTarget VulkanDevice::buildTarget() const {
     target.narrowSubgroupClock = state->narrowSubgroupClock;
     target.float64DenormPreserve = state->float64DenormPreserve;
     target.float16DenormPreserve = state->float16DenormPreserve;
+    target.spannedWaves = state->spannedWaves;
     target.fixedPushSlots = state->graphicsPipelineLibrary;
     target.registrationModules = state->graphicsPipelineLibrary;
     target.srgbDecodeFormats = state->srgbDecodeFormats;
@@ -3580,6 +3613,7 @@ Graphics::Context VulkanDevice::buildContext() const {
     context.samplerTableCapacity = SamplerTableCapacity(context);
     context.geometryShader = state->geometryShader;
     context.sampleRateShading = state->sampleRateShading;
+    context.storageImageMultisample = state->storageImageMultisample;
     context.shaderClipDistance = state->shaderClipDistance;
     context.shaderCullDistance = state->shaderCullDistance;
     context.shaderTerminateInvocation = state->shaderTerminateInvocation;
@@ -4538,6 +4572,7 @@ std::shared_ptr<ComputePipelineObjects> VulkanDevice::createComputePipeline(cons
     const VkPipelineCreateFlags pipelineFlags = computePipelineFlags();
     const Graphics::PipelineSpecialization specialization(shader);
     const auto subgroupSize = computeSubgroupSize(shader);
+    const auto stageFlags = computeStageFlags(shader);
     if (const char* directory = std::getenv("APS5_DUMP_COMPUTE_PIPELINES"); directory != nullptr && *directory != '\0' && CaptureComputePipeline(shader.spirv.size())) {
         ComputePipelineCapture capture;
         capture.spirv = shader.spirv.Copy();
@@ -4553,6 +4588,7 @@ std::shared_ptr<ComputePipelineObjects> VulkanDevice::createComputePipeline(cons
         if (pushStages != 0) capture.pushConstants.push_back(push);
         for (const auto& value : shader.specialization) capture.specialization.push_back({value.id, value.value});
         capture.requiredSubgroupSize = subgroupSize;
+        capture.stageFlags = stageFlags;
         capture.flags = pipelineFlags;
         capture.deviceName = state->properties.deviceName;
         capture.vendorId = state->properties.vendorID;
@@ -4564,7 +4600,7 @@ std::shared_ptr<ComputePipelineObjects> VulkanDevice::createComputePipeline(cons
         std::fprintf(stderr, "[compute-capture] %s\n", path.string().c_str());
     }
     if (profile && shader.spirv.size() > 100000) std::fprintf(stderr, "[dispatch] creating a pipeline for %zu SPIR-V words (program 0x%llx)\n", shader.spirv.size(), static_cast<unsigned long long>(programAddress));
-    CreateComputePipeline(state->device, state->DeviceFunction<PFN_vkCreateComputePipelines>("vkCreateComputePipelines"), context.pipelineCache, objects->module, objects->layout, pipelineFlags, 0, specialization.Info(), subgroupSize, &objects->pipeline, context.pipelineCacheSynchronization);
+    CreateComputePipeline(state->device, state->DeviceFunction<PFN_vkCreateComputePipelines>("vkCreateComputePipelines"), context.pipelineCache, objects->module, objects->layout, pipelineFlags, stageFlags, specialization.Info(), subgroupSize, &objects->pipeline, context.pipelineCacheSynchronization);
     objects->destroyModule(objects->device, objects->module, nullptr);
     objects->module = VK_NULL_HANDLE;
     computePipelinesCreated.fetch_add(1, std::memory_order_relaxed);

@@ -379,6 +379,9 @@ if(BUILD_TESTING)
         ${CMAKE_CURRENT_SOURCE_DIR}/elfpatcher/include
         ${CMAKE_CURRENT_SOURCE_DIR}/io/include
     )
+    if(APPLE AND (CMAKE_OSX_ARCHITECTURES STREQUAL "x86_64" OR (NOT CMAKE_OSX_ARCHITECTURES AND CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")))
+        target_link_options(amd64_only_converter_tests PRIVATE "LINKER:-pagezero_size,0x10000")
+    endif()
     add_test(NAME amd64_only_converter COMMAND amd64_only_converter_tests)
     add_test_executable(call_site_resolver_tests
         ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/CallSiteResolverTests.cpp
@@ -427,6 +430,8 @@ if(BUILD_TESTING)
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_optional_plt.py $<TARGET_FILE:relinker>)
         add_test(NAME empty_tls COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_empty_tls.py $<TARGET_FILE:relinker>)
+        add_test(NAME windows_tls_protected_entries COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_windows_tls_protected_entries.py $<TARGET_FILE:relinker>)
         set(tlsCoverageGroups metadata padding register_loads displacement_bounds alu_execution register_address_loads moved_branch rejected)
         foreach(register IN ITEMS 0 1 2 3 5 6 7 8 9 10 11 12 13 14 15)
             list(APPEND tlsCoverageGroups displacement_r${register})
@@ -528,6 +533,12 @@ if(BUILD_TESTING)
         add_test(NAME guest_export_lookup COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_guest_export_lookup.py $<TARGET_FILE:relinker>)
         set_tests_properties(guest_export_lookup PROPERTIES TIMEOUT 30)
+        add_test(NAME guest_module_fini COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_guest_module_fini.py
+            $<TARGET_FILE:relinker> $<TARGET_FILE:guest_module_args_host>)
+        add_asan_test_options(guest_module_args verify_asan_link_order=0)
+        add_asan_test_options(guest_deferred_dependencies verify_asan_link_order=0)
+        add_asan_test_options(guest_module_fini verify_asan_link_order=0)
         add_test(NAME guest_needed_nested_modules COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_guest_needed_nested_modules.py $<TARGET_FILE:relinker>)
         set(windows_stdio_host_arguments)
@@ -728,4 +739,10 @@ if(BUILD_TESTING)
         )
         add_test(NAME reloc_table_bounds COMMAND reloc_table_bounds_tests $<TARGET_FILE:relinker>)
     endif()
+endif()
+
+if(BUILD_TESTING AND Python3_Interpreter_FOUND)
+    add_test(NAME macos_guest_weak_imports COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_macos_guest_weak_imports.py $<TARGET_FILE:relinker>)
+    set_property(TEST macos_guest_weak_imports APPEND PROPERTY LABELS relinker)
 endif()

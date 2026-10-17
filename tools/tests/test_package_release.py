@@ -2,6 +2,7 @@ import os
 import json
 import ctypes
 import stat
+import subprocess
 import sys
 import tarfile
 import tempfile
@@ -232,6 +233,33 @@ class ReleasePackageTests(unittest.TestCase):
         finally:
             destination.chmod(stat.S_IREAD | stat.S_IWRITE)
 
+    @unittest.skipUnless(os.name == "nt", "Windows directory junction replacement semantics")
+    def test_dangling_directory_junction_preserves_all_existing_assets(self):
+        names = ["prx-linux-v1.zip", "prx-linux-v1.tar.gz", "relinker-v1"]
+        for index, blocked in enumerate(names):
+            with self.subTest(blocked=blocked):
+                output = self.output / str(index)
+                output.mkdir(parents=True)
+                previous = {name: b"old " + name.encode() for name in names if name != blocked}
+                previous["unrelated.txt"] = b"unrelated"
+                for name, content in previous.items():
+                    (output / name).write_bytes(content)
+                target = self.root / f"target-{index}"
+                target.mkdir()
+                destination = output / blocked
+                subprocess.run(["cmd", "/c", "mklink", "/J", str(destination), str(target)],
+                               check=True, capture_output=True)
+                self.addCleanup(destination.rmdir)
+                target.rmdir()
+                self.assertFalse(destination.exists())
+                self.assertTrue(destination.lstat().st_file_attributes & stat.FILE_ATTRIBUTE_DIRECTORY)
+                with self.assertRaises((OSError, RuntimeError)) as error:
+                    package_release.package("linux", self.build, output, "v1")
+                self.assertEqual({path.name: path.read_bytes() for path in output.iterdir() if path != destination}, previous)
+                self.assertTrue(destination.lstat().st_file_attributes & stat.FILE_ATTRIBUTE_DIRECTORY)
+                self.assertFalse(target.exists())
+                self.assertIn("not a file", str(error.exception))
+
     def file_link(self, link, target):
         try:
             link.symlink_to(target)
@@ -384,6 +412,31 @@ class ReleaseAssetsTests(unittest.TestCase):
 
 
 class ReleaseNotesTests(unittest.TestCase):
+    def test_aliased_paths_preserve_input_and_existing_outputs(self):
+        for pair in ((0, 1), (0, 2), (1, 2)):
+            for alias in ("same", "symlink", "hardlink"):
+                with self.subTest(pair=pair, alias=alias), tempfile.TemporaryDirectory() as directory:
+                    paths = [Path(directory) / name for name in ("notes.json", "body.md", "full.md")]
+                    paths[0].write_text(json.dumps({"body": "release notes"}), encoding="utf-8")
+                    paths[1].write_bytes(b"previous body")
+                    paths[2].write_bytes(b"previous full")
+                    first, second = pair
+                    paths[second].unlink()
+                    if alias == "same":
+                        paths[second] = paths[first]
+                    elif alias == "symlink":
+                        try:
+                            paths[second].symlink_to(paths[first])
+                        except OSError as error:
+                            self.skipTest(str(error))
+                    else:
+                        os.link(paths[first], paths[second])
+                    previous = [path.read_bytes() for path in paths]
+                    with self.assertRaisesRegex(ValueError, "distinct files"):
+                        prepare_release_notes.prepare_notes(*paths)
+                    self.assertEqual([path.read_bytes() for path in paths], previous)
+
+
     def test_short_notes_are_unchanged_including_unicode_at_limit(self):
         for notes in ("", "## What's Changed\n* Fix\n", "я" * 125000):
             self.assertEqual(prepare_release_notes.release_body(notes), notes)

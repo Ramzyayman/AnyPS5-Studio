@@ -47,6 +47,7 @@ ShaderDeviceProfile::ShaderDeviceProfile(const ShaderRecompiler::SpirvTarget& ta
         Require(!hasCapability(capability) || enabled, std::string("shader device profile advertises a disabled feature: ") + name);
     };
     checkFeature(spv::CapabilityFloat64, core.shaderFloat64 == VK_TRUE, "shaderFloat64");
+    checkFeature(spv::CapabilityGeometry, core.geometryShader == VK_TRUE, "geometryShader");
     checkFeature(spv::CapabilityTessellation, core.tessellationShader == VK_TRUE, "tessellationShader");
     checkFeature(spv::CapabilityImageGatherExtended, core.shaderImageGatherExtended == VK_TRUE, "shaderImageGatherExtended");
     checkFeature(spv::CapabilityClipDistance, core.shaderClipDistance == VK_TRUE, "shaderClipDistance");

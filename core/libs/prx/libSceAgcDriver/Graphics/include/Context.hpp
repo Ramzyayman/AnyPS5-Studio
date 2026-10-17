@@ -212,6 +212,7 @@ struct Context {
     std::uint32_t samplerTableCapacity = 0;
     bool geometryShader = false;
     bool sampleRateShading = false;
+    bool storageImageMultisample = false;
     bool shaderClipDistance = false;
     bool shaderCullDistance = false;
     bool nullDescriptors = false;

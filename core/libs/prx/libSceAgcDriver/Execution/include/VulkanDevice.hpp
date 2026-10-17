@@ -58,6 +58,7 @@ public:
     const std::uint32_t* WorkGroupCountLimit() const;
     std::uint32_t VendorId() const;
     ShaderRecompiler::SpirvTarget ComputeTarget(std::uint32_t waveSize) const;
+    bool ComputeFullSubgroups() const;
     // Distinguishes this device from every earlier one in the process (a memo keyed by the device
     // cannot rely on the pointer, which a replacement may reuse).
     std::uint64_t Serial() const { return serial; }
@@ -329,6 +330,7 @@ private:
     Graphics::Context graphicsContext() const;
     VkPipelineCreateFlags computePipelineFlags() const;
     std::uint32_t computeSubgroupSize(const ShaderRecompiler::RecompileResult& shader) const;
+    VkPipelineShaderStageCreateFlags computeStageFlags(const ShaderRecompiler::RecompileResult& shader) const;
     std::shared_ptr<ComputePipelineObjects> createComputePipeline(const Graphics::Context& context, const ShaderRecompiler::RecompileResult& shader, VkDescriptorSetLayout setLayout, std::span<const std::uint32_t> layoutKey, VkShaderStageFlags pushStages, std::uint64_t programAddress);
     ShaderRecompiler::SpirvTarget buildTarget() const;
     Graphics::Context buildContext() const;

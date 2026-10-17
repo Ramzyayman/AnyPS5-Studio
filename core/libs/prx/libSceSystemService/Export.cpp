@@ -1,9 +1,11 @@
 #include <cerrno>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
+#include <ctime>
 #include <charconv>
 #include <filesystem>
 #include <stdexcept>
@@ -38,6 +40,34 @@ int ConsoleLanguage() {
             ", not \"" + std::string(text) + "\"");
     }
     return language;
+}
+
+struct ConsoleTimeZone {
+    int minutes;
+    bool summer;
+};
+
+ConsoleTimeZone HostTimeZone() {
+    const std::time_t now = std::time(nullptr);
+    std::tm local{};
+#if defined(_WIN32)
+    const bool converted = localtime_s(&local, &now) == 0;
+#else
+    const bool converted = localtime_r(&now, &local) != nullptr;
+#endif
+    if (!converted) throw std::runtime_error("sceSystemServiceParamGetInt: the host local time is unavailable");
+    const std::chrono::sys_days date = std::chrono::year{local.tm_year + 1900} / std::chrono::month{static_cast<unsigned>(local.tm_mon + 1)} / std::chrono::day{static_cast<unsigned>(local.tm_mday)};
+    const auto localSeconds = date.time_since_epoch() + std::chrono::hours{local.tm_hour} + std::chrono::minutes{local.tm_min} + std::chrono::seconds{local.tm_sec};
+    const auto offset = std::chrono::duration_cast<std::chrono::minutes>(localSeconds - std::chrono::seconds{now});
+    const bool summer = local.tm_isdst > 0;
+#if defined(_WIN32)
+    long daylightBias = 0;
+    _get_dstbias(&daylightBias);
+    const int summerMinutes = summer ? static_cast<int>(-daylightBias / 60) : 0;
+#else
+    const int summerMinutes = summer ? 60 : 0;
+#endif
+    return {static_cast<int>(offset.count()) - summerMinutes, summer};
 }
 
 constexpr char MainExecutable[] = "/app0/eboot.bin";
@@ -183,6 +213,9 @@ void StartHostExecutable(HostLaunch& launch) {
     std::vector<char*> argv;
     for (auto& argument : launch.arguments) argv.push_back(argument.data());
     argv.push_back(nullptr);
+    if (const int host = HostStandardError_nid_no_patch(); host >= 0 && ::dup2(host, 2) != 2) {
+        throw std::runtime_error("sceSystemServiceLoadExec: cannot give the host standard error back to descriptor 2: " + std::string(std::strerror(errno)));
+    }
     ::execv(launch.executable.c_str(), argv.data());
     throw std::runtime_error("sceSystemServiceLoadExec: execv failed: " + std::string(std::strerror(errno)));
 }
@@ -267,8 +300,8 @@ int APS5_VABI sceSystemServiceParamGetInt(int paramId, int* value) {
   case SYSTEM_SERVICE_PARAM_ID_400: *value = ConsoleLanguage(); break;
   case SYSTEM_SERVICE_PARAM_ID_DATE_FORMAT: *value = SYSTEM_SERVICE_PARAM_DATE_FORMAT_DDMMYYYY; break;
   case SYSTEM_SERVICE_PARAM_ID_TIME_FORMAT: *value = SYSTEM_SERVICE_PARAM_TIME_FORMAT_24HOUR; break;
-  case SYSTEM_SERVICE_PARAM_ID_TIME_ZONE: *value = 0; break;
-  case SYSTEM_SERVICE_PARAM_ID_SUMMERTIME: *value = 0; break;
+  case SYSTEM_SERVICE_PARAM_ID_TIME_ZONE: *value = HostTimeZone().minutes; break;
+  case SYSTEM_SERVICE_PARAM_ID_SUMMERTIME: *value = HostTimeZone().summer ? 1 : 0; break;
   case SYSTEM_SERVICE_PARAM_ID_GAME_PARENTAL_LEVEL: *value = SYSTEM_SERVICE_PARAM_GAME_PARENTAL_OFF; break;
   case SYSTEM_SERVICE_PARAM_ID_ENTER_BUTTON_ASSIGN: *value = SYSTEM_SERVICE_PARAM_ENTER_BUTTON_CROSS; break;
   default: *value = 0; break;

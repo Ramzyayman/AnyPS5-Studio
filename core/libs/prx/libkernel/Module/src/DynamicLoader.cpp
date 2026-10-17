@@ -228,26 +228,24 @@ void* APS5_VABI dlsym_nid_postfix(void* handle, const char* name) {
 int APS5_VABI dlclose_nid_postfix(void* handle) {
     const auto key = reinterpret_cast<std::uintptr_t>(handle);
     std::shared_ptr<Module> module;
-#ifdef _WIN32
     bool lastReference = true;
-#endif
     {
         std::lock_guard lock(modulesMutex);
         auto found = modules.find(key);
         if (found == modules.end()) { Error("dlclose: invalid module handle"); return -1; }
         module = found->second;
-#ifdef _WIN32
         for (const auto& [other, entry] : modules) {
             if (other != key && entry->native == module->native) lastReference = false;
         }
-#endif
     }
-#ifdef _WIN32
     if (module->owned && module->native && lastReference) {
         GuestAllocations::Mutation mutation;
+#ifdef _WIN32
         mutation.UnregisterImage(module->native);
-    }
+#else
+        mutation.UnregisterImage(reinterpret_cast<const void*>(static_cast<link_map*>(module->native)->l_addr));
 #endif
+    }
     {
         std::lock_guard lock(modulesMutex);
         auto found = modules.find(key);

@@ -11,6 +11,11 @@ constexpr std::int32_t SCE_HMD2_ERROR_UNSUPPORTED_FEATURE = static_cast<std::int
 
 extern "C" {
 
+int APS5_VABI sceHmd2ReprojectionGetStatus() {
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
+}
+
 int APS5_VABI sceHmd2ReprojectionQuerySeeThroughBufferSizeAlign() {
     NotImplemented_nid_no_patch(__func__);
     return 0;

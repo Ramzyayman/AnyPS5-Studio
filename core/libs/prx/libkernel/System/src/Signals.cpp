@@ -359,10 +359,13 @@ extern "C" int APS5_VABI getitimer_nid_postfix(int which, GuestItimerval* output
         *__error_nid_postfix() = 22;
         return -1;
     }
-    if (which != 0) throw std::runtime_error("getitimer: CPU interval timers are not implemented");
     if (output == nullptr) {
         *__error_nid_postfix() = 14;
         return -1;
+    }
+    if (which != 0) {
+        *output = {};
+        return 0;
     }
     GuestItimerval result{};
     auto& alarms = Alarms();

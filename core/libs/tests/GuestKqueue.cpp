@@ -9,6 +9,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <vector>
 #ifdef _WIN32
 #include <aclapi.h>
 #include <windows.h>
@@ -23,6 +24,7 @@ int APS5_VABI pipe_nid_postfix(int*);
 int APS5_VABI socketpair_nid_postfix(int, int, int, int*);
 std::int64_t APS5_VABI send_nid_postfix(int, const void*, std::uint64_t, int);
 std::int64_t APS5_VABI recv_nid_postfix(int, void*, std::uint64_t, int);
+std::int64_t APS5_VABI read_nid_postfix(int, void*, std::uint64_t);
 int APS5_VABI open_nid_postfix(const char*, int, int);
 int APS5_VABI mkdir_nid_postfix(const char*, unsigned short);
 int APS5_VABI rmdir_nid_postfix(const char*);
@@ -60,6 +62,7 @@ static constexpr std::uint16_t EvReceipt = 0x0040;
 static constexpr std::uint16_t EvDispatch = 0x0080;
 static constexpr std::uint16_t EvForceoneshot = 0x0100;
 static constexpr std::uint16_t EvError = 0x4000;
+static constexpr std::uint16_t EvEof = 0x8000;
 static constexpr std::uint32_t NoteTrigger = 0x01000000;
 static constexpr std::uint32_t NoteFfcopy = 0xc0000000;
 static constexpr std::uint32_t NoteFfor = 0x80000000;
@@ -208,6 +211,40 @@ static void UserEvents() {
     Require(close_nid_postfix(kq) == 0);
 }
 
+static void PipeRead() {
+    const int kq = kqueue_nid_postfix();
+    int pipe[2];
+    Require(pipe_nid_postfix(pipe) == 0);
+    const auto readEnd = static_cast<std::uintptr_t>(pipe[0]);
+    int marker = 0;
+    KernelEvent events[4]{};
+    Require(Apply(kq, Change(readEnd, EvfiltRead, EvAdd, 0, 0, &marker)) == 0);
+    Require(Poll(kq, events, 4) == 0);
+    Require(write_nid_postfix(pipe[1], "abc", 3) == 3);
+    Require(Poll(kq, events, 4) == 1);
+    Require(events[0].ident == readEnd && events[0].filter == EvfiltRead && events[0].data == 3 && events[0].udata == &marker && (events[0].flags & EvEof) == 0);
+    char buffer[4]{};
+    Require(read_nid_postfix(pipe[0], buffer, sizeof(buffer)) == 3);
+    Require(Poll(kq, events, 4) == 0);
+    std::thread writer([&pipe] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        Require(write_nid_postfix(pipe[1], "d", 1) == 1);
+    });
+    const KernelTimespec limit{5, 0};
+    const auto start = std::chrono::steady_clock::now();
+    Require(kevent_nid_postfix(kq, nullptr, 0, events, 4, &limit) == 1);
+    const auto waited = std::chrono::steady_clock::now() - start;
+    writer.join();
+    Require(waited >= std::chrono::milliseconds(40) && waited < std::chrono::seconds(4));
+    Require(events[0].ident == readEnd && events[0].data == 1);
+    Require(close_nid_postfix(pipe[1]) == 0);
+    Require(Poll(kq, events, 4) == 1 && events[0].data == 1 && (events[0].flags & EvEof) != 0);
+    Require(read_nid_postfix(pipe[0], buffer, sizeof(buffer)) == 1);
+    Require(Poll(kq, events, 4) == 1 && events[0].data == 0 && (events[0].flags & EvEof) != 0);
+    Require(close_nid_postfix(pipe[0]) == 0);
+    Require(close_nid_postfix(kq) == 0);
+}
+
 static void SocketPair() {
     const int kq = kqueue_nid_postfix();
     int pair[2];
@@ -306,7 +343,9 @@ static void Errors() {
     RequireFailure(kevent_nid_postfix(kq, nullptr, 0, events, -1, nullptr), GuestEinval);
     int pipe[2];
     Require(pipe_nid_postfix(pipe) == 0);
-    Require(Throws([kq, &pipe] { Apply(kq, Change(static_cast<std::uintptr_t>(pipe[0]), EvfiltRead, EvAdd)); }));
+    Require(Throws([kq, &pipe] { Apply(kq, Change(static_cast<std::uintptr_t>(pipe[1]), EvfiltRead, EvAdd)); }));
+    Require(Throws([kq, &pipe] { Apply(kq, Change(static_cast<std::uintptr_t>(pipe[1]), EvfiltWrite, EvAdd)); }));
+    Require(Throws([kq, &pipe] { Apply(kq, Change(static_cast<std::uintptr_t>(pipe[0]), EvfiltRead, EvAdd | EvClear)); }));
     Require(close_nid_postfix(pipe[0]) == 0 && close_nid_postfix(pipe[1]) == 0);
     const KernelEvent skipped = Change(1, 0, EvAdd);
     const KernelTimespec zero{0, 0};
@@ -501,9 +540,14 @@ static std::string Utf8(const std::wstring& text) {
 }
 
 static PACL DenyListing(const std::wstring& directory, PSECURITY_DESCRIPTOR& owner) {
-    wchar_t account[256]{};
-    DWORD count = static_cast<DWORD>(sizeof(account) / sizeof(account[0]));
-    Require(::GetUserNameW(account, &count) != FALSE);
+    HANDLE token = nullptr;
+    Require(::OpenProcessToken(::GetCurrentProcess(), TOKEN_QUERY, &token) != FALSE);
+    DWORD size = 0;
+    ::GetTokenInformation(token, TokenUser, nullptr, 0, &size);
+    std::vector<unsigned char> user(size);
+    const BOOL queried = ::GetTokenInformation(token, TokenUser, user.data(), size, &size);
+    ::CloseHandle(token);
+    Require(queried != FALSE);
     PACL original = nullptr;
     Require(::GetNamedSecurityInfoW(directory.c_str(), SE_FILE_OBJECT, DACL_SECURITY_INFORMATION,
         nullptr, nullptr, &original, nullptr, &owner) == ERROR_SUCCESS);
@@ -511,9 +555,9 @@ static PACL DenyListing(const std::wstring& directory, PSECURITY_DESCRIPTOR& own
     denied.grfAccessPermissions = FILE_LIST_DIRECTORY;
     denied.grfAccessMode = DENY_ACCESS;
     denied.grfInheritance = NO_INHERITANCE;
-    denied.Trustee.TrusteeForm = TRUSTEE_IS_NAME;
+    denied.Trustee.TrusteeForm = TRUSTEE_IS_SID;
     denied.Trustee.TrusteeType = TRUSTEE_IS_USER;
-    denied.Trustee.ptstrName = account;
+    denied.Trustee.ptstrName = static_cast<LPWSTR>(reinterpret_cast<TOKEN_USER*>(user.data())->User.Sid);
     PACL blocked = nullptr;
     Require(::SetEntriesInAclW(1, &denied, original, &blocked) == ERROR_SUCCESS);
     const DWORD applied = ::SetNamedSecurityInfoW(const_cast<LPWSTR>(directory.c_str()), SE_FILE_OBJECT,
@@ -540,7 +584,24 @@ static void RequireContextInsensitive(std::string message, std::string context) 
     }
 }
 
+static void DropPrivilege(HANDLE token, const wchar_t* name) {
+    TOKEN_PRIVILEGES privileges{};
+    privileges.PrivilegeCount = 1;
+    privileges.Privileges[0].Attributes = SE_PRIVILEGE_REMOVED;
+    Require(::LookupPrivilegeValueW(nullptr, name, &privileges.Privileges[0].Luid) != FALSE);
+    Require(::AdjustTokenPrivileges(token, FALSE, &privileges, 0, nullptr, nullptr) != FALSE);
+}
+
+static void DropBackupPrivileges() {
+    HANDLE token = nullptr;
+    Require(::OpenProcessToken(::GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &token) != FALSE);
+    DropPrivilege(token, L"SeBackupPrivilege");
+    DropPrivilege(token, L"SeRestorePrivilege");
+    Require(::CloseHandle(token) != FALSE);
+}
+
 static void DeniedParentWatch() {
+    DropBackupPrivileges();
     const auto path = TemporaryName("denied");
     Require(mkdir_nid_postfix(path.c_str(), 0755) == 0);
     const int file = open_nid_postfix((path + "/watched.bin").c_str(), ReadWrite | Create, 0644);
@@ -584,6 +645,7 @@ static void Timeout() {
 int main() {
     CreateAndClose();
     Timers();
+    PipeRead();
     UserEvents();
     SocketPair();
     DisableAndDispatch();

@@ -24,7 +24,7 @@
 #include <cmath>
 #include <cstring>
 #include <cstdint>
-#ifdef __linux__
+#if defined(__linux__) || defined(__APPLE__)
 #include <sys/mman.h>
 #endif
 #include <functional>
@@ -1289,7 +1289,7 @@ void linuxRipRelativePlacement() {
 
 }
 
-#if defined(__linux__) && defined(__x86_64__)
+#if (defined(__linux__) || defined(__APPLE__)) && defined(__x86_64__)
 std::uint64_t extrqReference(std::uint64_t value, std::uint64_t control) {
     const auto length = static_cast<unsigned>(control & 0x3f);
     const auto index = static_cast<unsigned>((control >> 8) & 0x3f);

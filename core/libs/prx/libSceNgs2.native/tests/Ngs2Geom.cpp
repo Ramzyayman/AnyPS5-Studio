@@ -142,11 +142,48 @@ static void TestInvalidListener() {
     RejectListener(&param, 0);
 }
 
+static void TestGeomApply() {
+    Ngs2GeomListenerWork listener{};
+    for (std::size_t row = 0; row < 4; row++) {
+        for (std::size_t column = 0; column < 4; column++) listener.matrix[row][column] = row == column ? 1.0f : 0.0f;
+    }
+
+    Ngs2GeomSourceParam source;
+    Require(sceNgs2GeomResetSourceParam(&source) == SCE_NGS2_OK);
+    source.position = {1.0f, 2.0f, 3.0f};
+    source.min_level = -0.25f;
+    source.max_level = 0.5f;
+    source.matrix_format = 3;
+
+    Ngs2GeomAttribute attribute;
+    std::memset(&attribute, 0x5a, sizeof(attribute));
+    Require(sceNgs2GeomApply(&listener, &source, &attribute, 0) == SCE_NGS2_OK);
+    Require(attribute.pitch_ratio == 1.0f);
+    Require(attribute.a3d_attrib.position.x == 1.0f && attribute.a3d_attrib.position.y == 2.0f && attribute.a3d_attrib.position.z == 3.0f);
+    Require(attribute.a3d_attrib.volume == 0.5f);
+    Require(attribute.level[0] == 0.5f);
+    Require(attribute.level[1] == 0.0f);
+    Require(attribute.level[9] == 0.5f);
+    Require(attribute.level[18] == 0.5f);
+    Require(attribute.level[24] == 0.0f);
+    Require(attribute.level[63] == 0.0f);
+
+    Require(sceNgs2GeomApply(&listener, &source, nullptr, 0) == SCE_NGS2_ERROR_INVALID_OUT_ADDRESS);
+
+    source.matrix_format = 0;
+    std::memset(&attribute, 0x5a, sizeof(attribute));
+    Require(sceNgs2GeomApply(&listener, &source, &attribute, 0) == SCE_NGS2_OK);
+    Require(attribute.level[0] == 0.5f);
+    Require(attribute.level[9] == 0.5f);
+    Require(attribute.level[16] == 0.0f);
+}
+
 int main() {
     TestLayouts();
     TestResetListenerParam();
     TestResetSourceParam();
     TestListenerTransform();
     TestInvalidListener();
+    TestGeomApply();
     return 0;
 }

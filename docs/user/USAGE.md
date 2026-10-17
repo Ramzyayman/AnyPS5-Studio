@@ -107,6 +107,8 @@ Use `sce_modules/` or `prx/` instead of `sce_module/` if that is the input direc
 
 Some applications also need their original `app0/sce_sys/param.json` at runtime. AnyPS5 reads this file for the title ID and display name; it must contain a non-empty `titleId` string and a non-empty `localizedParameters` object with a language entry that has a non-empty `titleName`. It selects the entry named by `defaultLanguage` (inside `localizedParameters`, or at the top level); if that entry is absent, it tries `en-US`, then the first object-valued language entry. Preserve the values from the title's own metadata and place the file under the same `app0/` directory as the other app resources. At startup, its presence in the working directory creates `data/`; a non-zero `downloadDataSize` also creates `download0/`. Without the file, neither directory is created. If it is missing or invalid, metadata calls such as title/window setup can fail with a `param.json` error.
 
+Resources can also be packed into `app0.zar` beside `app0/`, a [ZArchive](https://github.com/Exzap/ZArchive) whose root is the `app0/` directory. A file present in `app0/` is read from there and any other file from the archive; the executable, `sce_module/` and `sce_sys/` stay in `app0/`. The archive is read only through `sceKernelOpen`/`open`, the read, seek and stat calls on its descriptors and `sceKernelStat`; other calls on an archived path, listing a directory that the archive also contains and opening a file in it for writing fail as described in [technical debt](../dev/debt/libkernel.md). An archive that cannot be opened stops the title at its first file access.
+
 Use the generated files printed as `Guest module:` for bundled title modules. `libs/` is for AnyPS5 system libraries, not the original PS5 `.prx` files. Placing an original PS5 module in `libs/` on Windows makes Windows try to load it as a DLL and can fail with error 193 (not a valid Win32 application).
 
 On Windows, a self-built `libs/` also needs `libgcc_s_seh-1.dll`, `libstdc++-6.dll` and `libwinpthread-1.dll` from the `mingw64/bin` directory of the toolchain that built the libraries; the release archives already contain them. The libraries are loaded without searching `PATH`, so a copy elsewhere on the system is not used, and a library that needs one of them fails with error 126 (the specified module could not be found) although its `.prx` file is present.
@@ -142,9 +144,10 @@ python3 tools/pad_input.py /tmp/anyps5-pad down --hold-ms 500
 python3 tools/pad_input.py /tmp/anyps5-pad release
 python3 tools/pad_input.py /tmp/anyps5-pad release --left-stick 128 0 --hold-ms 2000
 python3 tools/pad_input.py /tmp/anyps5-pad cross --left-stick 255 128 --right-stick 0 128
+python3 tools/pad_input.py /tmp/anyps5-pad touch-right
 ```
 
-Run the helper in a second terminal. Commands are polled at most every 100 ms during controller reads, and their buttons add to physical controller input. A press lasts 300 ms by default, starting when the application reads it, and releases automatically; `--hold-ms` accepts 1–5000 ms. `--left-stick X Y` and `--right-stick X Y` hold the sticks for the same time: each axis is 0-255, 128 is the centre, X grows to the right and Y grows downward. While such a command is active both sticks come from it instead of the physical controller, and a stick that was not named stays centred. Wait for the application to observe a release before sending another press. The file holds only the latest command; rapid commands can replace one another. On POSIX, replacing an existing command file retains its permission mode; a privileged helper also retains its owner and group so the game user can still read it. Commands left over when the application first reads the controller are ignored. Without the environment variable, file input is disabled.
+Run the helper in a second terminal. Commands are polled at most every 100 ms during controller reads, and their buttons add to physical controller input. A press lasts 300 ms by default, starting when the application reads it, and releases automatically; `--hold-ms` accepts 1–5000 ms. `--left-stick X Y` and `--right-stick X Y` hold the sticks for the same time: each axis is 0-255, 128 is the centre, X grows to the right and Y grows downward. While such a command is active both sticks come from it instead of the physical controller, and a stick that was not named stays centred. `touch-left` and `touch-right` press the touchpad with a finger on its left or right half, as the `TouchLeft` and `TouchRight` keys do; in the command file they are bits `0x200000` and `0x400000` of the button field. Wait for the application to observe a release before sending another press. The file holds only the latest command; rapid commands can replace one another. On POSIX, replacing an existing command file retains its permission mode; a privileged helper also retains its owner and group so the game user can still read it. Commands left over when the application first reads the controller are ignored. Without the environment variable, file input is disabled.
 
 ### System fonts
 
@@ -153,6 +156,17 @@ Games that open the console's system font sets (`sceFontOpenFontSet`) need font 
 ### Console language
 
 Games ask for the console's language with `sceSystemServiceParamGetInt` and show their text in it when they have it. It is English (United States) unless `ANYPS5_LANGUAGE` is set to another console language number: 0 Japanese, 1 English (United States), 2 French, 3 Spanish, 4 German, 5 Italian, 6 Dutch, 7 Portuguese (Portugal), 8 Russian, 9 Korean, 10 Chinese (Traditional), 11 Chinese (Simplified), 12 Finnish, 13 Swedish, 14 Danish, 15 Norwegian, 16 Polish, 17 Portuguese (Brazil), 18 English (United Kingdom), 19 Turkish, 20 Spanish (Latin America), 21 Arabic, 22 French (Canada), 23 Czech, 24 Hungarian, 25 Greek, 26 Romanian, 27 Thai, 28 Vietnamese, 29 Indonesian, 30 Ukrainian. For example, `ANYPS5_LANGUAGE=21` selects Arabic. An empty value is the same as an unset one; any other value stops the game at its first language query with an error that names the variable.
+
+### PlayGo dumps without metadata
+
+When a dump has neither `sce_sys/playgo-chunk.dat` nor `sce_sys/playgo-scenario.json`, AnyPS5 cannot tell which nonzero PlayGo chunk IDs exist. Requests for those IDs stop with an error by default. Set `APS5_PLAYGO_UNLISTED_CHUNKS` to choose an answer for that dump:
+
+| Value | Answer for an unlisted chunk ID | Observed title that needs it |
+|-------|---------------------------------|------------------------------|
+| `installed` | Report it as installed (`LOCAL_FAST`). | High on Life (PPSA15388) needs this to load its saves. |
+| `absent` | Return `SCE_PLAYGO_ERROR_BAD_CHUNK_ID`. | Sifu (PPSA03001) uses this result to end its chunk-ID search. |
+
+Leave the variable unset to keep the explicit error. Any other value also stops with an error. Dumps that include PlayGo metadata are unaffected. These title-specific results come from emulator runs and have not been verified against a console.
 
 ### GPU selection
 
@@ -177,11 +191,17 @@ HDR output is available on Windows only. Titles see it when the monitor showing 
 
 ### Shader cache
 
-Recompiled shaders and the Vulkan pipeline cache are kept in a `shader_cache/` directory beside the output executable, so later runs skip recompilation. Set `ANYPS5_SHADER_CACHE_DIR` to use another directory, or set `ANYPS5_NO_SHADER_CACHE` to any non-empty value other than `0` to disable both caches. Shaders are stored in a subdirectory named after the recompiler's source version; subdirectories of other versions unused for 14 days are removed the first time a run looks up a shader. The pipeline cache is one `vk-pipelines-*.bin` file per GPU and driver version. Deleting the directory is safe: it is rebuilt on the next run.
+Recompiled shaders and the Vulkan pipeline cache are kept in a `shader_cache/` directory beside the output executable, so later runs skip recompilation. Set `ANYPS5_SHADER_CACHE_DIR` to use another directory, or set `ANYPS5_NO_SHADER_CACHE` to any non-empty value other than `0` to disable both caches. Shaders are stored in a subdirectory named after the recompiler's source version; subdirectories of other versions unused for 14 days are removed the first time a run looks up a shader. The pipeline cache is one `vk-pipelines-*.bin` file per GPU and driver version. Entries of the current version are never removed and the directory has no size limit, so a title that compiles many shaders can add several GB within minutes. Deleting the directory is safe: it is rebuilt on the next run.
 
 ### Pipeline journal
 
 Besides the recompiled shaders, the shader cache directory holds `pipelines.journal`: every Vulkan graphics pipeline the pipeline store kept and every compute pipeline a run built, with the specialized shader modules they were built from. The next run of the title builds those pipelines on background threads while it loads, so a draw or dispatch the earlier run already made does not compile its pipeline when it is first reached. The journal belongs to the GPU and driver that wrote it, like the driver's pipeline cache file next to it: a run on another GPU or driver version starts it over, and the driver's own pipeline cache decides how fast each pipeline is rebuilt. Two runs sharing the directory take turns on `pipelines.journal.lock`; a run that cannot lock it records nothing. `APS5_NO_PIPELINE_JOURNAL=1` disables recording and replay; `APS5_PIPELINE_JOURNAL_THREADS` sets the replay threads (half the CPU threads by default; `0` records without replaying), `APS5_PIPELINE_JOURNAL_ENTRIES` how many pipelines are replayed (the first recorded, which a run reaches first) and `APS5_PIPELINE_STORE_ENTRIES` how many graphics pipelines stay resident (1024 each), and `APS5_PIPELINE_JOURNAL_MAX_MIB` (1024) the file size at which recording stops. Deleting the file loses nothing but the head start. With `APS5_PROFILE_DRAW=1` a `[pipeline-journal]` line reports what was loaded, replayed and recorded.
+
+### Texture cache budget
+
+Sampled textures and storage images stay in device memory in two caches that evict their least recently used entries when they grow past their budgets. The storage image budget is a quarter of the `VK_EXT_memory_budget` budget of the largest device-local heap, capped at a quarter of the heap's size or 2 GiB, whichever is larger, and never below 512 MiB. The sampled texture budget is what the reported budget leaves after the heap's use other than cached textures, that cap and an eighth of the budget, and never below 2 GiB. Both are read again every second; `[gpu] sampled texture cache budget` lines report them at start-up and when they change. `APS5_TEXTURE_CACHE_MIB=<n>` fixes both budgets at `n` MiB, and the lines are then not printed.
+
+A fixed budget above the automatic one can exceed what the card holds next to the rest of the frame. Allocations then go to host memory (`[gpu] ... placed in host memory` lines), where the GPU reads them over PCIe. PPSA16064 on an RTX 4060 8 GB, whose automatic storage image budget is 1797 MiB, placed 868 and 878 MiB in host memory with `APS5_TEXTURE_CACHE_MIB=3072` and walked through its first level at 4.46 and 4.83 FPS; with the variable unset it placed none and ran the same walk at 6.48 and 6.07 FPS. Leave it unset unless a measurement on the card shows otherwise.
 
 ### Storing GPU results at each flip
 
@@ -203,6 +223,8 @@ most called traced imports (1 calls in total):
 Limits are listed in the [libc](../dev/debt/libc.md) and [relinker](../dev/debt/relinker.md) technical debt.
 
 ### Windows crash diagnostics
+
+When a register points at readable memory that starts with at least four printable ASCII characters, either as UTF-16LE or as single bytes, the crash report prints that text after the register memory dump, as `[r13] u"..."` for UTF-16LE or `[rdi] "..."` for single bytes. The text ends at a NUL, at the first character that is not printable ASCII, a tab, a line feed or a carriage return, after 512 characters or at the end of readable memory. Tabs, line breaks, quotes and backslashes are escaped, and `...` after the closing quote means that no NUL ended the text within those limits.
 
 Set `APS5_CRASH_INDIRECT_MEMORY=1` before launching the executable to include up to 64 bytes from each pointer found in the register memory dump. The report labels each block with its register, pointer offset and target address. Inaccessible, incomplete and executable targets are skipped. This additional dump is disabled when the variable is unset or empty.
 
@@ -239,6 +261,8 @@ ELF modules in `--modules` are audited regardless of filename: their undefined s
 Each registry has a companion with the same prefix and the suffix `.needed.json`, listing its host library dependencies, including declared `DT_NEEDED` entries with no imports. Dependencies supplied by converted bundled modules, including their aliases, are omitted. The executable's companion includes host dependencies of its bundled modules. The audit reads these companions automatically; keep them beside the registries. Older registries without companions still work, but cannot report dependencies that have no imports; regenerate them with `--registry` to include those dependencies.
 
 The report also lists needed libraries that have no file in `--libs` or `--modules`, including dependencies with zero imports. These do not increase the import or reference counts. Windows can skip a missing dependency when no import needs it; Linux still needs the file. The audit also lists imports exported only by a library other than the one they name; those resolve on Linux and can fail on Windows.
+
+The audit also walks the built libraries' own host dependencies: each `.prx` under `--libs` has its PE imports (or ELF `DT_NEEDED` entries) checked for `.prx` names with no file in `--libs` or `--modules`, following present libraries transitively. Gaps fail the audit and are reported as `Importer: <root> Chain: <root> -> ... -> <missing>` lines, since the loader fails on them even when every game import resolves.
 
 | Option | Effect |
 |--------|--------|

@@ -271,6 +271,7 @@ void APS5_VABI _Cnd_destroy_nid_postfix(void** handle);
 int APS5_VABI _Cnd_wait_nid_postfix(void** condition, void** mutex);
 int APS5_VABI _Cnd_signal_nid_postfix(void** handle);
 int APS5_VABI wcsrtombs_s_nid_postfix(std::size_t* result, char* destination, std::size_t capacity, const std::uint16_t** source, std::size_t limit, void* state);
+[[noreturn]] void APS5_VABI __cxa_call_terminate_nid_postfix(void* exception);
 int APS5_VABI _Cnd_init_nid_postfix(void** handle);
 int SignalCondition_nid_no_patch(void** handle);
 [[noreturn]] void ThrowCppError_nid_no_patch(int code);
@@ -994,9 +995,8 @@ int APS5_VABI wcstombs_s_nid_postfix(std::size_t* result, char* destination, std
     return wcsrtombs_s_nid_postfix(result, destination, capacity, &source, limit, state.data());
 }
 
-int APS5_VABI __cxa_call_unexpected_nid_postfix(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+[[noreturn]] void APS5_VABI __cxa_call_unexpected_nid_postfix(void* unwindException) {
+    __cxa_call_terminate_nid_postfix(unwindException);
 }
 
 APS5_EXPORT("0hlfW1O4Aa4", sceAmprLocaleconv);

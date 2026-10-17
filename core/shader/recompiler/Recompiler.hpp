@@ -267,6 +267,7 @@ struct SpirvTarget {
     std::uint32_t registrationWordLimit = 200000u;
     bool vertexSubgroups = true;
     bool float16DenormPreserve = false;
+    bool spannedWaves = false;
 };
 
 struct BindingLayout {
@@ -603,6 +604,7 @@ struct CompiledShaderArtifact {
     bool vertexOffsetConflict = false;
     bool instanceOffsetConflict = false;
     std::uint32_t hostSubgroupSize = 0;
+    bool fullSubgroups = false;
     std::vector<std::uint32_t> parameterExports;
     std::vector<FragmentParameter> fragmentParameters;
     BarycentricEmulation barycentricEmulation;
@@ -657,7 +659,7 @@ struct RecompileResult : CompiledShaderArtifact, ShaderInvocation {
         };
         mix(specialization.size());
         for (const auto& constant : specialization) mix(constant.id | (static_cast<std::uint64_t>(constant.value) << 32u));
-        mix(hostSubgroupSize | (static_cast<std::uint64_t>(workgroupMemoryDwords) << 32u));
+        mix(hostSubgroupSize | (fullSubgroups ? 0x10000u : 0u) | (static_cast<std::uint64_t>(workgroupMemoryDwords) << 32u));
         mix(bindings.size());
         for (const auto& binding : bindings) mix(binding.descriptorSet | (static_cast<std::uint64_t>(binding.binding) << 16u) | (static_cast<std::uint64_t>(binding.kind) << 40u) | (static_cast<std::uint64_t>(binding.count) << 48u));
         if (identity.Empty()) identity.low = 1;

@@ -84,9 +84,9 @@ std::filesystem::path ShaderCacheDirectory() {
 namespace ShaderRecompiler::ShaderDiskCache {
 
 #if defined(__linux__) && defined(__x86_64__) && defined(__GLIBCXX__)
-static_assert(sizeof(CompiledShaderArtifact) == 232, "CompiledShaderArtifact changed: update the artifact encoder");
+static_assert(sizeof(CompiledShaderArtifact) == 240, "CompiledShaderArtifact changed: update the artifact encoder");
 static_assert(sizeof(ShaderInvocation) == 200, "ShaderInvocation changed: update the invocation encoder");
-static_assert(sizeof(RecompileResult) == 464, "RecompileResult changed: update EncodeResult and DecodeResult");
+static_assert(sizeof(RecompileResult) == 472, "RecompileResult changed: update EncodeResult and DecodeResult");
 static_assert(sizeof(DescriptorBinding) == 592, "DescriptorBinding changed: update the binding encoder");
 static_assert(sizeof(VertexAttribute) == 32, "VertexAttribute changed: update the attribute encoder");
 static_assert(sizeof(VertexInput) == 16, "VertexInput changed: update the vertex input encoder");
@@ -486,6 +486,7 @@ void encodeArtifact(Writer& writer, const CompiledShaderArtifact& result) {
     writer.Value(result.vertexOffsetConflict);
     writer.Value(result.instanceOffsetConflict);
     writer.Value(result.hostSubgroupSize);
+    writer.Value(result.fullSubgroups);
     writer.Values(std::span<const std::uint32_t>(result.parameterExports));
     writer.List(result.fragmentParameters, [](Writer& out, const FragmentParameter& parameter) {
         out.Value(parameter.location);
@@ -532,6 +533,7 @@ void decodeArtifact(Reader& reader, CompiledShaderArtifact& result) {
     reader.Value(result.vertexOffsetConflict);
     reader.Value(result.instanceOffsetConflict);
     reader.Value(result.hostSubgroupSize);
+    reader.Value(result.fullSubgroups);
     reader.Values(result.parameterExports);
     reader.List(result.fragmentParameters, 10, [](Reader& in, FragmentParameter& parameter) {
         in.Value(parameter.location);
@@ -1311,15 +1313,20 @@ LoadStatus unwrapEntry(std::span<const std::byte> file, std::span<const std::byt
     return LoadStatus::Loaded;
 }
 
+std::atomic<unsigned> runningWriters{0};
+
 class DiskStore {
 public:
-    DiskStore() {
+    explicit DiskStore(bool stopped) {
         const auto root = ShaderCacheDirectory();
         if (root.empty()) return;
         this->root = root;
         directory = root / hex(SourceVersion());
         discoverPrebuilt();
-        std::thread([this] { run(); }).detach();
+        stopping = stopped;
+        if (stopping) return;
+        writer = std::thread([this] { run(); });
+        runningWriters.fetch_add(1, std::memory_order_acq_rel);
     }
 
     [[nodiscard]] bool Enabled() const { return !directory.empty(); }
@@ -1361,6 +1368,19 @@ public:
     void Flush() {
         std::unique_lock lock(mutex);
         idle.wait(lock, [&] { return jobs.empty() && !writing; });
+    }
+
+    void Shutdown() {
+        std::thread stopped;
+        {
+            std::lock_guard lock(mutex);
+            stopping = true;
+            stopped = std::move(writer);
+        }
+        wake.notify_all();
+        if (!stopped.joinable()) return;
+        if (stopped.get_id() == std::this_thread::get_id()) stopped.detach();
+        else stopped.join();
     }
 
     Counters Totals() const {
@@ -1520,7 +1540,12 @@ private:
 
     void enqueue(Job job) {
         {
-            std::lock_guard lock(mutex);
+            std::unique_lock lock(mutex);
+            if (stopping) {
+                lock.unlock();
+                write(job);
+                return;
+            }
             jobs.push_back(std::move(job));
         }
         wake.notify_one();
@@ -1531,7 +1556,7 @@ private:
         housekeeping();
         std::unique_lock lock(mutex);
         while (true) {
-            wake.wait_for(lock, std::chrono::seconds(10), [&] { return !jobs.empty(); });
+            wake.wait_for(lock, std::chrono::seconds(10), [&] { return !jobs.empty() || stopping; });
             while (!jobs.empty()) {
                 auto job = std::move(jobs.front());
                 jobs.pop_front();
@@ -1543,10 +1568,12 @@ private:
                 writing = false;
             }
             idle.notify_all();
+            if (stopping) break;
             lock.unlock();
             report(false);
             lock.lock();
         }
+        runningWriters.fetch_sub(1, std::memory_order_acq_rel);
     }
 
     void write(const Job& job) {
@@ -1628,6 +1655,8 @@ private:
     std::condition_variable idle;
     std::deque<Job> jobs;
     bool writing = false;
+    bool stopping = false;
+    std::thread writer;
     std::atomic<std::uint64_t> hits{0}, misses{0}, writes{0}, loadFailures{0}, writeFailures{0}, bytesRead{0}, bytesWritten{0}, loadNanoseconds{0};
     std::atomic<std::uint64_t> planHits{0}, planMisses{0}, planWrites{0}, planLoadFailures{0};
     std::atomic<std::uint64_t> prebuiltHits{0}, prebuiltMisses{0}, prebuiltRejected{0}, lookupNanoseconds{0}, readNanoseconds{0}, decodeNanoseconds{0}, maxLoadNanoseconds{0}, prebuiltBytesRead{0}, prebuiltLoadNanoseconds{0};
@@ -1637,8 +1666,24 @@ private:
     std::uint64_t reportedLoadNs = 0;
 };
 
+struct StoreLifecycle {
+    std::mutex mutex;
+    DiskStore* created = nullptr;
+    bool stopped = false;
+};
+
+StoreLifecycle& lifecycle() {
+    static auto* state = new StoreLifecycle();
+    return *state;
+}
+
 DiskStore& store() {
-    static DiskStore* instance = new DiskStore();
+    static DiskStore* instance = [] {
+        auto& state = lifecycle();
+        std::lock_guard lock(state.mutex);
+        state.created = new DiskStore(state.stopped);
+        return state.created;
+    }();
     return *instance;
 }
 
@@ -1795,6 +1840,21 @@ std::shared_ptr<const CompiledVariant> Persist(std::span<const std::byte> key, c
 void Flush() {
     auto& instance = store();
     if (instance.Enabled()) instance.Flush();
+}
+
+void Shutdown() {
+    DiskStore* instance = nullptr;
+    {
+        auto& state = lifecycle();
+        std::lock_guard lock(state.mutex);
+        state.stopped = true;
+        instance = state.created;
+    }
+    if (instance != nullptr) instance->Shutdown();
+}
+
+unsigned Writers() {
+    return runningWriters.load(std::memory_order_acquire);
 }
 
 Counters Totals() {
