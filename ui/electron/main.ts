@@ -621,6 +621,114 @@ function getResolvedUnwrapScript(): string {
   return candidates[0] ? path.normalize(candidates[0]) : '';
 }
 
+function sanitizeModuleDirectory(
+  dirPath: string,
+  inputElfPath: string,
+  sendLog: (msg: string, level?: string) => void
+) {
+  if (!fs.existsSync(dirPath)) return;
+  try {
+    if (!fs.statSync(dirPath).isDirectory()) return;
+  } catch {
+    return;
+  }
+
+  let entries: string[] = [];
+  try {
+    entries = fs.readdirSync(dirPath);
+  } catch {
+    return;
+  }
+
+  const backupDir = path.join(dirPath, 'module_backups');
+  const normalizedInputElf = path.resolve(inputElfPath).toLowerCase();
+
+  for (const entry of entries) {
+    const fullPath = path.join(dirPath, entry);
+    let stat: fs.Stats;
+    try {
+      stat = fs.statSync(fullPath);
+    } catch {
+      continue;
+    }
+    if (!stat.isFile()) continue;
+
+    const lower = entry.toLowerCase();
+    const resolvedPath = path.resolve(fullPath).toLowerCase();
+
+    // Never touch or move the designated primary executable
+    if (resolvedPath === normalizedInputElf) {
+      continue;
+    }
+
+    let shouldIsolate = false;
+    let isolateReason = '';
+
+    // Check 1: eboot executable files placed inside a module directory
+    if (lower.startsWith('eboot.') || lower === 'eboot') {
+      shouldIsolate = true;
+      isolateReason = 'Main executable binary in module directory';
+    }
+
+    // Check 2: Known backup files (.bak, .esbak, .old, .orig, .self_orig)
+    if (!shouldIsolate && (
+      lower.includes('.bak') ||
+      lower.includes('.esbak') ||
+      lower.includes('.old') ||
+      lower.includes('.orig') ||
+      lower.includes('.self_orig')
+    )) {
+      shouldIsolate = true;
+      isolateReason = 'Backup artifact';
+    }
+
+    // Check 3: Inspect ELF header to detect non-shared ELFs (ET_EXEC = 2, etc.)
+    if (!shouldIsolate) {
+      try {
+        const header = Buffer.alloc(64);
+        const fd = fs.openSync(fullPath, 'r');
+        const bytesRead = fs.readSync(fd, header, 0, 64, 0);
+        fs.closeSync(fd);
+
+        if (bytesRead >= 20) {
+          // ELF magic: 0x7F, 'E', 'L', 'F'
+          if (header[0] === 0x7f && header[1] === 0x45 && header[2] === 0x4c && header[3] === 0x46) {
+            const eType = header.readUInt16LE(16);
+            // In PlayStation 5 / ELF64:
+            // 3 = ET_DYN (Shared library / guest PRX)
+            // 0xfe18 = ET_SCE_DYNAMIC (PlayStation dynamic PRX)
+            // Anything else (e.g. 2 = ET_EXEC) causes relinker to fail with "ELF is not a shared module"
+            if (eType !== 3 && eType !== 0xfe18) {
+              shouldIsolate = true;
+              isolateReason = `Non-shared ELF (e_type=0x${eType.toString(16)})`;
+            }
+          }
+        }
+      } catch {}
+    }
+
+    if (shouldIsolate) {
+      try {
+        if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true });
+        const target = path.join(backupDir, entry);
+        if (fs.existsSync(target)) fs.unlinkSync(target);
+        fs.renameSync(fullPath, target);
+        sendLog(`[AnyPS5] Isolated ${entry} (${isolateReason}) to module_backups/`, 'info');
+      } catch {
+        try {
+          if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true });
+          const target = path.join(backupDir, entry);
+          fs.copyFileSync(fullPath, target);
+          fs.unlinkSync(fullPath);
+          sendLog(`[AnyPS5] Isolated ${entry} (${isolateReason}) to module_backups/`, 'info');
+        } catch (err) {
+          console.warn(`Failed to isolate ${entry}:`, err);
+        }
+      }
+    }
+  }
+}
+
 function fixGameHierarchyInPlace(gameDir: string, sendLog: (msg: string, level?: string) => void) {
   const resolved = path.resolve(gameDir);
   if (!fs.existsSync(resolved)) {
@@ -734,6 +842,44 @@ function fixGameHierarchyInPlace(gameDir: string, sendLog: (msg: string, level?:
     ebootBin = path.join(resolved, 'eboot.bin');
   }
 
+  // Fallback search: if eboot is not in root or app0/, search subdirectories (e.g. decrypted/ or custom dump folders)
+  if (!fs.existsSync(inputElf) && !fs.existsSync(fallbackElf) && !fs.existsSync(ebootBin)) {
+    const findEbootInSubdir = (dir: string, depth = 0): string | null => {
+      if (depth > 3) return null;
+      try {
+        const entries = fs.readdirSync(dir);
+        for (const entry of entries) {
+          const full = path.join(dir, entry);
+          const stat = fs.statSync(full);
+          if (stat.isFile()) {
+            const lower = entry.toLowerCase();
+            if (lower === 'eboot.bin' || lower === 'eboot.elf') {
+              return full;
+            }
+          } else if (stat.isDirectory()) {
+            const lower = entry.toLowerCase();
+            if (!['libs', 'sce_sys', 'module_backups', 'sce_module_backups'].includes(lower) && !entry.startsWith('.')) {
+              const found = findEbootInSubdir(full, depth + 1);
+              if (found) return found;
+            }
+          }
+        }
+      } catch {}
+      return null;
+    };
+
+    const nestedEboot = findEbootInSubdir(app0Dir) || findEbootInSubdir(resolved);
+    if (nestedEboot) {
+      sendLog(`[AnyPS5] Located game executable in subfolder: "${path.relative(resolved, nestedEboot)}". Promoting to app0/eboot.bin...`, 'info');
+      ebootBin = path.join(app0Dir, 'eboot.bin');
+      try {
+        fs.copyFileSync(nestedEboot, ebootBin);
+      } catch (copyErr) {
+        console.warn('Failed to copy nested eboot:', copyErr);
+      }
+    }
+  }
+
   if (fs.existsSync(inputElf)) {
     if (!fs.existsSync(fallbackElf)) {
       try { fs.copyFileSync(inputElf, fallbackElf); } catch {}
@@ -767,7 +913,44 @@ function fixGameHierarchyInPlace(gameDir: string, sendLog: (msg: string, level?:
     }
   }
 
-  // 6. Discover, clean and unwrap all guest modules across app0/ (including sce_module, games/, Plugins/, etc.)
+  // 6. Ensure guest module directory structure complies with relinker requirements
+  const sceModuleDir = path.join(app0Dir, 'sce_module');
+  const sceModulesDir = path.join(app0Dir, 'sce_modules');
+  const prxDir = path.join(app0Dir, 'prx');
+
+  // Relinker aborts if both sce_module and sce_modules exist
+  if (fs.existsSync(sceModuleDir) && fs.existsSync(sceModulesDir)) {
+    sendLog(`[AnyPS5] Merging duplicate guest module directory "sce_modules" into "sce_module"...`, 'info');
+    try {
+      const files = fs.readdirSync(sceModulesDir);
+      for (const f of files) {
+        const src = path.join(sceModulesDir, f);
+        const dst = path.join(sceModuleDir, f);
+        if (!fs.existsSync(dst)) {
+          try {
+            fs.renameSync(src, dst);
+          } catch {
+            fs.copyFileSync(src, dst);
+            fs.unlinkSync(src);
+          }
+        }
+      }
+      try { fs.rmdirSync(sceModulesDir); } catch {}
+    } catch (mergeErr) {
+      console.warn('Failed to merge sce_modules:', mergeErr);
+    }
+  }
+
+  // Relinker requires at least one of sce_module, sce_modules, or prx to exist
+  const hasSingular = fs.existsSync(sceModuleDir);
+  const hasPlural = fs.existsSync(sceModulesDir);
+  const hasPrx = fs.existsSync(prxDir);
+  if (!hasSingular && !hasPlural && !hasPrx) {
+    sendLog(`[AnyPS5] Initializing standard guest module directory "app0/sce_module"...`, 'info');
+    fs.mkdirSync(sceModuleDir, { recursive: true });
+  }
+
+  // 7. Discover, clean and unwrap all guest modules across app0/ (including sce_module, games/, Plugins/, etc.)
   const moduleDirs: string[] = [];
   try {
     const unwrapScript = getResolvedUnwrapScript();
@@ -805,29 +988,15 @@ function fixGameHierarchyInPlace(gameDir: string, sendLog: (msg: string, level?:
       }
 
       if (prxFiles.length > 0) {
+        // Sanitize this module directory: isolate eboot binaries, non-shared ELFs, and backup artifacts
+        sanitizeModuleDirectory(currentDir, inputElf, sendLog);
+
         const backupDir = path.join(currentDir, 'module_backups');
 
-        // First pass: isolate any non-prx backup files (.bak, .esbak, .old, .elf duplicate)
-        for (const entry of entries) {
-          const fullPath = path.join(currentDir, entry);
-          if (!fs.statSync(fullPath).isFile()) continue;
-          const lower = entry.toLowerCase();
-          const isBackup = lower.includes('.bak') || lower.includes('.esbak') || lower.includes('.old') ||
-            (lower.endsWith('.elf') && prxFiles.some(p => p.slice(0, p.lastIndexOf('.')) === entry.slice(0, entry.lastIndexOf('.'))));
-          if (isBackup) {
-            if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true });
-            const target = path.join(backupDir, entry);
-            try {
-              if (fs.existsSync(target)) fs.unlinkSync(target);
-              fs.renameSync(fullPath, target);
-              sendLog(`[AnyPS5] Moved backup module out of ${path.relative(app0Dir, currentDir)}: ${entry}`, 'info');
-            } catch {}
-          }
-        }
-
-        // Second pass: unwrap any encrypted SELF modules in-place
+        // Unwrap any encrypted SELF modules in-place
         for (const prx of prxFiles) {
           const fullPrx = path.join(currentDir, prx);
+          if (!fs.existsSync(fullPrx)) continue;
           try {
             const buf = Buffer.alloc(4);
             const fd = fs.openSync(fullPrx, 'r');
@@ -865,6 +1034,11 @@ function fixGameHierarchyInPlace(gameDir: string, sendLog: (msg: string, level?:
     }
 
     scanDirectory(app0Dir);
+
+    // Also sanitize standard module directories if present
+    if (fs.existsSync(sceModuleDir)) sanitizeModuleDirectory(sceModuleDir, inputElf, sendLog);
+    if (fs.existsSync(prxDir)) sanitizeModuleDirectory(prxDir, inputElf, sendLog);
+
     moduleDirs.push(...Array.from(discoveredDirs));
   } catch (modScanErr) {
     console.error('Guest module scan error:', modScanErr);
