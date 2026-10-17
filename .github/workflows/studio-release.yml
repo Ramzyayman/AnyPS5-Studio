@@ -62,12 +62,17 @@ jobs:
             tag="v$(node -p "require('./ui/package.json').version")"
           fi
           echo "Publishing release $tag to GitHub..."
+          extra_args=""
+          if [[ "$tag" == *"-"* || "$tag" == *"preview"* || "$tag" == *"rc"* ]]; then
+            extra_args="--prerelease"
+          fi
           gh release create "$tag" \
             ui/dist-installer/AnyPS5-Studio-Setup-*.exe \
             ui/dist-installer/AnyPS5-Studio-Setup-*.exe.blockmap \
             ui/dist-installer/latest.yml \
             --title "AnyPS5 Studio $tag" \
             --generate-notes \
+            $extra_args \
             --verify-tag || \
           gh release upload "$tag" \
             ui/dist-installer/AnyPS5-Studio-Setup-*.exe \

@@ -286,7 +286,7 @@ class ApiBridge {
     if (window.anyps5?.getAppVersion) {
       return await window.anyps5.getAppVersion();
     }
-    return '1.1.1';
+    return '1.1.2-preview.1';
   }
 
   public async openExternal(url: string): Promise<boolean> {
