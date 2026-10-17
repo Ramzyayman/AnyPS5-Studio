@@ -624,7 +624,8 @@ function getResolvedUnwrapScript(): string {
 function sanitizeModuleDirectory(
   dirPath: string,
   inputElfPath: string,
-  sendLog: (msg: string, level?: string) => void
+  sendLog: (msg: string, level?: string) => void,
+  knownSystemLibs?: Set<string>
 ) {
   if (!fs.existsSync(dirPath)) return;
   try {
@@ -682,7 +683,18 @@ function sanitizeModuleDirectory(
       isolateReason = 'Backup artifact';
     }
 
-    // Check 3: Inspect ELF header to detect non-shared ELFs (ET_EXEC = 2, etc.)
+    // Check 3: Fake system library stubs dumped by jailbreak tools (e.g. libSceAgc.sprx, libSceAgcDriver.sprx, libScePsml.sprx)
+    // AnyPS5 already provides authoritative clean-room translations in libs/.
+    // If fake dump stubs are treated as guest modules, they conflict with AnyPS5 native Vulkan/OS drivers and crash at runtime.
+    if (!shouldIsolate && knownSystemLibs) {
+      const stem = lower.replace(/(\.sprx|\.prx|\.native|\.guest)+$/i, '');
+      if (knownSystemLibs.has(stem)) {
+        shouldIsolate = true;
+        isolateReason = `Conflicting system library stub (provided natively by AnyPS5 in libs/${stem}.prx)`;
+      }
+    }
+
+    // Check 4: Inspect ELF header to detect non-shared ELFs (ET_EXEC = 2, etc.)
     if (!shouldIsolate) {
       try {
         const header = Buffer.alloc(64);
@@ -794,29 +806,102 @@ function fixGameHierarchyInPlace(gameDir: string, sendLog: (msg: string, level?:
         }
       }
     }
+  } else {
+    // Check for redundant nested app0/app0 hierarchy created by archive extraction tools
+    try {
+      const nestedApp0 = path.join(app0Dir, 'app0');
+      if (fs.existsSync(nestedApp0) && fs.statSync(nestedApp0).isDirectory()) {
+        const nestedFiles = fs.readdirSync(nestedApp0);
+        if (nestedFiles.some((f) => f.toLowerCase().startsWith('eboot') || f.toLowerCase() === 'sce_sys' || f.toLowerCase() === 'sce_module')) {
+          sendLog(`[AnyPS5] Flattening redundant nested "app0/app0" directory container...`, 'info');
+          for (const item of nestedFiles) {
+            const src = path.join(nestedApp0, item);
+            const dst = path.join(app0Dir, item);
+            if (!fs.existsSync(dst)) {
+              try {
+                fs.renameSync(src, dst);
+              } catch {
+                if (fs.statSync(src).isDirectory()) {
+                  fs.cpSync(src, dst, { recursive: true });
+                  fs.rmSync(src, { recursive: true, force: true });
+                } else {
+                  fs.copyFileSync(src, dst);
+                  fs.unlinkSync(src);
+                }
+              }
+            }
+          }
+          try { fs.rmdirSync(nestedApp0); } catch {}
+        }
+      }
+    } catch (nestedErr) {
+      console.warn('Nested app0 check error:', nestedErr);
+    }
   }
 
-  // 3. Deploy clean-room PRX system libraries into libs/ in-place
+  // 3. Deploy clean-room PRX system libraries and runtime DLLs into libs/ and application directory
   const gameLibs = path.join(resolved, 'libs');
   if (!fs.existsSync(gameLibs) || !fs.statSync(gameLibs).isDirectory()) {
     if (fs.existsSync(gameLibs)) fs.rmSync(gameLibs, { recursive: true, force: true });
     fs.mkdirSync(gameLibs, { recursive: true });
   }
 
+  const knownSystemLibs = new Set<string>();
   const sourceLibs = getResolvedLibsPath();
   if (sourceLibs && fs.existsSync(sourceLibs)) {
-    const prxFiles = fs.readdirSync(sourceLibs);
-    let copiedCount = 0;
-    for (const prx of prxFiles) {
-      const s = path.join(sourceLibs, prx);
-      const d = path.join(gameLibs, prx);
-      if (fs.statSync(s).isFile() && !fs.existsSync(d)) {
-        fs.copyFileSync(s, d);
-        copiedCount++;
+    const sourceFiles = fs.readdirSync(sourceLibs);
+    let copiedLibsCount = 0;
+    let copiedRootCount = 0;
+
+    for (const file of sourceFiles) {
+      const s = path.join(sourceLibs, file);
+      let stat: fs.Stats;
+      try {
+        stat = fs.statSync(s);
+      } catch {
+        continue;
+      }
+      if (!stat.isFile()) continue;
+
+      const lower = file.toLowerCase();
+      const isPrx = lower.endsWith('.prx');
+      const isDll = lower.endsWith('.dll');
+
+      if (isPrx) {
+        const stem = lower.replace(/(\.prx|\.native)+$/i, '');
+        knownSystemLibs.add(stem);
+      }
+
+      // 3a. Deploy to gameDir/libs/ (legacy & relinker search directory)
+      const dLibs = path.join(gameLibs, file);
+      if (!fs.existsSync(dLibs) || fs.statSync(dLibs).size !== stat.size) {
+        fs.copyFileSync(s, dLibs);
+        copiedLibsCount++;
+      }
+
+      // 3b. Deploy runtime DLLs (libstdc++-6.dll, libwinpthread-1.dll, libgcc_s_seh-1.dll)
+      // and system PRXs directly into gameDir/ (the application root alongside app.exe).
+      // Windows 0x1100 (LOAD_LIBRARY_SEARCH_APPLICATION_DIR) exclusively searches the exe directory,
+      // resolving runtime dependencies for all guest modules in app0/ without STATUS_DLL_NOT_FOUND (0xC0000135).
+      if (isDll || isPrx) {
+        const dRoot = path.join(resolved, file);
+        if (!fs.existsSync(dRoot) || fs.statSync(dRoot).size !== stat.size) {
+          fs.copyFileSync(s, dRoot);
+          copiedRootCount++;
+        }
+
+        // Also deploy runtime DLLs directly into app0/ for direct DLL load directory searches
+        if (isDll) {
+          const dApp0 = path.join(app0Dir, file);
+          if (!fs.existsSync(dApp0) || fs.statSync(dApp0).size !== stat.size) {
+            fs.copyFileSync(s, dApp0);
+          }
+        }
       }
     }
-    if (copiedCount > 0) {
-      sendLog(`[AnyPS5] Deployed ${copiedCount} clean-room PRX system libraries into libs/.`, 'success');
+
+    if (copiedLibsCount > 0 || copiedRootCount > 0) {
+      sendLog(`[AnyPS5] Deployed clean-room PRX system libraries and runtime DLLs into libs/ and application directory.`, 'success');
     }
   }
 
@@ -950,17 +1035,51 @@ function fixGameHierarchyInPlace(gameDir: string, sendLog: (msg: string, level?:
     fs.mkdirSync(sceModuleDir, { recursive: true });
   }
 
-  // 7. Discover, clean and unwrap all guest modules across app0/ (including sce_module, games/, Plugins/, etc.)
+  // 7. Discover, clean, unwrap and deduplicate all guest modules across app0/
   const moduleDirs: string[] = [];
   try {
     const unwrapScript = getResolvedUnwrapScript();
-    const discoveredDirs = new Set<string>();
+
+    // Helper to inspect binary header for ELF magic and encrypted SELF container magic
+    const inspectModuleType = (filePath: string): { isElf: boolean; isSelf: boolean; size: number; mtime: number } => {
+      try {
+        const stat = fs.statSync(filePath);
+        const buf = Buffer.alloc(4);
+        const fd = fs.openSync(filePath, 'r');
+        fs.readSync(fd, buf, 0, 4, 0);
+        fs.closeSync(fd);
+        const magic = buf.readUInt32LE(0);
+        const isElf = buf[0] === 0x7f && buf[1] === 0x45 && buf[2] === 0x4c && buf[3] === 0x46;
+        const isSelf = magic === 0x1D3D154F || magic === 0xEEF51454;
+        return { isElf, isSelf, size: stat.size, mtime: stat.mtimeMs };
+      } catch {
+        return { isElf: false, isSelf: false, size: 0, mtime: 0 };
+      }
+    };
+
+    // Phase A: Recursively scan directories, isolate fake/dumper stubs, and unwrap encrypted modules
+    const candidateDirs = new Set<string>();
 
     function scanDirectory(currentDir: string) {
       let entries: string[] = [];
       try {
         entries = fs.readdirSync(currentDir);
       } catch {
+        return;
+      }
+
+      const dirNameLower = path.basename(currentDir).toLowerCase();
+      // Isolate dummy jailbreak dumper folders (e.g. fakelib, fake_lib, dummylibs)
+      if (['fakelib', 'fake_lib', 'fakelibs', 'fake_module', 'fake_modules', 'dummylibs'].includes(dirNameLower)) {
+        sendLog(`[AnyPS5] Isolating dummy dumper stub folder "${dirNameLower}" to module_backups/`, 'info');
+        const parentBackup = path.join(path.dirname(currentDir), 'module_backups', dirNameLower);
+        try {
+          if (!fs.existsSync(path.dirname(parentBackup))) fs.mkdirSync(path.dirname(parentBackup), { recursive: true });
+          if (fs.existsSync(parentBackup)) fs.rmSync(parentBackup, { recursive: true, force: true });
+          fs.renameSync(currentDir, parentBackup);
+        } catch (fakeMoveErr) {
+          console.warn('Failed to move fake stub folder:', fakeMoveErr);
+        }
         return;
       }
 
@@ -988,8 +1107,8 @@ function fixGameHierarchyInPlace(gameDir: string, sendLog: (msg: string, level?:
       }
 
       if (prxFiles.length > 0) {
-        // Sanitize this module directory: isolate eboot binaries, non-shared ELFs, and backup artifacts
-        sanitizeModuleDirectory(currentDir, inputElf, sendLog);
+        // Sanitize this directory: filter out eboot binaries, non-shared ELFs, backup artifacts, and fake system stubs
+        sanitizeModuleDirectory(currentDir, inputElf, sendLog, knownSystemLibs);
 
         const backupDir = path.join(currentDir, 'module_backups');
 
@@ -998,12 +1117,8 @@ function fixGameHierarchyInPlace(gameDir: string, sendLog: (msg: string, level?:
           const fullPrx = path.join(currentDir, prx);
           if (!fs.existsSync(fullPrx)) continue;
           try {
-            const buf = Buffer.alloc(4);
-            const fd = fs.openSync(fullPrx, 'r');
-            fs.readSync(fd, buf, 0, 4, 0);
-            fs.closeSync(fd);
-            const magic = buf.readUInt32LE(0);
-            if (magic === 0x1D3D154F || magic === 0xEEF51454) {
+            const modInfo = inspectModuleType(fullPrx);
+            if (modInfo.isSelf) {
               const unwrapped = fullPrx + '.unwrapped';
               const res = spawnSync('python', [unwrapScript, fullPrx, unwrapped]);
               if (res.status === 0 && fs.existsSync(unwrapped)) {
@@ -1019,25 +1134,128 @@ function fixGameHierarchyInPlace(gameDir: string, sendLog: (msg: string, level?:
           }
         }
 
-        // Register relative directory if outside standard sce_module
-        const rel = path.relative(app0Dir, currentDir).replace(/\\/g, '/');
-        if (rel) {
-          if (!['sce_module', 'sce_modules', 'prx'].includes(rel)) {
-            discoveredDirs.add(rel);
-          }
-        } else {
-          // Bundled guest PRX modules located directly in app0/ root (e.g. libcohtml, libfmod in Minecraft)
-          // Per AnyPS5 specification: "--module-dir . is the parent itself, without the input ELF"
-          discoveredDirs.add('.');
-        }
+        candidateDirs.add(currentDir);
       }
     }
 
     scanDirectory(app0Dir);
+    if (fs.existsSync(sceModuleDir)) candidateDirs.add(sceModuleDir);
+    if (fs.existsSync(prxDir)) candidateDirs.add(prxDir);
 
-    // Also sanitize standard module directories if present
-    if (fs.existsSync(sceModuleDir)) sanitizeModuleDirectory(sceModuleDir, inputElf, sendLog);
-    if (fs.existsSync(prxDir)) sanitizeModuleDirectory(prxDir, inputElf, sendLog);
+    // Phase B: Cross-directory guest module deduplication
+    // In titles like Marvel's Wolverine, duplicate copies of identical modules (e.g. libRenoirCore.PS5.prx)
+    // can exist across multiple directories (e.g. sce_module/ and decrypted/).
+    // Relinker's GuestModuleBuilder registers output files by filename (<stem>.guest.prx) and throws:
+    // "FAIL: Conflicting guest output filename: libRenoirCore.PS5.prx.guest.prx" if the same module is discovered twice.
+    // We register the best candidate (preferring decrypted ELF, standard sce_module location, or newer timestamp)
+    // and isolate conflicting duplicates to module_backups/.
+    interface GuestCandidate {
+      fullPath: string;
+      dir: string;
+      entry: string;
+      isElf: boolean;
+      size: number;
+      mtime: number;
+      isStandardDir: boolean;
+    }
+
+    const seenGuestModules = new Map<string, GuestCandidate>();
+
+    for (const dir of candidateDirs) {
+      if (!fs.existsSync(dir)) continue;
+      let dirEntries: string[] = [];
+      try {
+        dirEntries = fs.readdirSync(dir);
+      } catch {
+        continue;
+      }
+
+      for (const entry of dirEntries) {
+        const fullPath = path.join(dir, entry);
+        let stat: fs.Stats;
+        try {
+          stat = fs.statSync(fullPath);
+        } catch {
+          continue;
+        }
+        if (!stat.isFile()) continue;
+
+        const lower = entry.toLowerCase();
+        if (!lower.endsWith('.prx') && !lower.endsWith('.sprx')) continue;
+        if (path.resolve(fullPath).toLowerCase() === path.resolve(inputElf).toLowerCase()) continue;
+
+        const modInfo = inspectModuleType(fullPath);
+        const relDir = path.relative(app0Dir, dir).replace(/\\/g, '/');
+        const isStandardDir = ['sce_module', 'sce_modules', 'prx'].includes(relDir);
+
+        const candidate: GuestCandidate = {
+          fullPath,
+          dir,
+          entry,
+          isElf: modInfo.isElf,
+          size: modInfo.size,
+          mtime: modInfo.mtime,
+          isStandardDir,
+        };
+
+        const key = lower;
+        const existing = seenGuestModules.get(key);
+
+        if (!existing) {
+          seenGuestModules.set(key, candidate);
+        } else {
+          // Compare existing candidate vs new candidate
+          let keepCandidate = false;
+
+          // Priority 1: Decrypted ELF over encrypted SELF or unknown binary
+          if (candidate.isElf && !existing.isElf) {
+            keepCandidate = true;
+          } else if (!candidate.isElf && existing.isElf) {
+            keepCandidate = false;
+          } else if (candidate.isStandardDir && !existing.isStandardDir) {
+            // Priority 2: Standard PlayStation module directory (sce_module)
+            keepCandidate = true;
+          } else if (!candidate.isStandardDir && existing.isStandardDir) {
+            keepCandidate = false;
+          } else {
+            // Priority 3: Larger file size or newer modification timestamp
+            keepCandidate = candidate.size > existing.size || (candidate.size === existing.size && candidate.mtime > existing.mtime);
+          }
+
+          const winner = keepCandidate ? candidate : existing;
+          const loser = keepCandidate ? existing : candidate;
+
+          // Isolate conflicting duplicate to that directory's module_backups/
+          const loserBackupDir = path.join(loser.dir, 'module_backups');
+          try {
+            if (!fs.existsSync(loserBackupDir)) fs.mkdirSync(loserBackupDir, { recursive: true });
+            const target = path.join(loserBackupDir, loser.entry);
+            if (fs.existsSync(target)) fs.unlinkSync(target);
+            fs.renameSync(loser.fullPath, target);
+            sendLog(`[AnyPS5] Deduplicated guest module "${loser.entry}" (conflicting duplicate in "${path.relative(app0Dir, loser.fullPath)}" isolated to module_backups/)`, 'info');
+          } catch (dedupErr) {
+            console.warn(`Failed to isolate duplicate module ${loser.fullPath}:`, dedupErr);
+          }
+
+          seenGuestModules.set(key, winner);
+        }
+      }
+    }
+
+    // Phase C: Register relative directories that still contain active, non-duplicate guest modules
+    const discoveredDirs = new Set<string>();
+    for (const [, mod] of seenGuestModules) {
+      const rel = path.relative(app0Dir, mod.dir).replace(/\\/g, '/');
+      if (rel) {
+        if (!['sce_module', 'sce_modules', 'prx'].includes(rel)) {
+          discoveredDirs.add(rel);
+        }
+      } else {
+        // Bundled guest PRX modules located directly in app0/ root (e.g. libcohtml, libfmod in Minecraft)
+        // Per AnyPS5 specification: "--module-dir . is the parent itself, without the input ELF"
+        discoveredDirs.add('.');
+      }
+    }
 
     moduleDirs.push(...Array.from(discoveredDirs));
   } catch (modScanErr) {
@@ -1272,6 +1490,18 @@ ipcMain.handle('anyps5:launch-game', async (_, game) => {
       childEnv.ANYPS5_GPU = gpuToUse;
     }
 
+    // Prepend application root, libs/, and app0/ to PATH so child processes and loaders locate all dependencies
+    const runtimeDirs = [
+      game.path,
+      path.join(game.path, 'libs'),
+      path.join(game.path, 'app0'),
+      path.join(game.path, 'app0', 'sce_module'),
+    ];
+    const existingPath = childEnv.Path || childEnv.PATH || '';
+    const newPath = runtimeDirs.join(';') + (existingPath ? ';' + existingPath : '');
+    childEnv.Path = newPath;
+    childEnv.PATH = newPath;
+
     const child = spawn(targetExe, [], {
       cwd: game.path,
       env: childEnv,
@@ -1315,6 +1545,23 @@ ipcMain.handle('anyps5:launch-game', async (_, game) => {
     child.on('close', (code) => {
       const exitCodeHex = code !== null ? '0x' + (code >>> 0).toString(16).toUpperCase() : 'null';
       sendLog(`[AnyPS5] Game process exited with code ${code} (${exitCodeHex})`, code === 0 ? 'info' : 'warn');
+
+      // Surface runtime diagnostics from anyps5.log if generated in game directory
+      try {
+        const anyps5Log = path.join(game.path, 'anyps5.log');
+        if (fs.existsSync(anyps5Log)) {
+          const content = fs.readFileSync(anyps5Log, 'utf8');
+          const lines = content.split(/\r?\n/).filter(Boolean);
+          if (lines.length > 0) {
+            sendLog(`[AnyPS5 Runtime Log] Captured ${lines.length} diagnostic log entries:`, 'info');
+            for (const l of lines) {
+              sendLog(`[AnyPS5 Runtime Log] ${l}`, 'warn');
+            }
+          }
+        }
+      } catch (logErr) {
+        console.warn('Failed to read anyps5.log:', logErr);
+      }
 
       if (code === 3221225477 || code === -1073741819) {
         sendLog(`[AnyPS5 Diagnostics] Crash detected: Access Violation (0xC0000005). If the title was relinked with aggressive import filtering, ensure 'Unused Import Optimization' is set to Level 0 (Safe / Full Compatibility) to preserve all C++ virtual tables and dynamic function pointers.`, 'error');
