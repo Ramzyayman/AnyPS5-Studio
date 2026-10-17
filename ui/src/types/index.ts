@@ -74,6 +74,15 @@ export interface SystemTelemetry {
   recommendationReason?: string;
 }
 
+export interface DetectedGpu {
+  name: string;
+  vendor?: 'nvidia' | 'amd' | 'intel' | 'apple' | 'virtual' | 'other';
+  isDiscrete: boolean;
+  isVirtual: boolean;
+  adapterRamMb?: number;
+  driverVersion?: string;
+}
+
 export interface AppSettings {
   relinkerPath: string;
   prxPath: string;
@@ -82,6 +91,7 @@ export interface AppSettings {
   soundEnabled: boolean;
   hapticsEnabled: boolean;
   advanced: boolean;
+  preferredGpu?: string;
   defaultRelinkerPath?: string;
   defaultPrxPath?: string;
 }

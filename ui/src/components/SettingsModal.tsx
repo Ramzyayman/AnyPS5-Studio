@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import { audioService } from '../services/audioService';
 import { apiBridge } from '../services/apiBridge';
-import { UpdateStatus } from '../types';
+import { UpdateStatus, DetectedGpu } from '../types';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -36,6 +36,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [defaultPrxPath, setDefaultPrxPath] = useState<string>('');
   const [defaultTarget, setDefaultTarget] = useState<string>('windows');
   const [cpuFix, setCpuFix] = useState<string>('intel');
+  const [preferredGpu, setPreferredGpu] = useState<string>('auto');
+  const [availableGpus, setAvailableGpus] = useState<DetectedGpu[]>([]);
   const [soundEnabled, setSoundEnabled] = useState<boolean>(audioService.enabled);
   const [hapticsEnabled, setHapticsEnabled] = useState<boolean>(true);
   const [advanced, setAdvanced] = useState<boolean>(showAdvancedNav);
@@ -53,6 +55,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   useEffect(() => {
     if (isOpen) {
       setAdvanced(showAdvancedNav);
+      apiBridge.getAvailableGpus().then((gpus) => {
+        if (Array.isArray(gpus)) {
+          setAvailableGpus(gpus);
+        }
+      }).catch(() => {});
       apiBridge.getSettings().then((settings) => {
         if (settings) {
           if (settings.relinkerPath) setRelinkerPath(settings.relinkerPath);
@@ -61,6 +68,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           if (settings.defaultPrxPath) setDefaultPrxPath(settings.defaultPrxPath);
           if (settings.defaultTarget) setDefaultTarget(settings.defaultTarget);
           if (settings.cpuFix) setCpuFix(settings.cpuFix);
+          if (settings.preferredGpu) setPreferredGpu(settings.preferredGpu);
           if (settings.soundEnabled !== undefined) {
             setSoundEnabled(settings.soundEnabled);
             audioService.enabled = settings.soundEnabled;
@@ -73,6 +81,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       });
     }
   }, [isOpen]);
+
+  const primaryDiscreteGpu = availableGpus.find((g) => g.isDiscrete && !g.isVirtual) ||
+    availableGpus.find((g) => !g.isVirtual) ||
+    availableGpus[0];
 
   if (!isOpen) return null;
 
@@ -107,6 +119,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const handleResetDefaults = () => {
     if (defaultRelinkerPath) setRelinkerPath(defaultRelinkerPath);
     if (defaultPrxPath) setPrxPath(defaultPrxPath);
+    setPreferredGpu('auto');
   };
 
   const handleCheckForUpdates = async () => {
@@ -132,6 +145,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       soundEnabled,
       hapticsEnabled,
       advanced,
+      preferredGpu,
     });
     onToggleAdvancedNav(advanced);
     onClose();
@@ -139,7 +153,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-black/80 backdrop-blur-md animate-fade-in">
-      <div className="relative w-full max-w-lg bg-[#0b0e14]/95 rounded-2xl border border-white/10 overflow-hidden shadow-2xl p-6">
+      <div className="relative w-full max-w-lg max-h-[90vh] overflow-y-auto bg-[#0b0e14]/95 rounded-2xl border border-white/10 shadow-2xl p-6 custom-scrollbar">
         <div className="flex items-center justify-between pb-4 border-b border-white/10 mb-4">
           <div className="flex items-center space-x-2.5">
             <Settings className="w-4 h-4 text-white/70" />
@@ -221,6 +235,34 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <option value="rosetta">Apple Silicon (Rosetta JIT)</option>
               </select>
             </div>
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-xs font-medium text-white/70">Graphics Device (Vulkan GPU)</label>
+              {preferredGpu !== 'auto' && (
+                <span className="text-[10px] text-[#0070d1] font-medium bg-[#0070d1]/10 px-2 py-0.5 rounded-full border border-[#0070d1]/20">
+                  Custom GPU Bound
+                </span>
+              )}
+            </div>
+            <select
+              value={preferredGpu}
+              onChange={(e) => setPreferredGpu(e.target.value)}
+              className="w-full px-3 py-2 rounded-xl bg-[#141923] border border-white/10 text-white text-xs focus:outline-none focus:border-white/30 transition-all cursor-pointer font-sans"
+            >
+              <option value="auto">
+                Auto ({primaryDiscreteGpu ? `Discrete: ${primaryDiscreteGpu.name}` : 'High Performance Discrete'})
+              </option>
+              {availableGpus.map((gpu) => (
+                <option key={gpu.name} value={gpu.name}>
+                  {gpu.name} {gpu.isVirtual ? '(Virtual Adapter)' : gpu.isDiscrete ? '(Dedicated GPU)' : '(Integrated)'}
+                </option>
+              ))}
+            </select>
+            <p className="text-[11px] text-white/40 mt-1">
+              Forces Vulkan runtime to bind to your preferred physical graphics card and prevents selection of virtual display adapters.
+            </p>
           </div>
 
           <div className="pt-2 border-t border-white/10 space-y-2.5">

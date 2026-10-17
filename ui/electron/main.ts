@@ -367,6 +367,139 @@ interface AppSettings {
   soundEnabled?: boolean;
   hapticsEnabled?: boolean;
   advanced?: boolean;
+  preferredGpu?: string;
+}
+
+interface DetectedGpu {
+  name: string;
+  vendor?: 'nvidia' | 'amd' | 'intel' | 'apple' | 'virtual' | 'other';
+  isDiscrete: boolean;
+  isVirtual: boolean;
+  adapterRamMb?: number;
+  driverVersion?: string;
+}
+
+function detectAvailableGpus(): DetectedGpu[] {
+  const gpus: DetectedGpu[] = [];
+  const platform = os.platform();
+
+  if (platform === 'win32') {
+    try {
+      const cmd = `Get-CimInstance Win32_VideoController | Select-Object -Property Name, AdapterRAM, Status, VideoProcessor, DriverVersion, PNPDeviceID | ConvertTo-Json`;
+      const out = spawnSync('powershell', ['-NoProfile', '-Command', cmd], {
+        encoding: 'utf8',
+        timeout: 5000,
+      });
+      if (out.stdout && out.stdout.trim()) {
+        const parsed = JSON.parse(out.stdout.trim());
+        const rawList = Array.isArray(parsed) ? parsed : [parsed];
+
+        for (const item of rawList) {
+          if (!item || !item.Name || typeof item.Name !== 'string') continue;
+          const name = item.Name.trim();
+          if (!name) continue;
+
+          const pnp = (item.PNPDeviceID || '').toUpperCase();
+          const lowerName = name.toLowerCase();
+
+          // Check if device is a virtual monitor or indirect display adapter
+          const isVirtual =
+            lowerName.includes('meta virtual') ||
+            lowerName.includes('oculus') ||
+            lowerName.includes('virtual desktop') ||
+            lowerName.includes('spacedesk') ||
+            lowerName.includes('parsec') ||
+            lowerName.includes('indirect display') ||
+            lowerName.includes('iddcx') ||
+            lowerName.includes('citrix') ||
+            lowerName.includes('vbox') ||
+            lowerName.includes('vmware') ||
+            lowerName.includes('basic render') ||
+            lowerName.includes('microsoft basic display') ||
+            lowerName.includes('displaylink') ||
+            (!pnp.startsWith('PCI\\') && (lowerName.includes('virtual') || lowerName.includes('remote') || lowerName.includes('mirror')));
+
+          // Vendor classification
+          let vendor: DetectedGpu['vendor'] = 'other';
+          if (lowerName.includes('nvidia') || lowerName.includes('geforce') || lowerName.includes('rtx') || lowerName.includes('gtx') || pnp.includes('VEN_10DE')) {
+            vendor = 'nvidia';
+          } else if (lowerName.includes('amd') || lowerName.includes('radeon') || pnp.includes('VEN_1002')) {
+            vendor = 'amd';
+          } else if (lowerName.includes('intel') || lowerName.includes('arc') || pnp.includes('VEN_8086')) {
+            vendor = 'intel';
+          } else if (isVirtual) {
+            vendor = 'virtual';
+          }
+
+          const ramBytes = typeof item.AdapterRAM === 'number' ? item.AdapterRAM : parseInt(item.AdapterRAM || '0', 10);
+          const adapterRamMb = ramBytes > 0 ? Math.round(ramBytes / (1024 * 1024)) : undefined;
+
+          // Discrete GPU determination: PCIe device with NVIDIA, dedicated AMD RX, Intel Arc, or dedicated VRAM >= 1024MB
+          const isDiscrete = !isVirtual && (
+            vendor === 'nvidia' ||
+            (vendor === 'amd' && (lowerName.includes('rx') || lowerName.includes('radeon pro') || !lowerName.includes('graphics'))) ||
+            (vendor === 'intel' && lowerName.includes('arc')) ||
+            (adapterRamMb !== undefined && adapterRamMb >= 1024 && pnp.startsWith('PCI\\'))
+          );
+
+          gpus.push({
+            name,
+            vendor,
+            isDiscrete,
+            isVirtual,
+            adapterRamMb,
+            driverVersion: item.DriverVersion || undefined,
+          });
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to detect GPUs via PowerShell:', err);
+    }
+  } else if (platform === 'darwin') {
+    gpus.push({
+      name: 'Apple Metal Graphics Device',
+      vendor: 'apple',
+      isDiscrete: true,
+      isVirtual: false,
+    });
+  } else if (platform === 'linux') {
+    try {
+      const out = spawnSync('lspci', [], { encoding: 'utf8', timeout: 3000 });
+      if (out.stdout) {
+        const vgaLines = out.stdout.split('\n').filter(l => l.includes('VGA compatible controller') || l.includes('3D controller'));
+        for (const line of vgaLines) {
+          const parts = line.split(': ');
+          const gpuDesc = (parts[1] || line).trim();
+          const lower = gpuDesc.toLowerCase();
+          const isNvidia = lower.includes('nvidia');
+          const isAmd = lower.includes('amd') || lower.includes('radeon');
+          gpus.push({
+            name: gpuDesc,
+            vendor: isNvidia ? 'nvidia' : (isAmd ? 'amd' : 'intel'),
+            isDiscrete: isNvidia || isAmd,
+            isVirtual: false,
+          });
+        }
+      }
+    } catch {}
+  }
+
+  // Deduplicate by name
+  const seen = new Set<string>();
+  const unique = gpus.filter(g => {
+    if (seen.has(g.name)) return false;
+    seen.add(g.name);
+    return true;
+  });
+
+  // Sort: Physical discrete first, then integrated, then virtual adapters last
+  unique.sort((a, b) => {
+    if (a.isVirtual !== b.isVirtual) return a.isVirtual ? 1 : -1;
+    if (a.isDiscrete !== b.isDiscrete) return a.isDiscrete ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+
+  return unique;
 }
 
 function loadSettings(): AppSettings {
@@ -946,8 +1079,28 @@ ipcMain.handle('anyps5:launch-game', async (_, game) => {
   }
 
   try {
+    const childEnv: NodeJS.ProcessEnv = { ...process.env };
+    const userSettings = loadSettings();
+    let gpuToUse = '';
+
+    if (userSettings.preferredGpu && userSettings.preferredGpu !== 'auto' && userSettings.preferredGpu.trim() !== '') {
+      gpuToUse = userSettings.preferredGpu.trim();
+    } else {
+      // Auto: detect best discrete physical GPU
+      const gpus = detectAvailableGpus();
+      const bestDiscrete = gpus.find((g) => g.isDiscrete && !g.isVirtual);
+      if (bestDiscrete) {
+        gpuToUse = bestDiscrete.name;
+      }
+    }
+
+    if (gpuToUse) {
+      childEnv.ANYPS5_GPU = gpuToUse;
+    }
+
     const child = spawn(targetExe, [], {
       cwd: game.path,
+      env: childEnv,
       windowsHide: false,
     });
     activeGameProcess = child;
@@ -962,6 +1115,14 @@ ipcMain.handle('anyps5:launch-game', async (_, game) => {
 
     sendLog(`[AnyPS5] Launching native ported executable: ${targetExe}`);
     sendLog(`[AnyPS5] Initialized child process PID: ${child.pid}`);
+    if (gpuToUse) {
+      if (userSettings.preferredGpu && userSettings.preferredGpu !== 'auto' && userSettings.preferredGpu.trim() !== '') {
+        sendLog(`[AnyPS5 Graphics] Bound Graphics Device (GPU): "${gpuToUse}" (configured in Settings)`, 'info');
+      } else {
+        sendLog(`[AnyPS5 Graphics] Auto-selected High-Performance GPU: "${gpuToUse}" (prioritized over virtual display adapters)`, 'info');
+      }
+      sendLog(`[AnyPS5 Environment] ANYPS5_GPU="${gpuToUse}"`, 'info');
+    }
 
     child.stdout?.on('data', (d) => {
       const lines = d.toString().split(/\r?\n/).filter(Boolean);
@@ -1050,20 +1211,18 @@ ipcMain.handle('anyps5:get-telemetry', async () => {
     osName = `Linux (${release}, ${cpuArch})`;
   }
 
-  // Detect GPU name safely
+  // Detect GPU name safely (prioritizing user settings or discrete physical GPU over virtual display adapters)
   let gpuName = 'DirectX 12 / Vulkan Compatible GPU';
-  if (platform === 'win32') {
-    try {
-      const out = spawnSync('powershell', ['-NoProfile', '-Command', '(Get-CimInstance Win32_VideoController).Name'], {
-        encoding: 'utf8',
-        timeout: 4000,
-      });
-      const lines = out.stdout ? out.stdout.trim().split(/\r?\n/).filter(Boolean) : [];
-      if (lines.length > 0) {
-        gpuName = lines[0];
-      }
-    } catch {}
-  }
+  try {
+    const availableGpus = detectAvailableGpus();
+    const userSettings = loadSettings();
+    if (userSettings.preferredGpu && userSettings.preferredGpu !== 'auto' && userSettings.preferredGpu.trim() !== '') {
+      gpuName = userSettings.preferredGpu;
+    } else if (availableGpus.length > 0) {
+      const primary = availableGpus.find(g => g.isDiscrete && !g.isVirtual) || availableGpus.find(g => !g.isVirtual) || availableGpus[0];
+      gpuName = primary.name;
+    }
+  } catch {}
 
   // Locate relinker executable
   const relinkerPath = getResolvedRelinkerPath();
@@ -1152,6 +1311,7 @@ ipcMain.handle('anyps5:get-settings', async () => {
     soundEnabled: userSettings.soundEnabled !== undefined ? userSettings.soundEnabled : true,
     hapticsEnabled: userSettings.hapticsEnabled !== undefined ? userSettings.hapticsEnabled : true,
     advanced: userSettings.advanced !== undefined ? userSettings.advanced : false,
+    preferredGpu: userSettings.preferredGpu || 'auto',
     defaultRelinkerPath,
     defaultPrxPath,
   };
@@ -1160,6 +1320,10 @@ ipcMain.handle('anyps5:get-settings', async () => {
 ipcMain.handle('anyps5:save-settings', async (_, newSettings) => {
   saveSettings(newSettings);
   return true;
+});
+
+ipcMain.handle('anyps5:get-available-gpus', async () => {
+  return detectAvailableGpus();
 });
 
 ipcMain.handle('anyps5:select-file', async (_, filters) => {

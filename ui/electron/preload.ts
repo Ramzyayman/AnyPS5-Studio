@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('anyps5', {
   getSystemTelemetry: () => ipcRenderer.invoke('anyps5:get-telemetry'),
   getSettings: () => ipcRenderer.invoke('anyps5:get-settings'),
   saveSettings: (settings: unknown) => ipcRenderer.invoke('anyps5:save-settings', settings),
+  getAvailableGpus: () => ipcRenderer.invoke('anyps5:get-available-gpus'),
   selectFile: (filters?: unknown) => ipcRenderer.invoke('anyps5:select-file', filters),
   checkForUpdates: () => ipcRenderer.invoke('anyps5:check-for-updates'),
   quitAndInstallUpdate: () => ipcRenderer.invoke('anyps5:quit-and-install-update'),
