@@ -92,7 +92,8 @@ if (!gotTheLock) {
     try {
       autoUpdater.autoDownload = true;
       autoUpdater.autoInstallOnAppQuit = true;
-      autoUpdater.allowPrerelease = true;
+      // Stable users only receive full releases; preview builds are excluded from the auto-update feed
+      autoUpdater.allowPrerelease = false;
 
       const sendUpdateStatus = (status: {
         status: 'idle' | 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'error';
