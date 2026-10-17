@@ -1,0 +1,85 @@
+name: AnyPS5 Studio Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: studio-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-publish:
+    name: Build & Publish AnyPS5 Studio
+    runs-on: windows-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Fetch upstream relinker binary & PRX libraries
+        shell: bash
+        run: |
+          mkdir -p build libs
+          echo "Fetching official relinker binary..."
+          curl.exe -sSfL -o build/relinker.exe https://github.com/boykopovar/AnyPS5/releases/download/v0.1.2/relinker-v0.1.2.exe
+          echo "Fetching official PRX libraries..."
+          curl.exe -sSfL -o prx-windows.zip https://github.com/boykopovar/AnyPS5/releases/download/v0.1.2/prx-windows-v0.1.2.zip
+          tar.exe -xf prx-windows.zip -C libs/
+          rm -f prx-windows.zip
+          ls -la build/
+
+      - name: Install dependencies
+        working-directory: ui
+        run: npm ci
+
+      - name: Compile and package Studio installer
+        working-directory: ui
+        run: npm run dist -- --publish never
+
+      - name: Publish to GitHub Releases
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="${{ github.ref_name }}"
+          if [[ -z "$tag" || "$tag" == "main" ]]; then
+            tag="v$(node -p "require('./ui/package.json').version")"
+          fi
+          echo "Publishing release $tag to GitHub..."
+          gh release create "$tag" \
+            ui/dist-installer/AnyPS5-Studio-Setup-*.exe \
+            ui/dist-installer/AnyPS5-Studio-Setup-*.exe.blockmap \
+            ui/dist-installer/latest.yml \
+            --title "AnyPS5 Studio $tag" \
+            --generate-notes \
+            --verify-tag || \
+          gh release upload "$tag" \
+            ui/dist-installer/AnyPS5-Studio-Setup-*.exe \
+            ui/dist-installer/AnyPS5-Studio-Setup-*.exe.blockmap \
+            ui/dist-installer/latest.yml \
+            --clobber
+
+      - name: Upload installer workflow artifacts
+        uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: AnyPS5-Studio-Setup
+          path: |
+            ui/dist-installer/*.exe
+            ui/dist-installer/*.blockmap
+            ui/dist-installer/latest.yml
