@@ -43,7 +43,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
   const [soundEnabled, setSoundEnabled] = useState<boolean>(audioService.enabled);
   const [hapticsEnabled, setHapticsEnabled] = useState<boolean>(true);
   const [advanced, setAdvanced] = useState<boolean>(showAdvancedNav);
-  const [appVersion, setAppVersion] = useState<string>('1.1.2-preview.1');
+  const [appVersion, setAppVersion] = useState<string>('1.1.2-preview.2');
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus>({ status: 'idle' });
   const [isSaved, setIsSaved] = useState<boolean>(false);
 
