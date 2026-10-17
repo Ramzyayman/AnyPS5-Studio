@@ -37,11 +37,10 @@ jobs:
           mkdir -p build libs
           echo "Fetching official relinker binary..."
           curl.exe -sSfL -o build/relinker.exe https://github.com/boykopovar/AnyPS5/releases/download/v0.1.2/relinker-v0.1.2.exe
-          echo "Fetching official PRX libraries..."
-          curl.exe -sSfL -o prx-windows.zip https://github.com/boykopovar/AnyPS5/releases/download/v0.1.2/prx-windows-v0.1.2.zip
-          tar.exe -xf prx-windows.zip -C libs/
+          powershell.exe -NoProfile -Command "Expand-Archive -Path prx-windows.zip -DestinationPath libs -Force"
           rm -f prx-windows.zip
           ls -la build/
+          ls -la libs/ | head -n 5
 
       - name: Install dependencies
         working-directory: ui
