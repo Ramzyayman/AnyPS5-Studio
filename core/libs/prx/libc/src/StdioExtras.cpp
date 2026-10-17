@@ -153,10 +153,6 @@ void APS5_VABI _ZdlPvmSt11align_val_t_nid_postfix(void* pointer, std::size_t, st
     if (pointer != nullptr) ApplicationHeapFree_nid_no_patch(pointer);
 }
 
-void* APS5_VABI _ZnwmSt11align_val_t_nid_postfix(std::size_t size, std::size_t alignment) {
-    return AllocateAligned(size, alignment);
-}
-
 void* APS5_VABI _ZnamSt11align_val_t_nid_postfix(std::size_t size, std::size_t alignment) {
     return AllocateAligned(size, alignment);
 }
