@@ -31,20 +31,24 @@ jobs:
           cache: 'npm'
           cache-dependency-path: ui/package-lock.json
 
-      - name: Fetch upstream relinker binary & PRX libraries
+      - name: Fetch relinker binary & PRX libraries
         shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p build libs
-          echo "Fetching official relinker binary..."
-          curl.exe -sSfL -o build/relinker.exe https://github.com/boykopovar/AnyPS5/releases/download/v0.1.2/relinker-v0.1.2.exe
-          echo "Fetching official PRX libraries..."
-          curl.exe -sSfL -o prx-windows.zip https://github.com/boykopovar/AnyPS5/releases/download/v0.1.2/prx-windows-v0.1.2.zip
-          powershell.exe -NoProfile -Command "Expand-Archive -Path prx-windows.zip -DestinationPath . -Force"
-          rm -f prx-windows.zip
-          if [ -d "libs/libs" ]; then
-            cp -rn libs/libs/* libs/ 2>/dev/null || true
-            rm -rf libs/libs
-          fi
+          echo "Deploying latest core binaries and PRXs..."
+          python tools/deploy_upstream_core.py || {
+            echo "Fallback to official v0.1.2 release binaries..."
+            curl.exe -sSfL -o build/relinker.exe https://github.com/boykopovar/AnyPS5/releases/download/v0.1.2/relinker-v0.1.2.exe
+            curl.exe -sSfL -o prx-windows.zip https://github.com/boykopovar/AnyPS5/releases/download/v0.1.2/prx-windows-v0.1.2.zip
+            powershell.exe -NoProfile -Command "Expand-Archive -Path prx-windows.zip -DestinationPath . -Force"
+            rm -f prx-windows.zip
+            if [ -d "libs/libs" ]; then
+              cp -rn libs/libs/* libs/ 2>/dev/null || true
+              rm -rf libs/libs
+            fi
+          }
           if [ -d "core/libs/overrides" ]; then
             echo "Applying repository PRX overrides..."
             cp -fv core/libs/overrides/* libs/ || true
