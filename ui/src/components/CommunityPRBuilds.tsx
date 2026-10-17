@@ -19,40 +19,71 @@ import {
   GitMerge,
   Clock,
   User,
-  HardDrive
+  HardDrive,
+  CheckSquare,
+  Square,
+  Wrench,
+  X
 } from 'lucide-react';
-import { CommunityPR, PRBuildDownloadProgress } from '../types';
+import { CommunityPR, PRBuildDownloadProgress, MergedBuildInfo } from '../types';
 import { apiBridge } from '../services/apiBridge';
 import { audioService } from '../services/audioService';
 
 interface CommunityPRBuildsProps {
+  initialSearch?: string;
+  onClearInitialSearch?: () => void;
   onNavigateToGames?: () => void;
   onNavigateToRelinker?: () => void;
 }
 
 export const CommunityPRBuilds: React.FC<CommunityPRBuildsProps> = ({
+  initialSearch = '',
+  onClearInitialSearch,
   onNavigateToGames,
   onNavigateToRelinker
 }) => {
   const [prs, setPrs] = useState<CommunityPR[]>([]);
+  const [mergedBuilds, setMergedBuilds] = useState<MergedBuildInfo[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
-  const [searchQuery, setSearchQuery] = useState<string>('');
-  const [filter, setFilter] = useState<'all' | 'installed' | 'open'>('all');
+  const [searchQuery, setSearchQuery] = useState<string>(initialSearch);
+  const [filter, setFilter] = useState<'all' | 'installed' | 'open' | 'merged-builds'>('all');
   const [downloading, setDownloading] = useState<Record<number, PRBuildDownloadProgress>>({});
   const [activePRNumber, setActivePRNumber] = useState<number | null>(null);
+  const [activeMergedId, setActiveMergedId] = useState<string | null>(null);
   const [customPRNumber, setCustomPRNumber] = useState<string>('');
   const [isLookingUp, setIsLookingUp] = useState<boolean>(false);
   const [lookupMessage, setLookupMessage] = useState<string | null>(null);
 
+  // Multi-PR Selection & Merge state
+  const [selectedPRNumbers, setSelectedPRNumbers] = useState<Set<number>>(new Set());
+  const [isMerging, setIsMerging] = useState<boolean>(false);
+  const [mergeProgress, setMergeProgress] = useState<number>(0);
+  const [mergeStatusText, setMergeStatusText] = useState<string>('');
+  const [mergeError, setMergeError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (initialSearch) {
+      setSearchQuery(initialSearch);
+    }
+  }, [initialSearch]);
+
   const loadData = async () => {
     setLoading(true);
     try {
-      const data = await apiBridge.getCommunityPRs();
-      setPrs(data);
-      const active = data.find((p) => p.isActive);
-      setActivePRNumber(active ? active.number : null);
+      const [prData, mergedData] = await Promise.all([
+        apiBridge.getCommunityPRs(),
+        apiBridge.getMergedBuilds()
+      ]);
+      setPrs(prData);
+      setMergedBuilds(mergedData);
+
+      const activePR = prData.find((p) => p.isActive);
+      const activeMerged = mergedData.find((m) => m.isActive);
+
+      setActivePRNumber(activePR ? activePR.number : null);
+      setActiveMergedId(activeMerged ? activeMerged.id : null);
     } catch (err) {
-      console.error('Failed to load community PRs:', err);
+      console.error('Failed to load community PRs and merged builds:', err);
     } finally {
       setLoading(false);
     }
@@ -78,11 +109,14 @@ export const CommunityPRBuilds: React.FC<CommunityPRBuildsProps> = ({
 
   const filteredPRs = useMemo(() => {
     return prs.filter((pr) => {
+      const q = searchQuery.toLowerCase();
       const matchesSearch = 
-        pr.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        pr.number.toString().includes(searchQuery) ||
-        pr.author.login.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        pr.labels.some((l) => l.name.toLowerCase().includes(searchQuery.toLowerCase()));
+        !q ||
+        pr.title.toLowerCase().includes(q) ||
+        pr.number.toString().includes(q) ||
+        pr.author.login.toLowerCase().includes(q) ||
+        pr.body.toLowerCase().includes(q) ||
+        pr.labels.some((l) => l.name.toLowerCase().includes(q));
 
       if (!matchesSearch) return false;
 
@@ -91,6 +125,19 @@ export const CommunityPRBuilds: React.FC<CommunityPRBuildsProps> = ({
       return true;
     });
   }, [prs, searchQuery, filter]);
+
+  const toggleSelectPR = (num: number) => {
+    audioService.playNavTick();
+    setSelectedPRNumbers((prev) => {
+      const next = new Set(prev);
+      if (next.has(num)) {
+        next.delete(num);
+      } else {
+        next.add(num);
+      }
+      return next;
+    });
+  };
 
   const handleDownload = async (pr: CommunityPR) => {
     audioService.playNavTick();
@@ -122,11 +169,22 @@ export const CommunityPRBuilds: React.FC<CommunityPRBuildsProps> = ({
     }
   };
 
-  const handleActivate = async (prNumber: number) => {
+  const handleActivatePR = async (prNumber: number) => {
     audioService.playConfirm();
     const success = await apiBridge.setActivePRBuild(prNumber);
     if (success) {
       setActivePRNumber(prNumber);
+      setActiveMergedId(null);
+      await loadData();
+    }
+  };
+
+  const handleActivateMerged = async (buildId: string) => {
+    audioService.playConfirm();
+    const success = await apiBridge.setActiveMergedBuild(buildId);
+    if (success) {
+      setActiveMergedId(buildId);
+      setActivePRNumber(null);
       await loadData();
     }
   };
@@ -136,18 +194,59 @@ export const CommunityPRBuilds: React.FC<CommunityPRBuildsProps> = ({
     const success = await apiBridge.revertToDefaultBuild();
     if (success) {
       setActivePRNumber(null);
+      setActiveMergedId(null);
       await loadData();
     }
   };
 
-  const handleDelete = async (prNumber: number) => {
+  const handleDeletePR = async (prNumber: number) => {
     audioService.playNavTick();
     const success = await apiBridge.deletePRBuild(prNumber);
     if (success) {
-      if (activePRNumber === prNumber) {
-        setActivePRNumber(null);
-      }
+      if (activePRNumber === prNumber) setActivePRNumber(null);
       await loadData();
+    }
+  };
+
+  const handleDeleteMerged = async (buildId: string) => {
+    audioService.playNavTick();
+    const success = await apiBridge.deleteMergedBuild(buildId);
+    if (success) {
+      if (activeMergedId === buildId) setActiveMergedId(null);
+      await loadData();
+    }
+  };
+
+  const handleMergeAndBuild = async () => {
+    const numbers = Array.from(selectedPRNumbers);
+    if (numbers.length === 0) return;
+
+    audioService.playConfirm();
+    setIsMerging(true);
+    setMergeError(null);
+    setMergeProgress(15);
+    setMergeStatusText(`Checking git tree and staging ${numbers.length} PR branches...`);
+
+    try {
+      setMergeProgress(40);
+      setMergeStatusText(`Merging PRs #${numbers.join(', #')} sequentially...`);
+      const res = await apiBridge.mergeAndBuildPRs(numbers);
+
+      if (res.success && res.buildId) {
+        setMergeProgress(100);
+        setMergeStatusText('Combined build successfully compiled!');
+        audioService.playConfirm();
+        setSelectedPRNumbers(new Set());
+        await loadData();
+        // Activate the newly built hybrid binary automatically
+        await handleActivateMerged(res.buildId);
+      } else {
+        setMergeError(res.error || res.conflict || 'Merge or compilation failed.');
+      }
+    } catch (err: any) {
+      setMergeError(err?.message || 'Merge process failed.');
+    } finally {
+      setIsMerging(false);
     }
   };
 
@@ -206,9 +305,8 @@ export const CommunityPRBuilds: React.FC<CommunityPRBuildsProps> = ({
     }
   };
 
-  const activePR = useMemo(() => {
-    return prs.find((p) => p.number === activePRNumber);
-  }, [prs, activePRNumber]);
+  const activePR = useMemo(() => prs.find((p) => p.number === activePRNumber), [prs, activePRNumber]);
+  const activeMerged = useMemo(() => mergedBuilds.find((m) => m.id === activeMergedId), [mergedBuilds, activeMergedId]);
 
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden bg-[#07090e] text-white select-none animate-fade-in pt-16">
@@ -218,15 +316,15 @@ export const CommunityPRBuilds: React.FC<CommunityPRBuildsProps> = ({
           <div>
             <div className="flex items-center space-x-3 mb-1">
               <div className="p-2 rounded-xl bg-blue-500/10 border border-blue-500/20 text-[#00a2ff]">
-                <GitPullRequest className="w-5 h-5" />
+                <GitMerge className="w-5 h-5" />
               </div>
-              <h1 className="text-xl md:text-2xl font-semibold tracking-wide">Community PR Builds</h1>
+              <h1 className="text-xl md:text-2xl font-semibold tracking-wide">Community PR Builds & Multi-Merge</h1>
               <span className="px-2.5 py-0.5 rounded-full bg-blue-500/20 border border-blue-500/30 text-blue-400 text-[11px] font-mono font-medium">
-                Cloud CI
+                Lab & Diagnostics
               </span>
             </div>
             <p className="text-xs text-white/50 max-w-2xl leading-relaxed">
-              Test experimental PlayStation 5 relinker branches and game compatibility patches built automatically by GitHub Actions CI without installing local compilers.
+              Diagnose game aborts, test single PR builds from GitHub Actions CI, or merge multiple community PRs together into custom experimental relinker binaries.
             </p>
           </div>
 
@@ -240,7 +338,7 @@ export const CommunityPRBuilds: React.FC<CommunityPRBuildsProps> = ({
               className="px-3.5 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-white/80 hover:text-white text-xs font-medium transition-colors flex items-center space-x-2"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-              <span>Refresh PRs</span>
+              <span>Refresh</span>
             </button>
 
             {onNavigateToRelinker && (
@@ -258,30 +356,38 @@ export const CommunityPRBuilds: React.FC<CommunityPRBuildsProps> = ({
           </div>
         </div>
 
-        {/* Active Binary Indicator Card */}
+        {/* Active Runtime Status Card */}
         <div className="mt-5 p-3.5 rounded-2xl bg-white/[0.03] border border-white/10 flex items-center justify-between">
           <div className="flex items-center space-x-3">
-            <div className={`w-3 h-3 rounded-full ${activePR ? 'bg-emerald-400 animate-pulse' : 'bg-blue-400'}`} />
+            <div className={`w-3 h-3 rounded-full ${activePR || activeMerged ? 'bg-emerald-400 animate-pulse' : 'bg-blue-400'}`} />
             <div>
               <div className="flex items-center space-x-2">
                 <span className="text-xs font-medium text-white/90">
-                  {activePR ? `Active Runtime: PR #${activePR.number} · ${activePR.title}` : 'Active Runtime: Official Bundled Stable Binary'}
+                  {activeMerged 
+                    ? `Active Runtime: ${activeMerged.name}`
+                    : activePR 
+                    ? `Active Runtime: PR #${activePR.number} · ${activePR.title}` 
+                    : 'Active Runtime: Official Bundled Stable Binary'}
                 </span>
                 <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono ${
-                  activePR ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
+                  activeMerged
+                    ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
+                    : activePR 
+                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' 
+                    : 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
                 }`}>
-                  {activePR ? `Branch: ${activePR.headBranch}` : 'Stable v1.0.0'}
+                  {activeMerged ? 'Multi-PR Merged' : activePR ? `Branch: ${activePR.headBranch}` : 'Stable v1.0.0'}
                 </span>
               </div>
               <p className="text-[11px] text-white/40 mt-0.5">
-                {activePR 
-                  ? 'All conversions in Relinker Studio and Game Launcher sessions are currently utilizing this experimental PR build.'
+                {activeMerged || activePR
+                  ? 'All conversions in Relinker Studio and Game Launcher sessions are running this custom experimental build.'
                   : 'Currently running the official pre-compiled release binary validated for general stability.'}
               </p>
             </div>
           </div>
 
-          {activePR && (
+          {(activePR || activeMerged) && (
             <button
               onClick={handleRevert}
               className="px-3.5 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 text-white/90 hover:text-white text-xs font-medium border border-white/10 transition-colors flex-shrink-0"
@@ -290,6 +396,79 @@ export const CommunityPRBuilds: React.FC<CommunityPRBuildsProps> = ({
             </button>
           )}
         </div>
+
+        {/* Multi-PR Selection & Merge Toolbar */}
+        {selectedPRNumbers.size > 0 && (
+          <div className="mt-3 p-3.5 rounded-2xl bg-gradient-to-r from-blue-900/40 via-purple-900/30 to-blue-900/40 border border-blue-500/40 shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-3 animate-fade-in">
+            <div className="flex items-center space-x-3">
+              <div className="w-8 h-8 rounded-xl bg-blue-500/20 border border-blue-500/30 flex items-center justify-center text-[#00a2ff]">
+                <GitMerge className="w-4 h-4" />
+              </div>
+              <div>
+                <h4 className="text-xs font-semibold text-white tracking-wide">
+                  Combined Merge Queue ({selectedPRNumbers.size} PRs Selected)
+                </h4>
+                <p className="text-[11px] text-white/60">
+                  Target: PR #{Array.from(selectedPRNumbers).sort((a,b)=>a-b).join(' + #')} · Zero merge conflicts predicted
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center space-x-2.5">
+              <button
+                onClick={() => setSelectedPRNumbers(new Set())}
+                className="px-3 py-1.5 rounded-xl text-xs font-medium text-white/50 hover:text-white transition-colors"
+              >
+                Clear Selection
+              </button>
+              <button
+                onClick={handleMergeAndBuild}
+                disabled={isMerging}
+                className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-semibold transition-all flex items-center space-x-2 shadow-lg shadow-blue-600/30"
+              >
+                {isMerging ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Merging ({mergeProgress}%)...</span>
+                  </>
+                ) : (
+                  <>
+                    <Wrench className="w-3.5 h-3.5" />
+                    <span>Merge & Build Combined Binary</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Merge Progress or Error */}
+        {isMerging && (
+          <div className="mt-3 p-3 rounded-xl bg-white/[0.04] border border-white/10 space-y-2">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-white/80">{mergeStatusText}</span>
+              <span className="font-mono text-blue-400">{mergeProgress}%</span>
+            </div>
+            <div className="w-full bg-white/10 rounded-full h-1.5 overflow-hidden">
+              <div
+                className="bg-[#00a2ff] h-full transition-all duration-300 rounded-full"
+                style={{ width: `${mergeProgress}%` }}
+              />
+            </div>
+          </div>
+        )}
+
+        {mergeError && (
+          <div className="mt-3 p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-center justify-between">
+            <div className="flex items-center space-x-2">
+              <AlertCircle className="w-4 h-4 text-rose-400 flex-shrink-0" />
+              <span>{mergeError}</span>
+            </div>
+            <button onClick={() => setMergeError(null)} className="p-1 hover:text-white">
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Filter & Search Bar */}
@@ -302,9 +481,20 @@ export const CommunityPRBuilds: React.FC<CommunityPRBuildsProps> = ({
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search by title, PR #, author, or tag..."
-              className="w-full pl-9 pr-3 py-1.5 rounded-xl bg-white/[0.04] border border-white/10 text-white text-xs focus:outline-none focus:border-white/30 transition-all placeholder:text-white/30"
+              placeholder="Search by title, PR #, author, symbol, or tag..."
+              className="w-full pl-9 pr-8 py-1.5 rounded-xl bg-white/[0.04] border border-white/10 text-white text-xs focus:outline-none focus:border-white/30 transition-all placeholder:text-white/30"
             />
+            {searchQuery && (
+              <button
+                onClick={() => {
+                  setSearchQuery('');
+                  onClearInitialSearch?.();
+                }}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-white/40 hover:text-white"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
 
           <form onSubmit={handleLookupCustomPR} className="flex items-center space-x-2">
@@ -325,9 +515,9 @@ export const CommunityPRBuilds: React.FC<CommunityPRBuildsProps> = ({
           </form>
         </div>
 
-        {/* Status Filters */}
+        {/* Filter Tabs */}
         <div className="flex items-center space-x-1.5 bg-white/[0.03] p-1 rounded-xl border border-white/10">
-          {(['all', 'open', 'installed'] as const).map((tab) => (
+          {(['all', 'open', 'installed', 'merged-builds'] as const).map((tab) => (
             <button
               key={tab}
               onClick={() => {
@@ -340,7 +530,11 @@ export const CommunityPRBuilds: React.FC<CommunityPRBuildsProps> = ({
                   : 'text-white/50 hover:text-white/80'
               }`}
             >
-              {tab === 'installed' ? `Installed (${prs.filter((p) => p.isInstalled).length})` : tab}
+              {tab === 'installed' 
+                ? `Installed (${prs.filter((p) => p.isInstalled).length})` 
+                : tab === 'merged-builds' 
+                ? `Combined (${mergedBuilds.length})` 
+                : tab}
             </button>
           ))}
         </div>
@@ -355,180 +549,273 @@ export const CommunityPRBuilds: React.FC<CommunityPRBuildsProps> = ({
         </div>
       )}
 
-      {/* PR Cards Grid */}
+      {/* Content Area */}
       <div className="flex-1 overflow-y-auto px-8 md:px-12 py-6 space-y-4">
-        {loading && prs.length === 0 ? (
-          <div className="h-64 flex flex-col items-center justify-center space-y-3">
-            <RefreshCw className="w-6 h-6 text-white/40 animate-spin" />
-            <p className="text-xs text-white/40">Querying GitHub Actions CI & pull requests...</p>
-          </div>
-        ) : filteredPRs.length === 0 ? (
-          <div className="h-64 flex flex-col items-center justify-center space-y-2 text-center">
-            <GitPullRequest className="w-8 h-8 text-white/20 mb-2" />
-            <p className="text-sm font-medium text-white/70">No matching pull requests found</p>
-            <p className="text-xs text-white/40 max-w-sm">
-              Try adjusting your search query, or enter a specific PR number above to fetch directly from GitHub.
-            </p>
-          </div>
-        ) : (
-          filteredPRs.map((pr) => {
-            const isInstalled = pr.isInstalled;
-            const isActive = pr.isActive;
-            const progressObj = downloading[pr.number];
-            const isDownloading = progressObj && progressObj.status === 'downloading';
-
-            return (
+        {/* Render Merged Builds List if Filtered */}
+        {filter === 'merged-builds' ? (
+          mergedBuilds.length === 0 ? (
+            <div className="h-64 flex flex-col items-center justify-center space-y-2 text-center">
+              <GitMerge className="w-8 h-8 text-white/20 mb-2" />
+              <p className="text-sm font-medium text-white/70">No Combined Multi-PR Builds Created Yet</p>
+              <p className="text-xs text-white/40 max-w-sm">
+                Switch to the "All" tab, select two or more PRs using the checkboxes, and click "Merge & Build Combined Binary".
+              </p>
+            </div>
+          ) : (
+            mergedBuilds.map((mb) => (
               <div
-                key={pr.number}
+                key={mb.id}
                 className={`p-5 rounded-2xl border transition-all duration-200 ${
-                  isActive 
-                    ? 'bg-[#10192b]/90 border-emerald-500/40 shadow-lg shadow-emerald-500/5' 
-                    : isInstalled 
-                    ? 'bg-[#10141f]/70 border-white/15 hover:border-white/30' 
-                    : 'bg-[#0d1017]/60 border-white/10 hover:border-white/20'
+                  mb.isActive 
+                    ? 'bg-[#121929]/90 border-purple-500/40 shadow-lg shadow-purple-500/10' 
+                    : 'bg-[#0e121a]/70 border-white/15 hover:border-white/30'
                 }`}
               >
-                <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
-                  {/* Left Column: PR Info */}
-                  <div className="flex-1 min-w-0">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
                     <div className="flex items-center space-x-2.5 mb-2">
-                      <span className="px-2.5 py-0.5 rounded-full bg-white/10 text-white/90 text-xs font-mono font-semibold">
-                        #{pr.number}
+                      <span className="px-2.5 py-0.5 rounded-full bg-purple-500/20 border border-purple-500/30 text-purple-300 text-xs font-mono font-semibold">
+                        Multi-PR
                       </span>
-                      <h3 className="text-sm md:text-base font-semibold text-white tracking-wide truncate">
-                        {pr.title}
+                      <h3 className="text-sm md:text-base font-semibold text-white tracking-wide">
+                        {mb.name}
                       </h3>
-                      {isActive && (
+                      {mb.isActive && (
                         <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 text-[10px] font-medium uppercase tracking-wider flex items-center space-x-1">
                           <Check className="w-3 h-3" />
                           <span>Active</span>
                         </span>
                       )}
                     </div>
-
-                    <p className="text-xs text-white/60 mb-3 line-clamp-2 leading-relaxed">
-                      {pr.body}
+                    <p className="text-xs text-white/50 mb-2">
+                      Contains merged patches from PRs: #{mb.prNumbers.join(', #')}
                     </p>
-
-                    <div className="flex flex-wrap items-center gap-3 text-[11px] text-white/40">
-                      <div className="flex items-center space-x-1.5">
-                        <img
-                          src={pr.author.avatar_url || 'https://github.com/ghost.png'}
-                          alt={pr.author.login}
-                          className="w-4 h-4 rounded-full border border-white/20"
-                        />
-                        <span className="text-white/70 font-medium">{pr.author.login}</span>
-                      </div>
-
-                      <span>·</span>
-
-                      <div className="flex items-center space-x-1 font-mono">
-                        <GitMerge className="w-3.5 h-3.5 text-white/40" />
-                        <span>{pr.headBranch}</span>
-                        <span className="text-white/30">({pr.headSha})</span>
-                      </div>
-
-                      <span>·</span>
-
-                      <div className="flex items-center space-x-1">
-                        <HardDrive className="w-3.5 h-3.5 text-white/40" />
-                        <span>CI Artifact: ~{pr.artifactSizeMb || 15} MB</span>
-                      </div>
-
-                      {/* Labels */}
-                      <div className="flex items-center space-x-1.5 ml-1">
-                        {pr.labels.map((lbl) => (
-                          <span
-                            key={lbl.name}
-                            className="px-2 py-0.5 rounded text-[10px] font-medium"
-                            style={{ backgroundColor: `#${lbl.color}25`, color: `#${lbl.color}` }}
-                          >
-                            {lbl.name}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
+                    <p className="text-[11px] text-white/30 font-mono">
+                      Location: {mb.relinkerPath}
+                    </p>
                   </div>
 
-                  {/* Right Column: Actions */}
-                  <div className="flex items-center space-x-3 flex-shrink-0 self-end md:self-center">
-                    <a
-                      href={pr.html_url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-white/50 hover:text-white text-xs border border-white/10 transition-colors"
-                      title="View Pull Request on GitHub"
-                    >
-                      <ExternalLink className="w-4 h-4" />
-                    </a>
-
-                    {isInstalled ? (
-                      <div className="flex items-center space-x-2">
-                        {isActive ? (
-                          <button
-                            onClick={handleRevert}
-                            className="px-3.5 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 text-white/80 hover:text-white text-xs font-medium border border-white/10 transition-colors"
-                          >
-                            Deactivate
-                          </button>
-                        ) : (
-                          <button
-                            onClick={() => handleActivate(pr.number)}
-                            className="px-4 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-semibold transition-colors flex items-center space-x-1.5 shadow-lg shadow-emerald-500/20"
-                          >
-                            <Zap className="w-3.5 h-3.5" />
-                            <span>Activate</span>
-                          </button>
-                        )}
-
-                        <button
-                          onClick={() => handleDelete(pr.number)}
-                          className="p-2 rounded-xl bg-white/5 hover:bg-rose-500/20 hover:text-rose-400 text-white/40 text-xs border border-white/10 transition-colors"
-                          title="Delete downloaded build"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
+                  <div className="flex items-center space-x-2 flex-shrink-0">
+                    {mb.isActive ? (
+                      <button
+                        onClick={handleRevert}
+                        className="px-3.5 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 text-white/80 hover:text-white text-xs font-medium border border-white/10 transition-colors"
+                      >
+                        Deactivate
+                      </button>
                     ) : (
                       <button
-                        onClick={() => handleDownload(pr)}
-                        disabled={isDownloading}
-                        className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-semibold transition-all flex items-center space-x-2 shadow-lg shadow-blue-600/20"
+                        onClick={() => handleActivateMerged(mb.id)}
+                        className="px-4 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-semibold transition-colors flex items-center space-x-1.5 shadow-lg shadow-emerald-500/20"
                       >
-                        {isDownloading ? (
-                          <>
-                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                            <span>Downloading ({progressObj?.progress || 0}%)...</span>
-                          </>
-                        ) : (
-                          <>
-                            <Download className="w-3.5 h-3.5" />
-                            <span>Download CI Build</span>
-                          </>
-                        )}
+                        <Zap className="w-3.5 h-3.5" />
+                        <span>Activate</span>
                       </button>
                     )}
+                    <button
+                      onClick={() => handleDeleteMerged(mb.id)}
+                      className="p-2 rounded-xl bg-white/5 hover:bg-rose-500/20 hover:text-rose-400 text-white/40 text-xs border border-white/10 transition-colors"
+                      title="Delete combined build"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
                   </div>
                 </div>
+              </div>
+            ))
+          )
+        ) : (
+          /* Render Individual PRs List */
+          loading && prs.length === 0 ? (
+            <div className="h-64 flex flex-col items-center justify-center space-y-3">
+              <RefreshCw className="w-6 h-6 text-white/40 animate-spin" />
+              <p className="text-xs text-white/40">Querying GitHub Actions CI & pull requests...</p>
+            </div>
+          ) : filteredPRs.length === 0 ? (
+            <div className="h-64 flex flex-col items-center justify-center space-y-2 text-center">
+              <GitPullRequest className="w-8 h-8 text-white/20 mb-2" />
+              <p className="text-sm font-medium text-white/70">No matching pull requests found</p>
+              <p className="text-xs text-white/40 max-w-sm">
+                Try adjusting your search query, or enter a specific PR number above to fetch directly from GitHub.
+              </p>
+            </div>
+          ) : (
+            filteredPRs.map((pr) => {
+              const isInstalled = pr.isInstalled;
+              const isActive = pr.isActive;
+              const isSelected = selectedPRNumbers.has(pr.number);
+              const progressObj = downloading[pr.number];
+              const isDownloading = progressObj && progressObj.status === 'downloading';
 
-                {/* Download Progress Bar */}
-                {isDownloading && (
-                  <div className="mt-4 pt-3 border-t border-white/10">
-                    <div className="flex items-center justify-between text-[11px] text-white/60 mb-1.5">
-                      <span>Downloading pre-built binary from GitHub Actions CI...</span>
-                      <span className="font-mono">{progressObj.progress}%</span>
+              return (
+                <div
+                  key={pr.number}
+                  className={`p-5 rounded-2xl border transition-all duration-200 ${
+                    isSelected
+                      ? 'bg-[#141b2c] border-blue-500 shadow-md shadow-blue-500/10'
+                      : isActive 
+                      ? 'bg-[#10192b]/90 border-emerald-500/40 shadow-lg shadow-emerald-500/5' 
+                      : isInstalled 
+                      ? 'bg-[#10141f]/70 border-white/15 hover:border-white/30' 
+                      : 'bg-[#0d1017]/60 border-white/10 hover:border-white/20'
+                  }`}
+                >
+                  <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
+                    {/* Left Column: Multi-select Checkbox & PR Info */}
+                    <div className="flex items-start space-x-3.5 flex-1 min-w-0">
+                      <button
+                        onClick={() => toggleSelectPR(pr.number)}
+                        className="mt-0.5 p-1 rounded-lg hover:bg-white/10 text-white/40 hover:text-white transition-colors flex-shrink-0"
+                        title={isSelected ? "Deselect for merge" : "Select to merge with other PRs"}
+                      >
+                        {isSelected ? (
+                          <CheckSquare className="w-5 h-5 text-[#00a2ff]" />
+                        ) : (
+                          <Square className="w-5 h-5 text-white/30" />
+                        )}
+                      </button>
+
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center space-x-2.5 mb-2">
+                          <span className="px-2.5 py-0.5 rounded-full bg-white/10 text-white/90 text-xs font-mono font-semibold">
+                            #{pr.number}
+                          </span>
+                          <h3 className="text-sm md:text-base font-semibold text-white tracking-wide truncate">
+                            {pr.title}
+                          </h3>
+                          {isActive && (
+                            <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 text-[10px] font-medium uppercase tracking-wider flex items-center space-x-1">
+                              <Check className="w-3 h-3" />
+                              <span>Active</span>
+                            </span>
+                          )}
+                        </div>
+
+                        <p className="text-xs text-white/60 mb-3 line-clamp-2 leading-relaxed">
+                          {pr.body}
+                        </p>
+
+                        <div className="flex flex-wrap items-center gap-3 text-[11px] text-white/40">
+                          <div className="flex items-center space-x-1.5">
+                            <img
+                              src={pr.author.avatar_url || 'https://github.com/ghost.png'}
+                              alt={pr.author.login}
+                              className="w-4 h-4 rounded-full border border-white/20"
+                            />
+                            <span className="text-white/70 font-medium">{pr.author.login}</span>
+                          </div>
+
+                          <span>·</span>
+
+                          <div className="flex items-center space-x-1 font-mono">
+                            <GitMerge className="w-3.5 h-3.5 text-white/40" />
+                            <span>{pr.headBranch}</span>
+                            <span className="text-white/30">({pr.headSha})</span>
+                          </div>
+
+                          <span>·</span>
+
+                          <div className="flex items-center space-x-1">
+                            <HardDrive className="w-3.5 h-3.5 text-white/40" />
+                            <span>CI Artifact: ~{pr.artifactSizeMb || 15} MB</span>
+                          </div>
+
+                          {/* Labels */}
+                          <div className="flex items-center space-x-1.5 ml-1">
+                            {pr.labels.map((lbl) => (
+                              <span
+                                key={lbl.name}
+                                className="px-2 py-0.5 rounded text-[10px] font-medium"
+                                style={{ backgroundColor: `#${lbl.color}25`, color: `#${lbl.color}` }}
+                              >
+                                {lbl.name}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
                     </div>
-                    <div className="w-full bg-white/10 rounded-full h-1.5 overflow-hidden">
-                      <div
-                        className="bg-[#00a2ff] h-full transition-all duration-300 rounded-full"
-                        style={{ width: `${progressObj.progress}%` }}
-                      />
+
+                    {/* Right Column: Actions */}
+                    <div className="flex items-center space-x-3 flex-shrink-0 self-end md:self-center">
+                      <a
+                        href={pr.html_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-white/50 hover:text-white text-xs border border-white/10 transition-colors"
+                        title="View Pull Request on GitHub"
+                      >
+                        <ExternalLink className="w-4 h-4" />
+                      </a>
+
+                      {isInstalled ? (
+                        <div className="flex items-center space-x-2">
+                          {isActive ? (
+                            <button
+                              onClick={handleRevert}
+                              className="px-3.5 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 text-white/80 hover:text-white text-xs font-medium border border-white/10 transition-colors"
+                            >
+                              Deactivate
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => handleActivatePR(pr.number)}
+                              className="px-4 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-semibold transition-colors flex items-center space-x-1.5 shadow-lg shadow-emerald-500/20"
+                            >
+                              <Zap className="w-3.5 h-3.5" />
+                              <span>Activate</span>
+                            </button>
+                          )}
+
+                          <button
+                            onClick={() => handleDeletePR(pr.number)}
+                            className="p-2 rounded-xl bg-white/5 hover:bg-rose-500/20 hover:text-rose-400 text-white/40 text-xs border border-white/10 transition-colors"
+                            title="Delete downloaded build"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => handleDownload(pr)}
+                          disabled={isDownloading}
+                          className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-semibold transition-all flex items-center space-x-2 shadow-lg shadow-blue-600/20"
+                        >
+                          {isDownloading ? (
+                            <>
+                              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                              <span>Downloading ({progressObj?.progress || 0}%)...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Download className="w-3.5 h-3.5" />
+                              <span>Download CI Build</span>
+                            </>
+                          )}
+                        </button>
+                      )}
                     </div>
                   </div>
-                )}
-              </div>
-            );
-          })
+
+                  {/* Download Progress Bar */}
+                  {isDownloading && (
+                    <div className="mt-4 pt-3 border-t border-white/10">
+                      <div className="flex items-center justify-between text-[11px] text-white/60 mb-1.5">
+                        <span>Downloading pre-built binary from GitHub Actions CI...</span>
+                        <span className="font-mono">{progressObj.progress}%</span>
+                      </div>
+                      <div className="w-full bg-white/10 rounded-full h-1.5 overflow-hidden">
+                        <div
+                          className="bg-[#00a2ff] h-full transition-all duration-300 rounded-full"
+                          style={{ width: `${progressObj.progress}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })
+          )
         )}
       </div>
     </div>

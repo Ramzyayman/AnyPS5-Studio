@@ -26,6 +26,7 @@ export const App: React.FC = () => {
   const [gamepadConnected, setGamepadConnected] = useState<boolean>(false);
   const [downloadedUpdateVersion, setDownloadedUpdateVersion] = useState<string | null>(null);
   const [showUpdateToast, setShowUpdateToast] = useState<boolean>(false);
+  const [communitySearchKeyword, setCommunitySearchKeyword] = useState<string>('');
 
   // Advanced navbar items setting (persisted in localStorage, default OFF)
   const [showAdvancedNav, setShowAdvancedNav] = useState<boolean>(() => {
@@ -327,6 +328,8 @@ export const App: React.FC = () => {
 
         {activeTab === 'community' && (
           <CommunityPRBuilds
+            initialSearch={communitySearchKeyword}
+            onClearInitialSearch={() => setCommunitySearchKeyword('')}
             onNavigateToGames={() => setActiveTab('games')}
             onNavigateToRelinker={() => setActiveTab('relinker')}
           />
@@ -363,6 +366,11 @@ export const App: React.FC = () => {
             const idx = games.findIndex((item) => item.id === g.id);
             if (idx !== -1) setSelectedGameIndex(idx);
             setActiveTab('relinker');
+          }}
+          onNavigateToCommunityPRs={(keyword) => {
+            setActiveRunningGame(null);
+            if (keyword) setCommunitySearchKeyword(keyword);
+            setActiveTab('community');
           }}
         />
       )}

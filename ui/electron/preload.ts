@@ -30,6 +30,10 @@ contextBridge.exposeInMainWorld('anyps5', {
   setActivePRBuild: (prNumber: number) => ipcRenderer.invoke('anyps5:set-active-pr-build', prNumber),
   revertToDefaultBuild: () => ipcRenderer.invoke('anyps5:revert-to-default-build'),
   deletePRBuild: (prNumber: number) => ipcRenderer.invoke('anyps5:delete-pr-build', prNumber),
+  mergeAndBuildPRs: (prNumbers: number[]) => ipcRenderer.invoke('anyps5:merge-and-build-prs', prNumbers),
+  getMergedBuilds: () => ipcRenderer.invoke('anyps5:get-merged-builds'),
+  setActiveMergedBuild: (buildId: string) => ipcRenderer.invoke('anyps5:set-active-merged-build', buildId),
+  deleteMergedBuild: (buildId: string) => ipcRenderer.invoke('anyps5:delete-merged-build', buildId),
   onPRDownloadProgress: (callback: (progress: unknown) => void) => {
     const handler = (_: unknown, progress: unknown) => callback(progress);
     ipcRenderer.on('anyps5:pr-download-progress', handler);

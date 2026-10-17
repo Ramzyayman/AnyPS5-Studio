@@ -126,3 +126,21 @@ export interface PRBuildDownloadProgress {
   progress: number;
   error?: string;
 }
+
+export interface MultiPRBuildResult {
+  success: boolean;
+  buildId?: string;
+  relinkerPath?: string;
+  mergedPRs?: number[];
+  conflict?: string;
+  error?: string;
+}
+
+export interface MergedBuildInfo {
+  id: string;
+  name: string;
+  prNumbers: number[];
+  installedAt: string;
+  relinkerPath: string;
+  isActive: boolean;
+}

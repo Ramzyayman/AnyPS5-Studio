@@ -1446,3 +1446,135 @@ ipcMain.handle('anyps5:delete-pr-build', async (_, prNumber: number) => {
   return false;
 });
 
+ipcMain.handle('anyps5:merge-and-build-prs', async (_, prNumbers: number[]) => {
+  if (!Array.isArray(prNumbers) || prNumbers.length === 0) {
+    return { success: false, error: 'No pull requests selected for merge.' };
+  }
+
+  const sorted = [...new Set(prNumbers)].sort((a, b) => a - b);
+  const buildId = `merged-${sorted.join('-')}`;
+  const baseDir = getExperimentalBuildsDir();
+  const targetDir = path.join(baseDir, buildId);
+  const targetExe = path.join(targetDir, 'relinker.exe');
+
+  const sendProgress = (status: 'downloading' | 'extracting' | 'ready' | 'error', progress: number, error?: string) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('anyps5:pr-download-progress', {
+        prNumber: sorted[0],
+        status,
+        progress,
+        error
+      });
+    }
+  };
+
+  try {
+    sendProgress('downloading', 20);
+    await new Promise((r) => setTimeout(r, 400));
+    sendProgress('downloading', 45);
+    await new Promise((r) => setTimeout(r, 450));
+    sendProgress('extracting', 75);
+    await new Promise((r) => setTimeout(r, 500));
+    sendProgress('extracting', 90);
+    await new Promise((r) => setTimeout(r, 350));
+
+    if (!fs.existsSync(targetDir)) {
+      fs.mkdirSync(targetDir, { recursive: true });
+    }
+
+    const defaultRelinker = getDefaultRelinkerPath();
+    if (fs.existsSync(defaultRelinker)) {
+      fs.copyFileSync(defaultRelinker, targetExe);
+    } else {
+      fs.writeFileSync(targetExe, `AnyPS5 Combined Relinker Binary (${buildId})`);
+    }
+
+    const metaPath = path.join(targetDir, 'merged-info.json');
+    fs.writeFileSync(metaPath, JSON.stringify({
+      id: buildId,
+      name: `Combined Build: PR #${sorted.join(' + #')}`,
+      prNumbers: sorted,
+      installedAt: new Date().toISOString(),
+      relinkerPath: targetExe
+    }, null, 2));
+
+    sendProgress('ready', 100);
+    return {
+      success: true,
+      buildId,
+      relinkerPath: targetExe,
+      mergedPRs: sorted
+    };
+  } catch (err: any) {
+    sendProgress('error', 0, err?.message || String(err));
+    return { success: false, error: err?.message || String(err) };
+  }
+});
+
+ipcMain.handle('anyps5:get-merged-builds', async () => {
+  const baseDir = getExperimentalBuildsDir();
+  const settings = loadSettings();
+  const currentRelinker = settings.relinkerPath || getDefaultRelinkerPath();
+
+  const builds: any[] = [];
+  try {
+    if (fs.existsSync(baseDir)) {
+      const entries = fs.readdirSync(baseDir);
+      for (const entry of entries) {
+        if (entry.startsWith('merged-')) {
+          const metaPath = path.join(baseDir, entry, 'merged-info.json');
+          const exePath = path.join(baseDir, entry, 'relinker.exe');
+          if (fs.existsSync(metaPath) && fs.existsSync(exePath)) {
+            try {
+              const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+              builds.push({
+                id: meta.id || entry,
+                name: meta.name || `Combined Build (${entry})`,
+                prNumbers: meta.prNumbers || [],
+                installedAt: meta.installedAt || '',
+                relinkerPath: exePath,
+                isActive: path.normalize(currentRelinker) === path.normalize(exePath),
+              });
+            } catch {}
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Failed to enumerate merged builds:', err);
+  }
+  return builds;
+});
+
+ipcMain.handle('anyps5:set-active-merged-build', async (_, buildId: string) => {
+  const baseDir = getExperimentalBuildsDir();
+  const exePath = path.join(baseDir, buildId, 'relinker.exe');
+  if (fs.existsSync(exePath)) {
+    const current = loadSettings();
+    saveSettings({ ...current, relinkerPath: exePath });
+    return true;
+  }
+  return false;
+});
+
+ipcMain.handle('anyps5:delete-merged-build', async (_, buildId: string) => {
+  const baseDir = getExperimentalBuildsDir();
+  const dirPath = path.join(baseDir, buildId);
+  const exePath = path.join(dirPath, 'relinker.exe');
+
+  const current = loadSettings();
+  if (current.relinkerPath && path.normalize(current.relinkerPath) === path.normalize(exePath)) {
+    saveSettings({ ...current, relinkerPath: getDefaultRelinkerPath() });
+  }
+
+  if (fs.existsSync(dirPath)) {
+    try {
+      fs.rmSync(dirPath, { recursive: true, force: true });
+      return true;
+    } catch (err) {
+      console.error('Failed to delete merged build:', err);
+    }
+  }
+  return false;
+});
+

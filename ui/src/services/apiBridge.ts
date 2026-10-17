@@ -7,7 +7,9 @@ import {
   AppSettings, 
   UpdateStatus,
   CommunityPR,
-  PRBuildDownloadProgress
+  PRBuildDownloadProgress,
+  MultiPRBuildResult,
+  MergedBuildInfo
 } from '../types';
 import { INITIAL_GAMES } from './sampleData';
 
@@ -38,6 +40,10 @@ declare global {
       setActivePRBuild?: (prNumber: number) => Promise<boolean>;
       revertToDefaultBuild?: () => Promise<boolean>;
       deletePRBuild?: (prNumber: number) => Promise<boolean>;
+      mergeAndBuildPRs?: (prNumbers: number[]) => Promise<MultiPRBuildResult>;
+      getMergedBuilds?: () => Promise<MergedBuildInfo[]>;
+      setActiveMergedBuild?: (buildId: string) => Promise<boolean>;
+      deleteMergedBuild?: (buildId: string) => Promise<boolean>;
       onPRDownloadProgress?: (callback: (progress: PRBuildDownloadProgress) => void) => () => void;
       runRelinker: (
         game: GameItem,
@@ -302,6 +308,34 @@ class ApiBridge {
   public async deletePRBuild(prNumber: number): Promise<boolean> {
     if (window.anyps5?.deletePRBuild) {
       return await window.anyps5.deletePRBuild(prNumber);
+    }
+    return false;
+  }
+
+  public async mergeAndBuildPRs(prNumbers: number[]): Promise<MultiPRBuildResult> {
+    if (window.anyps5?.mergeAndBuildPRs) {
+      return await window.anyps5.mergeAndBuildPRs(prNumbers);
+    }
+    return { success: false, error: 'Not supported in browser mode' };
+  }
+
+  public async getMergedBuilds(): Promise<MergedBuildInfo[]> {
+    if (window.anyps5?.getMergedBuilds) {
+      return await window.anyps5.getMergedBuilds();
+    }
+    return [];
+  }
+
+  public async setActiveMergedBuild(buildId: string): Promise<boolean> {
+    if (window.anyps5?.setActiveMergedBuild) {
+      return await window.anyps5.setActiveMergedBuild(buildId);
+    }
+    return false;
+  }
+
+  public async deleteMergedBuild(buildId: string): Promise<boolean> {
+    if (window.anyps5?.deleteMergedBuild) {
+      return await window.anyps5.deleteMergedBuild(buildId);
     }
     return false;
   }

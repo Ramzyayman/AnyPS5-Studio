@@ -16,7 +16,8 @@ import {
   Gamepad2,
   Cpu,
   Layers,
-  Activity
+  Activity,
+  GitPullRequest
 } from 'lucide-react';
 import { GameItem, SystemTelemetry } from '../types';
 import { audioService } from '../services/audioService';
@@ -26,6 +27,7 @@ interface GameLauncherModalProps {
   game: GameItem;
   onClose: () => void;
   onNavigateToRelinker?: (game: GameItem) => void;
+  onNavigateToCommunityPRs?: (keyword?: string) => void;
 }
 
 type LaunchState = 'launching' | 'running' | 'closed' | 'crashed' | 'failed';
@@ -39,11 +41,13 @@ interface ErrorDetails {
 export const GameLauncherModal: React.FC<GameLauncherModalProps> = ({ 
   game, 
   onClose,
-  onNavigateToRelinker 
+  onNavigateToRelinker,
+  onNavigateToCommunityPRs
 }) => {
   const [launchState, setLaunchState] = useState<LaunchState>('launching');
   const [statusMessage, setStatusMessage] = useState<string>('Initializing runtime environment...');
   const [errorMessage, setErrorMessage] = useState<ErrorDetails | null>(null);
+  const [detectedAbortReason, setDetectedAbortReason] = useState<string | null>(null);
 
   const [pid, setPid] = useState<number | null>(null);
   const [exitCode, setExitCode] = useState<number | null>(null);
@@ -122,18 +126,21 @@ export const GameLauncherModal: React.FC<GameLauncherModalProps> = ({
     } else {
       setLaunchState('crashed');
       if (code === 3221225477 || code === -1073741819) {
+        setDetectedAbortReason((prev) => prev || 'Access Violation (0xC0000005)');
         setErrorMessage({
           summary: 'The game closed unexpectedly',
           remedy: 'An access violation (0xC0000005) occurred. In Relinker Studio, verify that "Unused Import Optimization" is set to Level 0 (Safe / Full Compatibility) so virtual tables and C++ error categories are not stripped.',
           isRelinkHint: true,
         });
       } else if (code === 3221225781 || code === -1073741515) {
+        setDetectedAbortReason((prev) => prev || 'Missing PRX Dependency (0xC0000135)');
         setErrorMessage({
           summary: 'The game closed unexpectedly',
           remedy: 'A required guest PRX or runtime dependency (0xC0000135) could not be loaded. Ensure the game folder was relinked with all middleware modules.',
           isRelinkHint: true,
         });
       } else {
+        setDetectedAbortReason((prev) => prev || `Process Exit (${resolvedHex})`);
         setErrorMessage({
           summary: 'The game closed unexpectedly',
           remedy: `Process exited with error code ${resolvedHex}. Inspect Technical Details below for complete crash diagnostics.`,
@@ -223,6 +230,12 @@ export const GameLauncherModal: React.FC<GameLauncherModalProps> = ({
       } else if (msg.includes('Initialized child process PID')) {
         setLaunchState('running');
         setStatusMessage('Game running');
+      }
+
+      // Parse abort reason, C++ exception what(), or missing symbols
+      const failMatch = msg.match(/(?:FAIL|Exception|what\(\)|Abort|Unimplemented|Missing):\s*([a-zA-Z0-9_:]+)/i);
+      if (failMatch && failMatch[1]) {
+        setDetectedAbortReason(failMatch[1]);
       }
 
       // Fallback process exit detection from log stream
@@ -427,6 +440,26 @@ export const GameLauncherModal: React.FC<GameLauncherModalProps> = ({
                   </p>
                 </div>
               )}
+
+              {/* Abort Reason Diagnostics Card */}
+              {detectedAbortReason && (launchState === 'crashed' || launchState === 'failed') && (
+                <div className="p-3 rounded-xl bg-blue-500/10 border border-blue-500/25 flex items-center justify-between text-xs animate-fade-in">
+                  <div className="flex items-center space-x-2">
+                    <GitPullRequest className="w-3.5 h-3.5 text-[#00a2ff] shrink-0" />
+                    <span className="text-white/60">Abort Exception:</span>
+                    <span className="font-mono text-blue-300 font-semibold">{detectedAbortReason}</span>
+                  </div>
+                  {onNavigateToCommunityPRs && (
+                    <button
+                      type="button"
+                      onClick={() => onNavigateToCommunityPRs(detectedAbortReason)}
+                      className="text-blue-400 hover:text-blue-300 underline font-medium text-[11px] ml-2 shrink-0"
+                    >
+                      Find PR Fixes &rarr;
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Action Buttons */}
@@ -515,6 +548,18 @@ export const GameLauncherModal: React.FC<GameLauncherModalProps> = ({
                     >
                       <Wrench className="w-3.5 h-3.5" />
                       <span>Relinker Studio</span>
+                    </button>
+                  )}
+
+                  {onNavigateToCommunityPRs && (
+                    <button
+                      type="button"
+                      onClick={() => onNavigateToCommunityPRs(detectedAbortReason || undefined)}
+                      className="px-5 py-2.5 rounded-full bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 border border-blue-500/30 font-medium text-xs transition-colors flex items-center space-x-2"
+                      title="Find community PR patches and experimental builds"
+                    >
+                      <GitPullRequest className="w-3.5 h-3.5" />
+                      <span>Community Fixes</span>
                     </button>
                   )}
 
