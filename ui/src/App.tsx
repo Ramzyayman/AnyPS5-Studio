@@ -46,16 +46,21 @@ export const App: React.FC = () => {
       console.error('Failed to save advanced nav preference:', err);
     }
     // If user is currently viewing an advanced section and disables Advanced, navigate safely to Games
-    if (!enabled && ['nid', 'prx', 'telemetry'].includes(activeTab)) {
+    if (!enabled && ['nid', 'prx', 'telemetry', 'community'].includes(activeTab)) {
       setActiveTab('games');
     }
   };
 
-  // Load games from apiBridge
+  // Load games & initial settings from apiBridge
   useEffect(() => {
     apiBridge.getGames().then((loaded) => {
       setGames(loaded);
     });
+    apiBridge.getSettings().then((settings) => {
+      if (settings && settings.advanced !== undefined) {
+        setShowAdvancedNav(settings.advanced);
+      }
+    }).catch(() => {});
   }, []);
 
   // Listen for background auto-updates
@@ -72,7 +77,7 @@ export const App: React.FC = () => {
 
   const availableTabs: ('games' | 'relinker' | 'community' | 'nid' | 'prx' | 'telemetry')[] = showAdvancedNav
     ? ['games', 'relinker', 'community', 'nid', 'prx', 'telemetry']
-    : ['games', 'relinker', 'community'];
+    : ['games', 'relinker'];
 
   // Keyboard navigation for authentic console feel
   useEffect(() => {
@@ -369,6 +374,10 @@ export const App: React.FC = () => {
           }}
           onNavigateToCommunityPRs={(keyword) => {
             setActiveRunningGame(null);
+            setShowAdvancedNav(true);
+            try {
+              localStorage.setItem('anyps5_show_advanced_nav', 'true');
+            } catch {}
             if (keyword) setCommunitySearchKeyword(keyword);
             setActiveTab('community');
           }}

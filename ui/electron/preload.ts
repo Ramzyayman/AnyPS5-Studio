@@ -24,7 +24,7 @@ contextBridge.exposeInMainWorld('anyps5', {
       ipcRenderer.removeListener('anyps5:update-status', handler);
     };
   },
-  getCommunityPRs: () => ipcRenderer.invoke('anyps5:get-community-prs'),
+  getCommunityPRs: (repo?: string, forceRefresh?: boolean) => ipcRenderer.invoke('anyps5:get-community-prs', repo, forceRefresh),
   downloadPRBuild: (args: { prNumber: number; artifactUrl?: string }) => 
     ipcRenderer.invoke('anyps5:download-pr-build', args),
   setActivePRBuild: (prNumber: number) => ipcRenderer.invoke('anyps5:set-active-pr-build', prNumber),

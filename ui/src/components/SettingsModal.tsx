@@ -68,16 +68,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           if (settings.hapticsEnabled !== undefined) setHapticsEnabled(settings.hapticsEnabled);
           if (settings.advanced !== undefined) {
             setAdvanced(settings.advanced);
-            onToggleAdvancedNav(settings.advanced);
           }
         }
       });
     }
-  }, [isOpen, showAdvancedNav]);
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
+  const handleClose = () => {
+    onToggleAdvancedNav(showAdvancedNav);
+    onClose();
+  };
+
   const handleAdvancedChange = (checked: boolean) => {
+    audioService.playNavTick();
     setAdvanced(checked);
     onToggleAdvancedNav(checked);
   };
@@ -141,7 +146,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <h3 className="font-medium text-base text-white tracking-wide">Settings · AnyPS5 Studio</h3>
           </div>
           <button
-            onClick={onClose}
+            onClick={handleClose}
             className="p-1 rounded-full hover:bg-white/10 text-white/50 hover:text-white transition-colors"
           >
             <X className="w-4 h-4" />
@@ -252,7 +257,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 />
                 <div className="flex flex-col">
                   <span className="font-medium text-white group-hover:text-white transition-colors">Advanced</span>
-                  <span className="text-[11px] text-white/50 leading-normal mt-0.5">Show advanced developer tools in the main navigation.</span>
+                  <span className="text-[11px] text-white/50 leading-normal mt-0.5">Show Community PR Builds and advanced developer tools in the navigation.</span>
                 </div>
               </label>
             </div>
@@ -359,7 +364,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <div className="flex items-center space-x-3">
               <button
                 type="button"
-                onClick={onClose}
+                onClick={handleClose}
                 className="px-4 py-2 rounded-full text-xs font-medium text-white/60 hover:text-white transition-colors"
               >
                 Cancel

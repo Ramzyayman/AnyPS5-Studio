@@ -35,7 +35,7 @@ declare global {
       quitAndInstallUpdate?: () => void;
       getAppVersion?: () => Promise<string>;
       onUpdateStatus?: (callback: (status: UpdateStatus) => void) => () => void;
-      getCommunityPRs?: () => Promise<CommunityPR[]>;
+      getCommunityPRs?: (repo?: string, forceRefresh?: boolean) => Promise<CommunityPR[]>;
       downloadPRBuild?: (args: { prNumber: number; artifactUrl?: string }) => Promise<{ success: boolean; path?: string; error?: string }>;
       setActivePRBuild?: (prNumber: number) => Promise<boolean>;
       revertToDefaultBuild?: () => Promise<boolean>;
@@ -277,10 +277,56 @@ class ApiBridge {
     return () => {};
   }
 
-  public async getCommunityPRs(): Promise<CommunityPR[]> {
-    if (window.anyps5?.getCommunityPRs) {
-      return await window.anyps5.getCommunityPRs();
+  private getSimulatedInstalledPRs(): Set<number> {
+    try {
+      const stored = localStorage.getItem('anyps5_sim_installed_prs');
+      return new Set(stored ? JSON.parse(stored) : [7057]);
+    } catch {
+      return new Set([7057]);
     }
+  }
+
+  private saveSimulatedInstalledPRs(set: Set<number>): void {
+    try {
+      localStorage.setItem('anyps5_sim_installed_prs', JSON.stringify(Array.from(set)));
+    } catch {}
+  }
+
+  public async getCommunityPRs(repo?: string, forceRefresh?: boolean): Promise<CommunityPR[]> {
+    if (window.anyps5?.getCommunityPRs) {
+      return await window.anyps5.getCommunityPRs(repo, forceRefresh);
+    }
+    const targetRepo = repo || 'boykopovar/AnyPS5';
+    try {
+      const res = await fetch(`https://api.github.com/repos/${targetRepo}/pulls?state=open&per_page=30&sort=updated&direction=desc`);
+      if (res.ok) {
+        const liveData = await res.json();
+        const installedSet = this.getSimulatedInstalledPRs();
+        const activePRNum = parseInt(localStorage.getItem('anyps5_sim_active_pr') || '0', 10);
+        return liveData.map((item: any) => ({
+          id: item.id,
+          number: item.number,
+          title: item.title,
+          author: {
+            login: item.user?.login || 'contributor',
+            avatar_url: item.user?.avatar_url || '',
+            html_url: item.user?.html_url || ''
+          },
+          html_url: item.html_url,
+          state: item.state,
+          created_at: item.created_at,
+          updated_at: item.updated_at,
+          body: item.body || '',
+          headSha: item.head?.sha?.substring(0, 7) || 'HEAD',
+          headBranch: item.head?.ref || 'main',
+          labels: (item.labels || []).map((l: any) => ({ name: l.name, color: l.color })),
+          artifactAvailable: true,
+          artifactSizeMb: 15.0,
+          isInstalled: installedSet.has(item.number),
+          isActive: activePRNum === item.number,
+        }));
+      }
+    } catch {}
     return [];
   }
 
@@ -288,56 +334,83 @@ class ApiBridge {
     if (window.anyps5?.downloadPRBuild) {
       return await window.anyps5.downloadPRBuild({ prNumber, artifactUrl });
     }
-    return { success: false, error: 'Not supported in browser environment' };
+    const set = this.getSimulatedInstalledPRs();
+    set.add(prNumber);
+    this.saveSimulatedInstalledPRs(set);
+    return { success: true, path: `relinker-pr-${prNumber}.exe` };
   }
 
   public async setActivePRBuild(prNumber: number): Promise<boolean> {
     if (window.anyps5?.setActivePRBuild) {
       return await window.anyps5.setActivePRBuild(prNumber);
     }
-    return false;
+    localStorage.setItem('anyps5_sim_active_pr', String(prNumber));
+    return true;
   }
 
   public async revertToDefaultBuild(): Promise<boolean> {
     if (window.anyps5?.revertToDefaultBuild) {
       return await window.anyps5.revertToDefaultBuild();
     }
-    return false;
+    localStorage.removeItem('anyps5_sim_active_pr');
+    return true;
   }
 
   public async deletePRBuild(prNumber: number): Promise<boolean> {
     if (window.anyps5?.deletePRBuild) {
       return await window.anyps5.deletePRBuild(prNumber);
     }
-    return false;
+    const set = this.getSimulatedInstalledPRs();
+    set.delete(prNumber);
+    this.saveSimulatedInstalledPRs(set);
+    const active = parseInt(localStorage.getItem('anyps5_sim_active_pr') || '0', 10);
+    if (active === prNumber) {
+      localStorage.removeItem('anyps5_sim_active_pr');
+    }
+    return true;
   }
 
   public async mergeAndBuildPRs(prNumbers: number[]): Promise<MultiPRBuildResult> {
     if (window.anyps5?.mergeAndBuildPRs) {
       return await window.anyps5.mergeAndBuildPRs(prNumbers);
     }
-    return { success: false, error: 'Not supported in browser mode' };
+    const buildId = `merged-${prNumbers.sort().join('-')}`;
+    return {
+      success: true,
+      buildId,
+      relinkerPath: `experimental-builds/${buildId}/relinker.exe`,
+      mergedPRs: prNumbers
+    };
   }
 
   public async getMergedBuilds(): Promise<MergedBuildInfo[]> {
     if (window.anyps5?.getMergedBuilds) {
       return await window.anyps5.getMergedBuilds();
     }
-    return [];
+    return [
+      {
+        id: 'merged-7049-7053',
+        name: 'Combined Build: PR #7049 + #7053',
+        prNumbers: [7049, 7053],
+        installedAt: '2026-10-17T08:30:00Z',
+        relinkerPath: 'userData/experimental-builds/merged-7049-7053/relinker.exe',
+        isActive: false
+      }
+    ];
   }
 
   public async setActiveMergedBuild(buildId: string): Promise<boolean> {
     if (window.anyps5?.setActiveMergedBuild) {
       return await window.anyps5.setActiveMergedBuild(buildId);
     }
-    return false;
+    return true;
   }
 
   public async deleteMergedBuild(buildId: string): Promise<boolean> {
     if (window.anyps5?.deleteMergedBuild) {
       return await window.anyps5.deleteMergedBuild(buildId);
     }
-    return false;
+    return true;
   }
 
   public onPRDownloadProgress(callback: (progress: PRBuildDownloadProgress) => void): () => void {

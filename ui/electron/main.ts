@@ -1292,53 +1292,72 @@ const CURATED_COMMUNITY_PRS = [
   }
 ];
 
-ipcMain.handle('anyps5:get-community-prs', async () => {
+const prCache = new Map<string, { timestamp: number; data: any[] }>();
+
+ipcMain.handle('anyps5:get-community-prs', async (_, targetRepoArg?: string, forceRefresh?: boolean) => {
   const baseDir = getExperimentalBuildsDir();
   const settings = loadSettings();
   const currentRelinker = settings.relinkerPath || getDefaultRelinkerPath();
+  const targetRepo = targetRepoArg && targetRepoArg.trim() ? targetRepoArg.trim() : 'boykopovar/AnyPS5';
+
+  const cacheKey = targetRepo.toLowerCase();
+  const cached = prCache.get(cacheKey);
+  const now = Date.now();
 
   let prs: any[] = [];
-  try {
-    const res = await fetch('https://api.github.com/repos/Ramzyayman/AnyPS5-Studio/pulls?state=all&per_page=30', {
-      headers: {
-        'User-Agent': 'AnyPS5-Studio-Desktop',
-        'Accept': 'application/vnd.github.v3+json'
+  let fetchedSuccessfully = false;
+
+  if (!forceRefresh && cached && (now - cached.timestamp < 300000)) {
+    prs = cached.data;
+    fetchedSuccessfully = true;
+  } else {
+    try {
+      const res = await fetch(`https://api.github.com/repos/${targetRepo}/pulls?state=open&per_page=50&sort=updated&direction=desc`, {
+        headers: {
+          'User-Agent': 'AnyPS5-Studio-Desktop',
+          'Accept': 'application/vnd.github.v3+json'
+        }
+      });
+      if (res.ok) {
+        const liveData = await res.json();
+        if (Array.isArray(liveData)) {
+          prs = liveData.map((item: any) => ({
+            id: item.id,
+            number: item.number,
+            title: item.title,
+            author: {
+              login: item.user?.login || 'contributor',
+              avatar_url: item.user?.avatar_url || '',
+              html_url: item.user?.html_url || ''
+            },
+            html_url: item.html_url,
+            state: item.state,
+            created_at: item.created_at,
+            updated_at: item.updated_at,
+            body: item.body || '',
+            headSha: item.head?.sha?.substring(0, 7) || 'HEAD',
+            headBranch: item.head?.ref || 'main',
+            labels: (item.labels || []).map((l: any) => ({ name: l.name, color: l.color })),
+            artifactAvailable: true,
+            artifactSizeMb: 15.0,
+          }));
+          prCache.set(cacheKey, { timestamp: now, data: prs });
+          fetchedSuccessfully = true;
+        }
+      } else {
+        console.warn(`GitHub API returned status ${res.status} for ${targetRepo}`);
       }
-    });
-    if (res.ok) {
-      const liveData = await res.json();
-      if (Array.isArray(liveData) && liveData.length > 0) {
-        prs = liveData.map((item: any) => ({
-          id: item.id,
-          number: item.number,
-          title: item.title,
-          author: {
-            login: item.user?.login || 'contributor',
-            avatar_url: item.user?.avatar_url || '',
-            html_url: item.user?.html_url || ''
-          },
-          html_url: item.html_url,
-          state: item.state,
-          created_at: item.created_at,
-          updated_at: item.updated_at,
-          body: item.body || '',
-          headSha: item.head?.sha?.substring(0, 7) || 'HEAD',
-          headBranch: item.head?.ref || 'main',
-          labels: (item.labels || []).map((l: any) => ({ name: l.name, color: l.color })),
-          artifactAvailable: true,
-          artifactSizeMb: 15.0,
-        }));
-      }
+    } catch (err) {
+      console.warn(`Could not fetch live GitHub PRs from ${targetRepo}:`, err);
     }
-  } catch (err) {
-    console.warn('Could not fetch live GitHub PRs, using curated community list:', err);
   }
 
-  // Combine live PRs with curated community PRs (avoiding duplicate numbers)
-  const existingNumbers = new Set(prs.map((p) => p.number));
-  for (const c of CURATED_COMMUNITY_PRS) {
-    if (!existingNumbers.has(c.number)) {
-      prs.push(c);
+  // If live fetch failed due to network error, fallback to cache or upstream offline fallback
+  if (!fetchedSuccessfully) {
+    if (cached) {
+      prs = cached.data;
+    } else if (targetRepo.toLowerCase() === 'boykopovar/anyps5') {
+      prs = [...CURATED_COMMUNITY_PRS];
     }
   }
 
@@ -1347,11 +1366,19 @@ ipcMain.handle('anyps5:get-community-prs', async () => {
     const prDir = path.join(baseDir, `pr-${pr.number}`);
     const prExe = path.join(prDir, 'relinker.exe');
     const isInstalled = fs.existsSync(prExe);
+    let artifactSizeMb = pr.artifactSizeMb;
+    if (isInstalled) {
+      try {
+        const stats = fs.statSync(prExe);
+        artifactSizeMb = Math.round((stats.size / (1024 * 1024)) * 10) / 10;
+      } catch {}
+    }
     const isActive = isInstalled && path.normalize(currentRelinker) === path.normalize(prExe);
     return {
       ...pr,
       isInstalled,
       isActive,
+      artifactSizeMb: artifactSizeMb || pr.artifactSizeMb,
     };
   });
 });
@@ -1440,12 +1467,12 @@ ipcMain.handle('anyps5:delete-pr-build', async (_, prNumber: number) => {
   if (fs.existsSync(prDir)) {
     try {
       fs.rmSync(prDir, { recursive: true, force: true });
-      return true;
     } catch (err) {
       console.error('Failed to remove PR build directory:', err);
+      return false;
     }
   }
-  return false;
+  return true;
 });
 
 ipcMain.handle('anyps5:merge-and-build-prs', async (_, prNumbers: number[]) => {
