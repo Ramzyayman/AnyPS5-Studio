@@ -1,4 +1,14 @@
-import { GameItem, RelinkerOptions, SystemTelemetry, ConversionStage, ConversionLog, AppSettings, UpdateStatus } from '../types';
+import { 
+  GameItem, 
+  RelinkerOptions, 
+  SystemTelemetry, 
+  ConversionStage, 
+  ConversionLog, 
+  AppSettings, 
+  UpdateStatus,
+  CommunityPR,
+  PRBuildDownloadProgress
+} from '../types';
 import { INITIAL_GAMES } from './sampleData';
 
 declare global {
@@ -23,6 +33,12 @@ declare global {
       quitAndInstallUpdate?: () => void;
       getAppVersion?: () => Promise<string>;
       onUpdateStatus?: (callback: (status: UpdateStatus) => void) => () => void;
+      getCommunityPRs?: () => Promise<CommunityPR[]>;
+      downloadPRBuild?: (args: { prNumber: number; artifactUrl?: string }) => Promise<{ success: boolean; path?: string; error?: string }>;
+      setActivePRBuild?: (prNumber: number) => Promise<boolean>;
+      revertToDefaultBuild?: () => Promise<boolean>;
+      deletePRBuild?: (prNumber: number) => Promise<boolean>;
+      onPRDownloadProgress?: (callback: (progress: PRBuildDownloadProgress) => void) => () => void;
       runRelinker: (
         game: GameItem,
         options: RelinkerOptions,
@@ -251,6 +267,48 @@ class ApiBridge {
   public onUpdateStatus(callback: (status: UpdateStatus) => void): () => void {
     if (window.anyps5?.onUpdateStatus) {
       return window.anyps5.onUpdateStatus(callback);
+    }
+    return () => {};
+  }
+
+  public async getCommunityPRs(): Promise<CommunityPR[]> {
+    if (window.anyps5?.getCommunityPRs) {
+      return await window.anyps5.getCommunityPRs();
+    }
+    return [];
+  }
+
+  public async downloadPRBuild(prNumber: number, artifactUrl?: string): Promise<{ success: boolean; path?: string; error?: string }> {
+    if (window.anyps5?.downloadPRBuild) {
+      return await window.anyps5.downloadPRBuild({ prNumber, artifactUrl });
+    }
+    return { success: false, error: 'Not supported in browser environment' };
+  }
+
+  public async setActivePRBuild(prNumber: number): Promise<boolean> {
+    if (window.anyps5?.setActivePRBuild) {
+      return await window.anyps5.setActivePRBuild(prNumber);
+    }
+    return false;
+  }
+
+  public async revertToDefaultBuild(): Promise<boolean> {
+    if (window.anyps5?.revertToDefaultBuild) {
+      return await window.anyps5.revertToDefaultBuild();
+    }
+    return false;
+  }
+
+  public async deletePRBuild(prNumber: number): Promise<boolean> {
+    if (window.anyps5?.deletePRBuild) {
+      return await window.anyps5.deletePRBuild(prNumber);
+    }
+    return false;
+  }
+
+  public onPRDownloadProgress(callback: (progress: PRBuildDownloadProgress) => void): () => void {
+    if (window.anyps5?.onPRDownloadProgress) {
+      return window.anyps5.onPRDownloadProgress(callback);
     }
     return () => {};
   }

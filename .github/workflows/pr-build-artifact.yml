@@ -1,0 +1,69 @@
+name: Community PR Build & Artifact
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "Pull request number to build (e.g. 1)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: read
+  actions: write
+
+jobs:
+  build-windows:
+    name: Build Windows x64 Binary
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Checkout or Merge PR
+        if: ${{ github.event_name == 'pull_request' || inputs.pr_number != '' }}
+        shell: bash
+        run: |
+          PR_NUM="${{ github.event.pull_request.number || inputs.pr_number }}"
+          echo "Fetching and merging PR #${PR_NUM}..."
+          git fetch origin "pull/${PR_NUM}/head:pr-${PR_NUM}"
+          git -c user.name="AnyPS5 CI" -c user.email="ci@anyps5.local" merge --no-ff "pr-${PR_NUM}" -m "Merge PR #${PR_NUM} into CI workspace"
+          git submodule update --init --recursive
+
+      - name: Setup CMake and Ninja
+        uses: lukka/get-cmake@latest
+
+      - name: Configure CMake
+        shell: cmd
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DANYPS5_BUILD_TESTS=OFF
+
+      - name: Compile Relinker
+        shell: cmd
+        run: |
+          cmake --build build --target relinker --config Release
+
+      - name: Package PR Artifact
+        shell: bash
+        run: |
+          mkdir -p dist-pr
+          cp build/bin/relinker.exe dist-pr/relinker.exe 2>/dev/null || cp build/relinker.exe dist-pr/relinker.exe 2>/dev/null || true
+          if [ -d "libs" ]; then
+            cp -r libs dist-pr/libs
+          fi
+
+      - name: Upload PR Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: anyps5-relinker-windows-x64-pr-${{ github.event.pull_request.number || inputs.pr_number }}
+          path: dist-pr/
+          retention-days: 14

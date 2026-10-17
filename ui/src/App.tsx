@@ -8,6 +8,7 @@ import { TelemetryPanel } from './components/TelemetryPanel';
 import { GameLauncherModal } from './components/GameLauncherModal';
 import { AddGameModal } from './components/AddGameModal';
 import { SettingsModal } from './components/SettingsModal';
+import { CommunityPRBuilds } from './components/CommunityPRBuilds';
 import { GameItem } from './types';
 import { apiBridge } from './services/apiBridge';
 import { audioService } from './services/audioService';
@@ -18,7 +19,7 @@ import { INITIAL_GAMES } from './services/sampleData';
 export const App: React.FC = () => {
   const [games, setGames] = useState<GameItem[]>([]);
   const [selectedGameIndex, setSelectedGameIndex] = useState<number>(0);
-  const [activeTab, setActiveTab] = useState<'games' | 'relinker' | 'nid' | 'prx' | 'telemetry'>('games');
+  const [activeTab, setActiveTab] = useState<'games' | 'relinker' | 'community' | 'nid' | 'prx' | 'telemetry'>('games');
   const [activeRunningGame, setActiveRunningGame] = useState<GameItem | null>(null);
   const [isAddGameOpen, setIsAddGameOpen] = useState<boolean>(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
@@ -68,9 +69,9 @@ export const App: React.FC = () => {
     return () => unsub();
   }, []);
 
-  const availableTabs: ('games' | 'relinker' | 'nid' | 'prx' | 'telemetry')[] = showAdvancedNav
-    ? ['games', 'relinker', 'nid', 'prx', 'telemetry']
-    : ['games', 'relinker'];
+  const availableTabs: ('games' | 'relinker' | 'community' | 'nid' | 'prx' | 'telemetry')[] = showAdvancedNav
+    ? ['games', 'relinker', 'community', 'nid', 'prx', 'telemetry']
+    : ['games', 'relinker', 'community'];
 
   // Keyboard navigation for authentic console feel
   useEffect(() => {
@@ -322,6 +323,13 @@ export const App: React.FC = () => {
               </button>
             </div>
           )
+        )}
+
+        {activeTab === 'community' && (
+          <CommunityPRBuilds
+            onNavigateToGames={() => setActiveTab('games')}
+            onNavigateToRelinker={() => setActiveTab('relinker')}
+          />
         )}
 
         {activeTab === 'nid' && (

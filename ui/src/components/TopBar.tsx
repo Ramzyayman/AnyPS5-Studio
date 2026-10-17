@@ -12,17 +12,18 @@ import { audioService } from '../services/audioService';
 import { apiBridge } from '../services/apiBridge';
 
 interface TopBarProps {
-  activeTab: 'games' | 'relinker' | 'nid' | 'prx' | 'telemetry';
-  onTabChange: (tab: 'games' | 'relinker' | 'nid' | 'prx' | 'telemetry') => void;
+  activeTab: 'games' | 'relinker' | 'community' | 'nid' | 'prx' | 'telemetry';
+  onTabChange: (tab: 'games' | 'relinker' | 'community' | 'nid' | 'prx' | 'telemetry') => void;
   onOpenAddGame: () => void;
   onOpenSettings: () => void;
   gamepadConnected: boolean;
   showAdvancedNav?: boolean;
 }
 
-const ALL_NAV_ITEMS: { key: 'games' | 'relinker' | 'nid' | 'prx' | 'telemetry'; label: string; advanced?: boolean }[] = [
+const ALL_NAV_ITEMS: { key: 'games' | 'relinker' | 'community' | 'nid' | 'prx' | 'telemetry'; label: string; advanced?: boolean }[] = [
   { key: 'games', label: 'Games' },
   { key: 'relinker', label: 'Relinker Studio' },
+  { key: 'community', label: 'Community PR Builds' },
   { key: 'nid', label: 'NID Inspector', advanced: true },
   { key: 'prx', label: 'PRX Libraries', advanced: true },
   { key: 'telemetry', label: 'System Status', advanced: true },
@@ -63,7 +64,7 @@ export const TopBar: React.FC<TopBarProps> = ({
     return () => unsubscribe();
   }, []);
 
-  const handleTabClick = (tab: 'games' | 'relinker' | 'nid' | 'prx' | 'telemetry') => {
+  const handleTabClick = (tab: 'games' | 'relinker' | 'community' | 'nid' | 'prx' | 'telemetry') => {
     if (tab !== activeTab) {
       audioService.playNavTick();
       onTabChange(tab);
