@@ -559,22 +559,44 @@ function getDefaultLibsPath(): string {
   const candidates: string[] = [];
   if (app.isPackaged) {
     if (process.resourcesPath) {
-      candidates.push(path.join(process.resourcesPath, 'libs'));
+      candidates.push(
+        path.join(process.resourcesPath, 'libs', 'libs'),
+        path.join(process.resourcesPath, 'libs')
+      );
     }
     try {
       const exeDir = path.dirname(app.getPath('exe'));
       candidates.push(
+        path.join(exeDir, 'resources', 'libs', 'libs'),
         path.join(exeDir, 'resources', 'libs'),
+        path.join(exeDir, 'libs', 'libs'),
         path.join(exeDir, 'libs')
       );
     } catch {}
   } else {
     candidates.push(
+      path.resolve(__dirname, '../../libs/libs'),
       path.resolve(__dirname, '../../libs'),
+      path.resolve(process.cwd(), 'libs/libs'),
       path.resolve(process.cwd(), 'libs'),
+      path.resolve(process.cwd(), '../libs/libs'),
       path.resolve(process.cwd(), '../libs')
     );
   }
+
+  // First pass: prioritize candidate directory that directly contains .prx files
+  for (const c of candidates) {
+    if (fs.existsSync(c)) {
+      try {
+        const files = fs.readdirSync(c);
+        if (files.some(f => f.toLowerCase().endsWith('.prx'))) {
+          return path.normalize(c);
+        }
+      } catch {}
+    }
+  }
+
+  // Second pass: fallback to any existing directory
   for (const c of candidates) {
     if (fs.existsSync(c)) return path.normalize(c);
   }
@@ -591,10 +613,25 @@ function getResolvedRelinkerPath(): string {
 
 function getResolvedLibsPath(): string {
   const userSettings = loadSettings();
+  let baseDir = '';
   if (userSettings.prxPath && fs.existsSync(userSettings.prxPath)) {
-    return path.normalize(userSettings.prxPath);
+    baseDir = path.normalize(userSettings.prxPath);
+  } else {
+    baseDir = getDefaultLibsPath();
   }
-  return getDefaultLibsPath();
+  if (baseDir && fs.existsSync(baseDir)) {
+    // If baseDir has a nested 'libs' directory containing PRX files, automatically resolve it
+    const nested = path.join(baseDir, 'libs');
+    if (fs.existsSync(nested) && fs.statSync(nested).isDirectory()) {
+      try {
+        const nestedFiles = fs.readdirSync(nested);
+        if (nestedFiles.some(f => f.toLowerCase().endsWith('.prx'))) {
+          return nested;
+        }
+      } catch {}
+    }
+  }
+  return baseDir;
 }
 
 function getResolvedUnwrapScript(): string {
@@ -743,38 +780,44 @@ function sanitizeModuleDirectory(
   }
 }
 
-function fixGameHierarchyInPlace(gameDir: string, sendLog: (msg: string, level?: string) => void) {
+function fixGameHierarchyInPlace(
+  gameDir: string,
+  sendLog: (msg: string, level?: string) => void,
+  mode: 'launch' | 'relink' = 'launch'
+) {
   const resolved = path.resolve(gameDir);
   if (!fs.existsSync(resolved)) {
     throw new Error(`Game directory does not exist: "${resolved}"`);
   }
 
-  // 1. Flatten single wrapper directory if present in-place (instant rename)
+  // 1. Flatten single wrapper directories if present in-place (handles nested wrappers like [DLPS].../[DLPS]...)
   try {
-    const rootEntries = fs.readdirSync(resolved);
-    if (rootEntries.length === 1) {
+    for (let depth = 0; depth < 5; depth++) {
+      const rootEntries = fs.readdirSync(resolved);
+      if (rootEntries.length !== 1) break;
       const singlePath = path.join(resolved, rootEntries[0]);
-      if (fs.statSync(singlePath).isDirectory() && !['app0', 'libs'].includes(rootEntries[0])) {
-        if (rootEntries[0].toLowerCase().endsWith('-app0') || rootEntries[0].toLowerCase().includes('app0')) {
-          const app0Target = path.join(resolved, 'app0');
-          if (!fs.existsSync(app0Target)) {
-            sendLog(`[AnyPS5] Normalizing wrapper directory "${rootEntries[0]}" -> "app0"...`, 'info');
-            fs.renameSync(singlePath, app0Target);
-          }
-        } else {
-          sendLog(`[AnyPS5] Unnesting contents of "${rootEntries[0]}" in-place...`, 'info');
-          const innerFiles = fs.readdirSync(singlePath);
-          for (const inner of innerFiles) {
-            const src = path.join(singlePath, inner);
-            const dst = path.join(resolved, inner);
-            if (!fs.existsSync(dst)) {
-              fs.renameSync(src, dst);
-            }
-          }
-          try {
-            fs.rmdirSync(singlePath);
-          } catch {}
+      if (!fs.statSync(singlePath).isDirectory() || ['app0', 'libs'].includes(rootEntries[0])) break;
+
+      if (rootEntries[0].toLowerCase().endsWith('-app0') || rootEntries[0].toLowerCase().includes('app0')) {
+        const app0Target = path.join(resolved, 'app0');
+        if (!fs.existsSync(app0Target)) {
+          sendLog(`[AnyPS5] Normalizing wrapper directory "${rootEntries[0]}" -> "app0"...`, 'info');
+          fs.renameSync(singlePath, app0Target);
         }
+        break;
+      } else {
+        sendLog(`[AnyPS5] Unnesting contents of "${rootEntries[0]}" in-place...`, 'info');
+        const innerFiles = fs.readdirSync(singlePath);
+        for (const inner of innerFiles) {
+          const src = path.join(singlePath, inner);
+          const dst = path.join(resolved, inner);
+          if (!fs.existsSync(dst)) {
+            fs.renameSync(src, dst);
+          }
+        }
+        try {
+          fs.rmdirSync(singlePath);
+        } catch {}
       }
     }
   } catch (flattenErr) {
@@ -851,20 +894,52 @@ function fixGameHierarchyInPlace(gameDir: string, sendLog: (msg: string, level?:
   const knownSystemLibs = new Set<string>();
   const sourceLibs = getResolvedLibsPath();
   if (sourceLibs && fs.existsSync(sourceLibs)) {
-    const sourceFiles = fs.readdirSync(sourceLibs);
+    const collectSourceFiles = (dir: string): { name: string; fullPath: string; stat: fs.Stats }[] => {
+      const results: { name: string; fullPath: string; stat: fs.Stats }[] = [];
+      try {
+        const entries = fs.readdirSync(dir);
+        for (const entry of entries) {
+          const full = path.join(dir, entry);
+          try {
+            const stat = fs.statSync(full);
+            if (stat.isFile()) {
+              results.push({ name: entry, fullPath: full, stat });
+            } else if (stat.isDirectory() && entry.toLowerCase() === 'libs') {
+              results.push(...collectSourceFiles(full));
+            }
+          } catch {}
+        }
+      } catch {}
+      return results;
+    };
+
+    const sourceFiles = collectSourceFiles(sourceLibs);
+
+    // Apply any local PRX/DLL overrides from core/libs/overrides
+    const overrideCandidates = [
+      path.resolve(__dirname, '../../core/libs/overrides'),
+      path.resolve(process.cwd(), 'core/libs/overrides'),
+      path.resolve(process.cwd(), '../core/libs/overrides'),
+    ];
+    for (const cand of overrideCandidates) {
+      if (fs.existsSync(cand) && fs.statSync(cand).isDirectory()) {
+        const overrides = collectSourceFiles(cand);
+        for (const ov of overrides) {
+          const existingIdx = sourceFiles.findIndex(f => f.name.toLowerCase() === ov.name.toLowerCase());
+          if (existingIdx >= 0) {
+            sourceFiles[existingIdx] = ov;
+          } else {
+            sourceFiles.push(ov);
+          }
+        }
+        break;
+      }
+    }
+
     let copiedLibsCount = 0;
     let copiedRootCount = 0;
 
-    for (const file of sourceFiles) {
-      const s = path.join(sourceLibs, file);
-      let stat: fs.Stats;
-      try {
-        stat = fs.statSync(s);
-      } catch {
-        continue;
-      }
-      if (!stat.isFile()) continue;
-
+    for (const { name: file, fullPath: s, stat } of sourceFiles) {
       const lower = file.toLowerCase();
       const isPrx = lower.endsWith('.prx');
       const isDll = lower.endsWith('.dll');
@@ -877,8 +952,10 @@ function fixGameHierarchyInPlace(gameDir: string, sendLog: (msg: string, level?:
       // 3a. Deploy to gameDir/libs/ (legacy & relinker search directory)
       const dLibs = path.join(gameLibs, file);
       if (!fs.existsSync(dLibs) || fs.statSync(dLibs).size !== stat.size) {
-        fs.copyFileSync(s, dLibs);
-        copiedLibsCount++;
+        try {
+          fs.copyFileSync(s, dLibs);
+          copiedLibsCount++;
+        } catch {}
       }
 
       // 3b. Deploy runtime DLLs (libstdc++-6.dll, libwinpthread-1.dll, libgcc_s_seh-1.dll)
@@ -888,15 +965,19 @@ function fixGameHierarchyInPlace(gameDir: string, sendLog: (msg: string, level?:
       if (isDll || isPrx) {
         const dRoot = path.join(resolved, file);
         if (!fs.existsSync(dRoot) || fs.statSync(dRoot).size !== stat.size) {
-          fs.copyFileSync(s, dRoot);
-          copiedRootCount++;
+          try {
+            fs.copyFileSync(s, dRoot);
+            copiedRootCount++;
+          } catch {}
         }
 
         // Also deploy runtime DLLs directly into app0/ for direct DLL load directory searches
         if (isDll) {
           const dApp0 = path.join(app0Dir, file);
           if (!fs.existsSync(dApp0) || fs.statSync(dApp0).size !== stat.size) {
-            fs.copyFileSync(s, dApp0);
+            try {
+              fs.copyFileSync(s, dApp0);
+            } catch {}
           }
         }
       }
@@ -1266,6 +1347,77 @@ function fixGameHierarchyInPlace(gameDir: string, sendLog: (msg: string, level?:
 
   const outputExe = path.join(resolved, 'app.exe');
 
+  // Backward compatibility check for executables built with legacy dumper stubs (fakelib)
+  if (mode === 'launch') {
+    try {
+      if (fs.existsSync(outputExe)) {
+        const exeBuffer = fs.readFileSync(outputExe);
+        if (exeBuffer.includes(Buffer.from('fakelib'))) {
+          sendLog(`[AnyPS5 Diagnostics] Stale executable detected: "app.exe" contains embedded imports to legacy "fakelib" stubs.`, 'warn');
+          sendLog(`[AnyPS5 Diagnostics] Re-relinking this title in Relinker Studio is recommended to use AnyPS5's native translation libraries.`, 'info');
+
+          const backupFakelib = path.join(app0Dir, 'module_backups', 'fakelib');
+          const activeFakelib = path.join(app0Dir, 'fakelib');
+
+          if (fs.existsSync(backupFakelib)) {
+            if (!fs.existsSync(activeFakelib)) fs.mkdirSync(activeFakelib, { recursive: true });
+            const backupEntries = fs.readdirSync(backupFakelib);
+            for (const be of backupEntries) {
+              const src = path.join(backupFakelib, be);
+              const dst = path.join(activeFakelib, be);
+              if (!fs.existsSync(dst)) {
+                try {
+                  fs.copyFileSync(src, dst);
+                } catch {}
+              }
+            }
+          }
+
+          // Deploy fallback bridges for system libraries expected in fakelib (e.g. libSceAppContent.sprx.guest.prx)
+          const expectedStems = ['libSceAppContent', 'libSceAgc', 'libSceAgcDriver', 'libSceSaveData'];
+          for (const stem of expectedStems) {
+            const guestPrxName = `${stem}.sprx.guest.prx`;
+            const missingGuestPrx = path.join(activeFakelib, guestPrxName);
+            if (!fs.existsSync(missingGuestPrx)) {
+              const nativePrx = path.join(resolved, `${stem}.prx`);
+              const libsPrx = path.join(resolved, 'libs', `${stem}.prx`);
+              const sourcePrx = fs.existsSync(nativePrx) ? nativePrx : (fs.existsSync(libsPrx) ? libsPrx : '');
+              if (sourcePrx) {
+                try {
+                  if (!fs.existsSync(activeFakelib)) fs.mkdirSync(activeFakelib, { recursive: true });
+                  fs.copyFileSync(sourcePrx, missingGuestPrx);
+                  sendLog(`[AnyPS5] Deployed native ${stem} as fallback guest bridge at app0/fakelib/${guestPrxName}`, 'info');
+                } catch (bridgeErr) {
+                  console.warn(`Failed to deploy fallback guest bridge for ${stem}:`, bridgeErr);
+                }
+              }
+            }
+          }
+        }
+      }
+    } catch (compatErr) {
+      console.warn('Fakelib backward compatibility check error:', compatErr);
+    }
+  } else if (mode === 'relink') {
+    // During relink, clean up any active app0/fakelib bridge so relinker never links against fake stubs
+    try {
+      const activeFakelib = path.join(app0Dir, 'fakelib');
+      if (fs.existsSync(activeFakelib)) {
+        const backupFakelib = path.join(app0Dir, 'module_backups', 'fakelib');
+        if (!fs.existsSync(backupFakelib)) fs.mkdirSync(backupFakelib, { recursive: true });
+        const entries = fs.readdirSync(activeFakelib);
+        for (const e of entries) {
+          const src = path.join(activeFakelib, e);
+          const dst = path.join(backupFakelib, e);
+          if (!fs.existsSync(dst)) {
+            try { fs.copyFileSync(src, dst); } catch {}
+          }
+        }
+        try { fs.rmSync(activeFakelib, { recursive: true, force: true }); } catch {}
+      }
+    } catch {}
+  }
+
   return {
     gameDir: resolved,
     inputElf,
@@ -1296,8 +1448,8 @@ ipcMain.handle('anyps5:run-relinker', async (_, { game, options }) => {
     sendLog(`[AnyPS5] Preparing in-place relinker pipeline for "${game.title}"...`, 'info');
     sendStage(1, 'active', 20);
 
-    // Step 1: Fix folder hierarchy in-place in native location (no copying outside native folder)
-    const { gameDir, inputElf, outputExe, moduleDirs } = fixGameHierarchyInPlace(game.path, sendLog);
+    // Step 1: Fix folder hierarchy in-place in native location (mode: 'relink' isolates legacy stubs)
+    const { gameDir, inputElf, outputExe, moduleDirs } = fixGameHierarchyInPlace(game.path, sendLog, 'relink');
     game.path = gameDir;
     sendStage(1, 'completed', 100);
 
@@ -1446,10 +1598,21 @@ let activeGameProcess: ChildProcess | null = null;
 
 // IPC Handler: Launch Ported Game
 ipcMain.handle('anyps5:launch-game', async (_, game) => {
+  const sendLog = (message: string, level = 'info') => {
+    mainWindow?.webContents.send('anyps5:game-log', {
+      timestamp: new Date().toLocaleTimeString(),
+      level,
+      message: message.trim(),
+    });
+  };
+
   try {
-    fixGameHierarchyInPlace(game.path, () => {});
-  } catch (err) {
+    sendLog(`[AnyPS5] Launching native ported executable: ${game.path}/${game.executableName || 'app.exe'}`);
+    sendLog(`[AnyPS5] Checking runtime layout: libs/ system PRX and app0/ guest filesystem...`);
+    fixGameHierarchyInPlace(game.path, sendLog, 'launch');
+  } catch (err: any) {
     console.error('Launch hierarchy check error:', err);
+    sendLog(`[AnyPS5 Warning] Hierarchy check: ${err?.message || err}`, 'warn');
   }
 
   const candidateExes = [
@@ -1511,14 +1674,6 @@ ipcMain.handle('anyps5:launch-game', async (_, game) => {
     });
     activeGameProcess = child;
 
-    const sendLog = (message: string, level = 'info') => {
-      mainWindow?.webContents.send('anyps5:game-log', {
-        timestamp: new Date().toLocaleTimeString(),
-        level,
-        message: message.trim(),
-      });
-    };
-
     sendLog(`[AnyPS5] Launching native ported executable: ${targetExe}`);
     sendLog(`[AnyPS5] Initialized child process PID: ${child.pid}`);
     if (gpuToUse) {
@@ -1530,15 +1685,21 @@ ipcMain.handle('anyps5:launch-game', async (_, game) => {
       sendLog(`[AnyPS5 Environment] ANYPS5_GPU="${gpuToUse}"`, 'info');
     }
 
+    let capturedOutput = '';
+
     child.stdout?.on('data', (d) => {
-      const lines = d.toString().split(/\r?\n/).filter(Boolean);
+      const text = d.toString();
+      capturedOutput += text + '\n';
+      const lines = text.split(/\r?\n/).filter(Boolean);
       for (const line of lines) {
         sendLog(line, 'info');
       }
     });
 
     child.stderr?.on('data', (d) => {
-      const lines = d.toString().split(/\r?\n/).filter(Boolean);
+      const text = d.toString();
+      capturedOutput += text + '\n';
+      const lines = text.split(/\r?\n/).filter(Boolean);
       for (const line of lines) {
         sendLog(line, 'warn');
       }
@@ -1568,7 +1729,25 @@ ipcMain.handle('anyps5:launch-game', async (_, game) => {
       if (code === 3221225477 || code === -1073741819) {
         sendLog(`[AnyPS5 Diagnostics] Crash detected: Access Violation (0xC0000005). If the title was relinked with aggressive import filtering, ensure 'Unused Import Optimization' is set to Level 0 (Safe / Full Compatibility) to preserve all C++ virtual tables and dynamic function pointers.`, 'error');
       } else if (code === 3221225781 || code === -1073741515) {
-        sendLog(`[AnyPS5 Diagnostics] Crash detected: Missing Dependency DLL (0xC0000135). Ensure all required middleware PRXs and runtime libraries in libs/ are deployed.`, 'error');
+        if (capturedOutput.toLowerCase().includes('fakelib')) {
+          sendLog(`[AnyPS5 Diagnostics] Crash Root Cause: Stale executable attempting to load legacy "fakelib" dump stubs. Open Relinker Studio and click Relink to rebuild with AnyPS5's native translation libraries.`, 'error');
+        } else {
+          sendLog(`[AnyPS5 Diagnostics] Crash detected: Missing Dependency DLL (0xC0000135). Ensure all required middleware PRXs and runtime libraries in libs/ are deployed.`, 'error');
+        }
+      } else if (code === 3221225785 || code === -1073741511) {
+        const importMatch = capturedOutput.match(/FAIL:\s*unresolved\s+ELF\s+import\s+([^\r\n]+)/i);
+        if (importMatch && importMatch[1]) {
+          sendLog(`[AnyPS5 Diagnostics] Crash detected: Unresolved ELF Import (0xC0000139) -> "${importMatch[1].trim()}". Verify exported symbols in the target PRX.`, 'error');
+        } else {
+          sendLog(`[AnyPS5 Diagnostics] Crash detected: Unresolved Entry Point / Symbol Import (0xC0000139). Inspect the searched libraries and missing symbols above.`, 'error');
+        }
+      } else if (code === 3221226505 || code === -1073740791) {
+        const whatMatch = capturedOutput.match(/what\(\):\s*([^\r\n]+)/i);
+        if (whatMatch && whatMatch[1]) {
+          sendLog(`[AnyPS5 Diagnostics] Crash detected: Fatal Exception / Abort (0xC0000409) -> "${whatMatch[1].trim()}".`, 'error');
+        } else {
+          sendLog(`[AnyPS5 Diagnostics] Crash detected: Process Abort / Fail-Fast (0xC0000409). Check execution log for abort() or assertion failure.`, 'error');
+        }
       }
 
       mainWindow?.webContents.send('anyps5:game-exit', {

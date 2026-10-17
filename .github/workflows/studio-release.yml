@@ -39,10 +39,18 @@ jobs:
           curl.exe -sSfL -o build/relinker.exe https://github.com/boykopovar/AnyPS5/releases/download/v0.1.2/relinker-v0.1.2.exe
           echo "Fetching official PRX libraries..."
           curl.exe -sSfL -o prx-windows.zip https://github.com/boykopovar/AnyPS5/releases/download/v0.1.2/prx-windows-v0.1.2.zip
-          powershell.exe -NoProfile -Command "Expand-Archive -Path prx-windows.zip -DestinationPath libs -Force"
+          powershell.exe -NoProfile -Command "Expand-Archive -Path prx-windows.zip -DestinationPath . -Force"
           rm -f prx-windows.zip
+          if [ -d "libs/libs" ]; then
+            cp -rn libs/libs/* libs/ 2>/dev/null || true
+            rm -rf libs/libs
+          fi
+          if [ -d "core/libs/overrides" ]; then
+            echo "Applying repository PRX overrides..."
+            cp -fv core/libs/overrides/* libs/ || true
+          fi
           ls -la build/
-          ls -la libs/ | head -n 5
+          ls -la libs/ | head -n 10
 
       - name: Install dependencies
         working-directory: ui

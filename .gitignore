@@ -110,5 +110,6 @@ cookies.txt
 .env
 .env.local
 
-libs/
+/libs/
+!/core/libs/overrides/
 relinked-games/

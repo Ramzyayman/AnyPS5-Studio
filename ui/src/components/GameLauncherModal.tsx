@@ -134,10 +134,33 @@ export const GameLauncherModal: React.FC<GameLauncherModalProps> = ({
         });
       } else if (code === 3221225781 || code === -1073741515) {
         setDetectedAbortReason((prev) => prev || 'Missing PRX Dependency (0xC0000135)');
-        setErrorMessage({
-          summary: 'The game closed unexpectedly',
-          remedy: 'A required guest PRX or runtime dependency (0xC0000135) could not be loaded. Ensure the game folder was relinked with all middleware modules.',
-          isRelinkHint: true,
+        setErrorMessage((prev) => {
+          if (prev && prev.remedy && (prev.remedy.includes('fakelib') || prev.remedy.includes('module'))) return prev;
+          return {
+            summary: 'The game closed unexpectedly',
+            remedy: 'A required guest PRX or runtime dependency (0xC0000135) could not be loaded. Ensure the game folder was relinked with all middleware modules.',
+            isRelinkHint: true,
+          };
+        });
+      } else if (code === 3221225785 || code === -1073741511) {
+        setDetectedAbortReason((prev) => (prev && prev !== 'unresolved' ? prev : 'Unresolved Import (0xC0000139)'));
+        setErrorMessage((prev) => {
+          if (prev && prev.remedy && prev.remedy.includes('symbol')) return prev;
+          return {
+            summary: 'Unresolved Function / Symbol Import (0xC0000139)',
+            remedy: 'A required native function or symbol was not exported by the loaded PRX modules. In Relinker Studio, verify system libraries and middleware stubs.',
+            isRelinkHint: true,
+          };
+        });
+      } else if (code === 3221226505 || code === -1073740791) {
+        setDetectedAbortReason((prev) => (prev && prev !== 'unresolved' ? prev : 'Process Abort / Exception (0xC0000409)'));
+        setErrorMessage((prev) => {
+          if (prev && prev.remedy && prev.remedy.length > 0) return prev;
+          return {
+            summary: 'Process Terminated via Abort (0xC0000409)',
+            remedy: 'The application encountered an unhandled C++ exception or abort() call during execution. Check Execution Logs below for the runtime error trace.',
+            isRelinkHint: false,
+          };
         });
       } else {
         setDetectedAbortReason((prev) => prev || `Process Exit (${resolvedHex})`);
@@ -232,10 +255,47 @@ export const GameLauncherModal: React.FC<GameLauncherModalProps> = ({
         setStatusMessage('Game running');
       }
 
-      // Parse abort reason, C++ exception what(), or missing symbols
-      const failMatch = msg.match(/(?:FAIL|Exception|what\(\)|Abort|Unimplemented|Missing):\s*([a-zA-Z0-9_:]+)/i);
-      if (failMatch && failMatch[1]) {
-        setDetectedAbortReason(failMatch[1]);
+      // Parse unresolved ELF import explicitly (e.g. "FAIL: unresolved ELF import <name> from <lib>")
+      if (msg.includes('unresolved ELF import')) {
+        const match = msg.match(/FAIL:\s*unresolved\s+ELF\s+import\s+([^\r\n]+)/i);
+        if (match && match[1]) {
+          const rawSymbol = match[1].trim();
+          setDetectedAbortReason(rawSymbol);
+          setErrorMessage({
+            summary: 'Unresolved Function Import (0xC0000139)',
+            remedy: `The ported binary requires symbol "${rawSymbol}", which was not exported by the loaded PRX.`,
+            isRelinkHint: true,
+          });
+        }
+      } else {
+        // Parse abort reason, C++ exception what(), or missing symbols
+        const failMatch = msg.match(/(?:Exception|what\(\)|Abort|Unimplemented|Missing):\s*([^\r\n]+)/i);
+        if (failMatch && failMatch[1]) {
+          const reason = failMatch[1].trim();
+          if (reason) setDetectedAbortReason(reason);
+        }
+      }
+
+      // Parse module load failure from PE loader stub
+      if (msg.includes('Failed to load module:')) {
+        const match = msg.match(/Failed to load module:\s*([^\r\n]+)/i);
+        const modPath = match ? match[1].trim() : '';
+        const modName = modPath.split(/[\\/]/).pop() || 'Unknown Module';
+        if (modPath.toLowerCase().includes('fakelib')) {
+          setDetectedAbortReason('Legacy fakelib stub');
+          setErrorMessage({
+            summary: 'Legacy dump stubs detected (fakelib)',
+            remedy: 'This game was previously linked with legacy dump stubs (fakelib). Click "Relinker Studio" below to rebuild with AnyPS5 native system libraries.',
+            isRelinkHint: true,
+          });
+        } else {
+          setDetectedAbortReason(`Missing: ${modName}`);
+          setErrorMessage({
+            summary: 'Missing required module',
+            remedy: `Could not load module "${modName}". In Relinker Studio, verify all required guest modules and system PRXs are deployed.`,
+            isRelinkHint: true,
+          });
+        }
       }
 
       // Fallback process exit detection from log stream
@@ -449,7 +509,15 @@ export const GameLauncherModal: React.FC<GameLauncherModalProps> = ({
                     <span className="text-white/60">Abort Exception:</span>
                     <span className="font-mono text-blue-300 font-semibold">{detectedAbortReason}</span>
                   </div>
-                  {onNavigateToCommunityPRs && (
+                  {errorMessage?.isRelinkHint && onNavigateToRelinker ? (
+                    <button
+                      type="button"
+                      onClick={() => onNavigateToRelinker(game)}
+                      className="text-amber-400 hover:text-amber-300 underline font-semibold text-[11px] ml-2 shrink-0"
+                    >
+                      Relink in Studio &rarr;
+                    </button>
+                  ) : onNavigateToCommunityPRs ? (
                     <button
                       type="button"
                       onClick={() => onNavigateToCommunityPRs(detectedAbortReason)}
@@ -457,7 +525,7 @@ export const GameLauncherModal: React.FC<GameLauncherModalProps> = ({
                     >
                       Find PR Fixes &rarr;
                     </button>
-                  )}
+                  ) : null}
                 </div>
               )}
             </div>
