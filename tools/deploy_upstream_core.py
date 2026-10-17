@@ -21,8 +21,15 @@ def deploy():
         shutil.rmtree(temp_dir)
     temp_dir.mkdir(parents=True, exist_ok=True)
 
-    # Use gh run download
-    cmd = f'gh run download --name anyps5-upstream-core-windows-x64 --dir "{temp_dir}" --repo Ramzyayman/AnyPS5-Studio'
+    # Query latest successful run ID
+    cmd_run = 'gh run list --branch feature/upstream-sync --workflow build-upstream-core.yml --status success --limit 1 --json databaseId -q ".[0].databaseId"'
+    res_run = run_cmd(cmd_run, check=False)
+    latest_run_id = res_run.stdout.strip()
+    if latest_run_id:
+        print(f"Downloading from latest successful build run #{latest_run_id}...")
+        cmd = f'gh run download {latest_run_id} --name anyps5-upstream-core-windows-x64 --dir "{temp_dir}" --repo Ramzyayman/AnyPS5-Studio'
+    else:
+        cmd = f'gh run download --name anyps5-upstream-core-windows-x64 --dir "{temp_dir}" --repo Ramzyayman/AnyPS5-Studio'
     res = run_cmd(cmd, check=False)
     if res.returncode != 0:
         print(f"Could not download artifact directly: {res.stderr.strip()}")
@@ -71,6 +78,11 @@ def deploy():
                 prx_count += 1
             elif item.suffix.lower() == '.dll':
                 dll_count += 1
+
+    if (target_libs / "libc.prx").exists():
+        overrides_dir = ROOT / "core" / "libs" / "overrides"
+        overrides_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(target_libs / "libc.prx", overrides_dir / "libc.prx")
 
     print(f"Successfully deployed {prx_count} PRX libraries and {dll_count} runtime DLLs to libs/ and unpacked resources.")
     
