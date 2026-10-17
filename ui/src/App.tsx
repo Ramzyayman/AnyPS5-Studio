@@ -8,6 +8,7 @@ import { TelemetryPanel } from './components/TelemetryPanel';
 import { GameLauncherModal } from './components/GameLauncherModal';
 import { AddGameModal } from './components/AddGameModal';
 import { SettingsModal } from './components/SettingsModal';
+import { CommunityPRBuilds } from './components/CommunityPRBuilds';
 import { GameItem } from './types';
 import { apiBridge } from './services/apiBridge';
 import { audioService } from './services/audioService';
@@ -18,13 +19,14 @@ import { INITIAL_GAMES } from './services/sampleData';
 export const App: React.FC = () => {
   const [games, setGames] = useState<GameItem[]>([]);
   const [selectedGameIndex, setSelectedGameIndex] = useState<number>(0);
-  const [activeTab, setActiveTab] = useState<'games' | 'relinker' | 'nid' | 'prx' | 'telemetry'>('games');
+  const [activeTab, setActiveTab] = useState<'games' | 'relinker' | 'community' | 'nid' | 'prx' | 'telemetry'>('games');
   const [activeRunningGame, setActiveRunningGame] = useState<GameItem | null>(null);
   const [isAddGameOpen, setIsAddGameOpen] = useState<boolean>(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [gamepadConnected, setGamepadConnected] = useState<boolean>(false);
   const [downloadedUpdateVersion, setDownloadedUpdateVersion] = useState<string | null>(null);
   const [showUpdateToast, setShowUpdateToast] = useState<boolean>(false);
+  const [communitySearchKeyword, setCommunitySearchKeyword] = useState<string>('');
 
   // Advanced navbar items setting (persisted in localStorage, default OFF)
   const [showAdvancedNav, setShowAdvancedNav] = useState<boolean>(() => {
@@ -44,16 +46,21 @@ export const App: React.FC = () => {
       console.error('Failed to save advanced nav preference:', err);
     }
     // If user is currently viewing an advanced section and disables Advanced, navigate safely to Games
-    if (!enabled && ['nid', 'prx', 'telemetry'].includes(activeTab)) {
+    if (!enabled && ['nid', 'prx', 'telemetry', 'community'].includes(activeTab)) {
       setActiveTab('games');
     }
   };
 
-  // Load games from apiBridge
+  // Load games & initial settings from apiBridge
   useEffect(() => {
     apiBridge.getGames().then((loaded) => {
       setGames(loaded);
     });
+    apiBridge.getSettings().then((settings) => {
+      if (settings && settings.advanced !== undefined) {
+        setShowAdvancedNav(settings.advanced);
+      }
+    }).catch(() => {});
   }, []);
 
   // Listen for background auto-updates
@@ -68,8 +75,8 @@ export const App: React.FC = () => {
     return () => unsub();
   }, []);
 
-  const availableTabs: ('games' | 'relinker' | 'nid' | 'prx' | 'telemetry')[] = showAdvancedNav
-    ? ['games', 'relinker', 'nid', 'prx', 'telemetry']
+  const availableTabs: ('games' | 'relinker' | 'community' | 'nid' | 'prx' | 'telemetry')[] = showAdvancedNav
+    ? ['games', 'relinker', 'community', 'nid', 'prx', 'telemetry']
     : ['games', 'relinker'];
 
   // Keyboard navigation for authentic console feel
@@ -324,6 +331,15 @@ export const App: React.FC = () => {
           )
         )}
 
+        {activeTab === 'community' && (
+          <CommunityPRBuilds
+            initialSearch={communitySearchKeyword}
+            onClearInitialSearch={() => setCommunitySearchKeyword('')}
+            onNavigateToGames={() => setActiveTab('games')}
+            onNavigateToRelinker={() => setActiveTab('relinker')}
+          />
+        )}
+
         {activeTab === 'nid' && (
           selectedGame ? (
             <NidInspector game={selectedGame} />
@@ -355,6 +371,15 @@ export const App: React.FC = () => {
             const idx = games.findIndex((item) => item.id === g.id);
             if (idx !== -1) setSelectedGameIndex(idx);
             setActiveTab('relinker');
+          }}
+          onNavigateToCommunityPRs={(keyword) => {
+            setActiveRunningGame(null);
+            setShowAdvancedNav(true);
+            try {
+              localStorage.setItem('anyps5_show_advanced_nav', 'true');
+            } catch {}
+            if (keyword) setCommunitySearchKeyword(keyword);
+            setActiveTab('community');
           }}
         />
       )}

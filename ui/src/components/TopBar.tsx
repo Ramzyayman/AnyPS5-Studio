@@ -12,17 +12,18 @@ import { audioService } from '../services/audioService';
 import { apiBridge } from '../services/apiBridge';
 
 interface TopBarProps {
-  activeTab: 'games' | 'relinker' | 'nid' | 'prx' | 'telemetry';
-  onTabChange: (tab: 'games' | 'relinker' | 'nid' | 'prx' | 'telemetry') => void;
+  activeTab: 'games' | 'relinker' | 'community' | 'nid' | 'prx' | 'telemetry';
+  onTabChange: (tab: 'games' | 'relinker' | 'community' | 'nid' | 'prx' | 'telemetry') => void;
   onOpenAddGame: () => void;
   onOpenSettings: () => void;
   gamepadConnected: boolean;
   showAdvancedNav?: boolean;
 }
 
-const ALL_NAV_ITEMS: { key: 'games' | 'relinker' | 'nid' | 'prx' | 'telemetry'; label: string; advanced?: boolean }[] = [
+const ALL_NAV_ITEMS: { key: 'games' | 'relinker' | 'community' | 'nid' | 'prx' | 'telemetry'; label: string; advanced?: boolean }[] = [
   { key: 'games', label: 'Games' },
   { key: 'relinker', label: 'Relinker Studio' },
+  { key: 'community', label: 'Community PR Builds', advanced: true },
   { key: 'nid', label: 'NID Inspector', advanced: true },
   { key: 'prx', label: 'PRX Libraries', advanced: true },
   { key: 'telemetry', label: 'System Status', advanced: true },
@@ -63,7 +64,7 @@ export const TopBar: React.FC<TopBarProps> = ({
     return () => unsubscribe();
   }, []);
 
-  const handleTabClick = (tab: 'games' | 'relinker' | 'nid' | 'prx' | 'telemetry') => {
+  const handleTabClick = (tab: 'games' | 'relinker' | 'community' | 'nid' | 'prx' | 'telemetry') => {
     if (tab !== activeTab) {
       audioService.playNavTick();
       onTabChange(tab);
@@ -73,23 +74,23 @@ export const TopBar: React.FC<TopBarProps> = ({
   return (
     <header 
       onDoubleClick={() => apiBridge.maximizeWindow()}
-      className="relative z-30 h-16 flex items-center justify-between px-8 md:px-12 bg-transparent select-none cursor-default"
+      className="relative z-30 h-16 flex items-center justify-between px-3 sm:px-4 md:px-5 lg:px-6 xl:px-12 bg-transparent select-none cursor-default"
       style={{ WebkitAppRegion: 'drag' } as any}
     >
       {/* Left: Compact AnyPS5 Console Identity & PS5 Typography Navigation */}
-      <div className="flex items-center space-x-8 md:space-x-12" style={{ WebkitAppRegion: 'no-drag' } as any}>
+      <div className="flex items-center space-x-2 sm:space-x-3 md:space-x-4 lg:space-x-5 xl:space-x-10 shrink-0 min-w-0" style={{ WebkitAppRegion: 'no-drag' } as any}>
         {/* Compact Console Brand Mark */}
-        <div className="flex items-center space-x-2">
+        <div className="flex items-center space-x-1.5 sm:space-x-2 shrink-0">
           <div className="w-5 h-5 rounded-[4px] bg-white flex items-center justify-center">
             <span className="font-black text-black text-[10px] tracking-tighter">PS</span>
           </div>
-          <span className="font-semibold text-xs tracking-wider text-white/90 uppercase">
+          <span className="font-semibold text-xs tracking-wider text-white/90 uppercase whitespace-nowrap">
             AnyPS5 <span className="text-white/40 font-normal">Studio</span>
           </span>
         </div>
 
-        {/* PS5 Typography-Driven Navigation (no underlines, no boxes, purely typography-differentiated) */}
-        <nav className="flex items-baseline space-x-6 md:space-x-8" role="tablist">
+        {/* PS5 Typography-Driven Navigation */}
+        <nav className="flex items-baseline space-x-1 sm:space-x-2 md:space-x-2.5 lg:space-x-3.5 xl:space-x-7 min-w-0" role="tablist">
           {navItems.map((item) => {
             const isSelected = activeTab === item.key;
             return (
@@ -98,10 +99,10 @@ export const TopBar: React.FC<TopBarProps> = ({
                 role="tab"
                 aria-selected={isSelected}
                 onClick={() => handleTabClick(item.key)}
-                className={`relative py-1 tracking-wide focus:outline-none focus-visible:ring-1 focus-visible:ring-white/60 focus-visible:rounded transition-all duration-200 ease-out motion-reduce:transition-none ${
+                className={`relative py-1 whitespace-nowrap shrink-0 tracking-wide focus:outline-none focus-visible:ring-1 focus-visible:ring-white/60 focus-visible:rounded transition-all duration-200 ease-out motion-reduce:transition-none ${
                   isSelected
-                    ? 'text-white text-[16px] font-semibold opacity-100'
-                    : 'text-white/65 text-[14px] font-normal hover:text-white/90'
+                    ? 'text-white text-[11.5px] sm:text-[12px] md:text-[12.5px] lg:text-[13.5px] xl:text-[15.5px] font-semibold opacity-100'
+                    : 'text-white/65 text-[10.5px] sm:text-[11px] md:text-[11.5px] lg:text-[12.5px] xl:text-[14px] font-normal hover:text-white/90'
                 }`}
               >
                 <span>{item.label}</span>
@@ -112,23 +113,23 @@ export const TopBar: React.FC<TopBarProps> = ({
       </div>
 
       {/* Right: Small, Understated Console Controls & Window Controls */}
-      <div className="flex items-center space-x-5 text-neutral-300" style={{ WebkitAppRegion: 'no-drag' } as any}>
+      <div className="flex items-center space-x-1.5 sm:space-x-2.5 md:space-x-3 lg:space-x-4 xl:space-x-5 text-neutral-300 shrink-0" style={{ WebkitAppRegion: 'no-drag' } as any}>
         {/* Import Game Button */}
         <button
           onClick={() => {
             audioService.playConfirm();
             onOpenAddGame();
           }}
-          className="flex items-center space-x-1 px-2.5 py-1 rounded-full text-white/60 hover:text-white hover:bg-white/10 text-xs font-medium transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-white/50"
+          className="flex items-center space-x-1 px-2.5 py-1 rounded-full text-white/60 hover:text-white hover:bg-white/10 text-xs font-medium transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-white/50 whitespace-nowrap shrink-0"
           title="Import Decrypted PS5 Title"
         >
           <Plus className="w-3.5 h-3.5" />
-          <span>Import</span>
+          <span className="hidden 2xl:inline">Import</span>
         </button>
 
         {/* Controller Status */}
         <div 
-          className="flex items-center space-x-1.5 text-xs text-white/40"
+          className="flex items-center space-x-1.5 text-xs text-white/40 shrink-0"
           title={gamepadConnected ? "DualSense Wireless Controller Connected" : "Keyboard Navigation Active"}
         >
           <Gamepad2 className={`w-4 h-4 ${gamepadConnected ? 'text-blue-400' : 'text-white/40'}`} />
@@ -141,19 +142,19 @@ export const TopBar: React.FC<TopBarProps> = ({
             audioService.playConfirm();
             onOpenSettings();
           }}
-          className="p-1 text-white/50 hover:text-white transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-white/50 focus-visible:rounded"
+          className="p-1 text-white/50 hover:text-white transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-white/50 focus-visible:rounded shrink-0"
           title="System Settings"
         >
           <Settings className="w-4 h-4" />
         </button>
 
         {/* Console Clock */}
-        <span className="text-xs font-medium tracking-wider text-white/70 pl-1">
+        <span className="text-xs font-medium tracking-wider text-white/70 pl-1 whitespace-nowrap shrink-0 hidden xl:inline">
           {time}
         </span>
 
         {/* Minimal Frameless Window Controls */}
-        <div className="flex items-center space-x-0.5 pl-2 border-l border-white/10">
+        <div className="flex items-center space-x-0.5 pl-1.5 sm:pl-2 border-l border-white/10 shrink-0">
           <button
             type="button"
             onClick={() => apiBridge.minimizeWindow()}

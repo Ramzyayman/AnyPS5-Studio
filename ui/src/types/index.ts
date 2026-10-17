@@ -95,3 +95,52 @@ export interface UpdateStatus {
   total?: number;
   error?: string;
 }
+
+export interface CommunityPR {
+  id: number;
+  number: number;
+  title: string;
+  author: {
+    login: string;
+    avatar_url: string;
+    html_url: string;
+  };
+  html_url: string;
+  state: 'open' | 'closed' | 'merged';
+  created_at: string;
+  updated_at: string;
+  body: string;
+  headSha: string;
+  headBranch: string;
+  labels: { name: string; color: string }[];
+  artifactAvailable: boolean;
+  artifactSizeMb?: number;
+  artifactUrl?: string;
+  isInstalled?: boolean;
+  isActive?: boolean;
+}
+
+export interface PRBuildDownloadProgress {
+  prNumber: number;
+  status: 'idle' | 'downloading' | 'extracting' | 'ready' | 'error';
+  progress: number;
+  error?: string;
+}
+
+export interface MultiPRBuildResult {
+  success: boolean;
+  buildId?: string;
+  relinkerPath?: string;
+  mergedPRs?: number[];
+  conflict?: string;
+  error?: string;
+}
+
+export interface MergedBuildInfo {
+  id: string;
+  name: string;
+  prNumbers: number[];
+  installedAt: string;
+  relinkerPath: string;
+  isActive: boolean;
+}

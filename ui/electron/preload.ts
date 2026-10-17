@@ -24,6 +24,23 @@ contextBridge.exposeInMainWorld('anyps5', {
       ipcRenderer.removeListener('anyps5:update-status', handler);
     };
   },
+  getCommunityPRs: (repo?: string, forceRefresh?: boolean) => ipcRenderer.invoke('anyps5:get-community-prs', repo, forceRefresh),
+  downloadPRBuild: (args: { prNumber: number; artifactUrl?: string }) => 
+    ipcRenderer.invoke('anyps5:download-pr-build', args),
+  setActivePRBuild: (prNumber: number) => ipcRenderer.invoke('anyps5:set-active-pr-build', prNumber),
+  revertToDefaultBuild: () => ipcRenderer.invoke('anyps5:revert-to-default-build'),
+  deletePRBuild: (prNumber: number) => ipcRenderer.invoke('anyps5:delete-pr-build', prNumber),
+  mergeAndBuildPRs: (prNumbers: number[]) => ipcRenderer.invoke('anyps5:merge-and-build-prs', prNumbers),
+  getMergedBuilds: () => ipcRenderer.invoke('anyps5:get-merged-builds'),
+  setActiveMergedBuild: (buildId: string) => ipcRenderer.invoke('anyps5:set-active-merged-build', buildId),
+  deleteMergedBuild: (buildId: string) => ipcRenderer.invoke('anyps5:delete-merged-build', buildId),
+  onPRDownloadProgress: (callback: (progress: unknown) => void) => {
+    const handler = (_: unknown, progress: unknown) => callback(progress);
+    ipcRenderer.on('anyps5:pr-download-progress', handler);
+    return () => {
+      ipcRenderer.removeListener('anyps5:pr-download-progress', handler);
+    };
+  },
   onRelinkerEvent: (callback: (event: { type: string; data: unknown }) => void) => {
     const handler = (_: unknown, event: { type: string; data: unknown }) => callback(event);
     ipcRenderer.on('anyps5:relinker-event', handler);
