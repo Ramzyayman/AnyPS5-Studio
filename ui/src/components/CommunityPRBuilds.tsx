@@ -808,15 +808,17 @@ export const CommunityPRBuilds: React.FC<CommunityPRBuildsProps> = ({
                             </button>
                           )}
 
-                          <a
-                            href={pr.html_url}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="p-1 rounded text-neutral-500 hover:text-white hover:bg-white/5 transition-colors"
-                            title="Open on GitHub"
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              apiBridge.openExternal(pr.html_url);
+                            }}
+                            className="p-1 rounded text-neutral-500 hover:text-white hover:bg-white/5 transition-colors focus:outline-none"
+                            title="Open on GitHub in browser"
                           >
                             <ExternalLink className="w-3.5 h-3.5" />
-                          </a>
+                          </button>
                         </div>
                       </div>
                     </div>
@@ -956,15 +958,17 @@ export const CommunityPRBuilds: React.FC<CommunityPRBuildsProps> = ({
                   {selectedPRNumbers.has(selectedPRDetail.number) ? 'Deselect from Multi-Build' : 'Select for Multi-Build'}
                 </button>
 
-                <a
-                  href={selectedPRDetail.html_url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="p-2 rounded-lg border border-white/10 bg-white/[0.03] hover:bg-white/10 text-neutral-300 hover:text-white transition-colors"
-                  title="View on GitHub"
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    apiBridge.openExternal(selectedPRDetail.html_url);
+                  }}
+                  className="p-2 rounded-lg border border-white/10 bg-white/[0.03] hover:bg-white/10 text-neutral-300 hover:text-white transition-colors focus:outline-none"
+                  title="View on GitHub in browser"
                 >
                   <ExternalLink className="w-3.5 h-3.5" />
-                </a>
+                </button>
               </div>
             </div>
           </div>

@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld('anyps5', {
   checkForUpdates: () => ipcRenderer.invoke('anyps5:check-for-updates'),
   quitAndInstallUpdate: () => ipcRenderer.invoke('anyps5:quit-and-install-update'),
   getAppVersion: () => ipcRenderer.invoke('anyps5:get-app-version'),
+  openExternal: (url: string) => ipcRenderer.invoke('anyps5:open-external', url),
   onUpdateStatus: (callback: (status: unknown) => void) => {
     const handler = (_: unknown, status: unknown) => callback(status);
     ipcRenderer.on('anyps5:update-status', handler);

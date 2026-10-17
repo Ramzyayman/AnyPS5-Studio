@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron';
 import path from 'path';
 import { spawn, spawnSync, ChildProcess } from 'child_process';
 import os from 'os';
@@ -51,6 +51,25 @@ function createWindow() {
 
   mainWindow.on('unmaximize', () => {
     mainWindow?.webContents.send('anyps5:window-maximized-change', false);
+  });
+
+  // Open any external web links in user's default system browser instead of in-app
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      shell.openExternal(url);
+      return { action: 'deny' };
+    }
+    return { action: 'allow' };
+  });
+
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      const isDev = (process.env.VITE_DEV_SERVER_URL && url.startsWith(process.env.VITE_DEV_SERVER_URL)) || url.startsWith('http://localhost:5173');
+      if (!isDev) {
+        event.preventDefault();
+        shell.openExternal(url);
+      }
+    }
   });
 
   const distPath = path.join(__dirname, '../dist/index.html');
@@ -1184,6 +1203,14 @@ ipcMain.handle('anyps5:quit-and-install-update', () => {
 
 ipcMain.handle('anyps5:get-app-version', () => {
   return app.getVersion();
+});
+
+ipcMain.handle('anyps5:open-external', async (_, url: string) => {
+  if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
+    await shell.openExternal(url);
+    return true;
+  }
+  return false;
 });
 
 // Community PR Builds & Artifact Manager IPC Handlers

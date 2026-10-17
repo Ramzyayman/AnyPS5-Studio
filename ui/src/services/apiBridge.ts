@@ -34,6 +34,7 @@ declare global {
       checkForUpdates?: () => Promise<{ status: string; currentVersion: string; error?: string }>;
       quitAndInstallUpdate?: () => void;
       getAppVersion?: () => Promise<string>;
+      openExternal?: (url: string) => Promise<boolean>;
       onUpdateStatus?: (callback: (status: UpdateStatus) => void) => () => void;
       getCommunityPRs?: (repo?: string, forceRefresh?: boolean) => Promise<CommunityPR[]>;
       downloadPRBuild?: (args: { prNumber: number; artifactUrl?: string }) => Promise<{ success: boolean; path?: string; error?: string }>;
@@ -268,6 +269,14 @@ class ApiBridge {
       return await window.anyps5.getAppVersion();
     }
     return '1.0.0';
+  }
+
+  public async openExternal(url: string): Promise<boolean> {
+    if (window.anyps5?.openExternal) {
+      return await window.anyps5.openExternal(url);
+    }
+    window.open(url, '_blank');
+    return true;
   }
 
   public onUpdateStatus(callback: (status: UpdateStatus) => void): () => void {
