@@ -1,14 +1,7 @@
 name: Pages
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
-  release:
-    types: [published]
-  workflow_run:
-    workflows: [Release]
-    types: [completed]
 
 permissions:
   contents: read
