@@ -92,6 +92,7 @@ if (!gotTheLock) {
     try {
       autoUpdater.autoDownload = true;
       autoUpdater.autoInstallOnAppQuit = true;
+      autoUpdater.allowPrerelease = true;
 
       const sendUpdateStatus = (status: {
         status: 'idle' | 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'error';
