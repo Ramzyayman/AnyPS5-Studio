@@ -54,7 +54,7 @@ int APS5_VABI defaultPosixAlign(void** pointer, std::size_t alignment, std::size
 std::array<void*, 10> defaultApi() {
     return {reinterpret_cast<void*>(defaultAllocate), reinterpret_cast<void*>(defaultFree),
         reinterpret_cast<void*>(defaultCalloc), reinterpret_cast<void*>(defaultReallocate),
-        reinterpret_cast<void*>(defaultAlign), nullptr, reinterpret_cast<void*>(defaultPosixAlign)};
+        reinterpret_cast<void*>(defaultAlign), reinterpret_cast<void*>(defaultRealign), reinterpret_cast<void*>(defaultPosixAlign)};
 }
 
 class CallbackScope {
@@ -148,8 +148,8 @@ void ApplicationHeapInitialize_nid_no_patch(const void* processParameters) {
     std::call_once(heapInitialization, [processParameters] {
         try {
             if (processParameters == nullptr) {
-                const auto api = defaultApi();
-                ApplicationHeapRegister_nid_no_patch(api.data());
+                std::array<void*, 10> zeros{};
+                ApplicationHeapRegister_nid_no_patch(zeros.data());
                 return;
             }
             if (read<std::uint64_t>(processParameters, 0) < 0x40 || read<std::uint32_t>(processParameters, 8) != 0x4942524f) throw std::runtime_error("application heap: invalid process parameters");
