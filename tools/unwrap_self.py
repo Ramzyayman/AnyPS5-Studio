@@ -143,9 +143,6 @@ def place_segments(data, headers, records):
     for header in headers:
         if header["type"] == PT_LOAD:
             continue
-        if header["size"] == 0:
-            header["source"] = 0
-            continue
         if header["vaddr"] != 0:
             host = load_for(header["vaddr"], header["size"])
             if host is None:

@@ -3,7 +3,7 @@ name: Build Upstream Core Binaries
 on:
   workflow_dispatch:
   push:
-    branches: [feature/upstream-sync]
+    branches: [main, feature/upstream-sync]
     paths:
       - 'core/**'
       - 'cmake/**'
