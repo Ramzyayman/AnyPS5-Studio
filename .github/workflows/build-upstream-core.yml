@@ -1,0 +1,96 @@
+name: Build Upstream Core Binaries
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feature/upstream-sync]
+    paths:
+      - 'core/**'
+      - 'cmake/**'
+      - 'CMakeLists.txt'
+      - '.github/workflows/build-upstream-core.yml'
+
+permissions:
+  contents: write
+  actions: write
+
+env:
+  CONFIGURE: >-
+    -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+    -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++
+    -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+  WINLIBS_RELEASE: 15.2.0posix-14.0.0-ucrt-r7
+  WINLIBS_ZIP: winlibs-x86_64-posix-seh-gcc-15.2.0-mingw-w64ucrt-14.0.0-r7.zip
+
+jobs:
+  build-windows:
+    name: Build Windows x64 Relinker & PRX Libraries
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Point WinLibs CMake at Git CA bundle
+        shell: bash
+        run: |
+          for prefix in ucrt64 mingw64; do
+            bundle="C:/Program Files/Git/$prefix/etc/ssl/certs/ca-bundle.crt"
+            if [ -f "$bundle" ]; then echo "SSL_CERT_FILE=$bundle" >> "$GITHUB_ENV"; exit 0; fi
+          done
+          echo "::error::No CA bundle found in Git for Windows"; exit 1
+
+      - id: toolchain
+        uses: actions/cache@v4
+        with:
+          path: C:\winlibs
+          key: ${{ env.WINLIBS_ZIP }}
+
+      - if: steps.toolchain.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          curl -sSfL -o "$RUNNER_TEMP/winlibs.zip" "https://github.com/brechtsanders/winlibs_mingw/releases/download/$WINLIBS_RELEASE/$WINLIBS_ZIP"
+          7z x "$RUNNER_TEMP/winlibs.zip" -oC:/winlibs
+
+      - name: Add WinLibs to PATH
+        shell: bash
+        run: echo 'C:\winlibs\mingw64\bin' >> "$GITHUB_PATH"
+
+      - uses: hendrikmuhs/ccache-action@v1.2.24
+        with:
+          key: windows-upstream-sync
+          save: true
+
+      - name: Configure CMake
+        shell: cmd
+        run: cmake -S . -B build %CONFIGURE%
+
+      - name: Build Relinker & System PRX Libraries
+        shell: cmd
+        run: |
+          cmake --build build --target relinker
+          cmake --build build --target libs
+
+      - name: Package Core Binaries
+        shell: bash
+        run: |
+          mkdir -p dist-upstream/libs dist-upstream/build
+          # Copy relinker.exe
+          cp -v build/core/relinker/relinker.exe dist-upstream/build/ || cp -v build/bin/relinker.exe dist-upstream/build/ || cp -v build/relinker.exe dist-upstream/build/
+          # Copy all built PRX libraries
+          cp -v build/core/libs/libs/*.prx dist-upstream/libs/
+          # Copy MinGW runtime DLLs
+          cp -v /c/winlibs/mingw64/bin/libgcc_s_seh-1.dll dist-upstream/libs/
+          cp -v /c/winlibs/mingw64/bin/libstdc++-6.dll dist-upstream/libs/
+          cp -v /c/winlibs/mingw64/bin/libwinpthread-1.dll dist-upstream/libs/
+          ls -la dist-upstream/build/
+          ls -la dist-upstream/libs/
+
+      - name: Upload Core Binaries Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: anyps5-upstream-core-windows-x64
+          path: dist-upstream/
+          retention-days: 30
