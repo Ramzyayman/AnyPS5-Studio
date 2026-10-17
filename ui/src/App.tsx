@@ -46,6 +46,7 @@ export const App: React.FC = () => {
     } catch (err) {
       console.error('Failed to save advanced nav preference:', err);
     }
+    apiBridge.saveSettings({ advanced: enabled }).catch(() => {});
     // If user is currently viewing an advanced section and disables Advanced, navigate safely to Games
     if (!enabled && ['nid', 'prx', 'telemetry', 'community'].includes(activeTab)) {
       setActiveTab('games');
@@ -383,10 +384,7 @@ export const App: React.FC = () => {
           }}
           onNavigateToCommunityPRs={(keyword) => {
             setActiveRunningGame(null);
-            setShowAdvancedNav(true);
-            try {
-              localStorage.setItem('anyps5_show_advanced_nav', 'true');
-            } catch {}
+            handleToggleAdvancedNav(true);
             if (keyword) setCommunitySearchKeyword(keyword);
             setActiveTab('community');
           }}

@@ -56,7 +56,6 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
   }, []);
 
   useEffect(() => {
-    setAdvanced(showAdvancedNav);
     apiBridge.getAvailableGpus().then((gpus) => {
       if (Array.isArray(gpus)) {
         setAvailableGpus(gpus);
@@ -79,10 +78,12 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
         if (settings.hapticsEnabled !== undefined) setHapticsEnabled(settings.hapticsEnabled);
         if (settings.advanced !== undefined) {
           setAdvanced(settings.advanced);
+        } else {
+          setAdvanced(showAdvancedNav);
         }
       }
     });
-  }, [showAdvancedNav]);
+  }, []);
 
   const primaryDiscreteGpu = availableGpus.find((g) => g.isDiscrete && !g.isVirtual) ||
     availableGpus.find((g) => !g.isVirtual) ||
@@ -92,6 +93,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
     audioService.playNavTick();
     setAdvanced(checked);
     onToggleAdvancedNav(checked);
+    setIsSaved(false);
   };
 
   const handleBrowseRelinker = async () => {
@@ -120,6 +122,8 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
     setPreferredGpu('auto');
     setDefaultTarget('windows');
     setCpuFix('intel');
+    setAdvanced(false);
+    onToggleAdvancedNav(false);
     setIsSaved(false);
   };
 

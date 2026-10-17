@@ -515,7 +515,9 @@ function loadSettings(): AppSettings {
 
 function saveSettings(settings: AppSettings) {
   try {
-    fs.writeFileSync(settingsStorePath, JSON.stringify(settings, null, 2), 'utf8');
+    const current = loadSettings();
+    const merged = { ...current, ...settings };
+    fs.writeFileSync(settingsStorePath, JSON.stringify(merged, null, 2), 'utf8');
   } catch (err) {
     console.error('Failed to write settings.json:', err);
   }

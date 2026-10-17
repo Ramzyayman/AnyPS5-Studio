@@ -177,7 +177,11 @@ class ApiBridge {
     if (window.anyps5?.saveSettings) {
       await window.anyps5.saveSettings(settings);
     }
-    localStorage.setItem('anyps5_settings', JSON.stringify(settings));
+    try {
+      const existing = localStorage.getItem('anyps5_settings');
+      const current = existing ? JSON.parse(existing) : {};
+      localStorage.setItem('anyps5_settings', JSON.stringify({ ...current, ...settings }));
+    } catch {}
   }
 
   public async getTelemetry(): Promise<SystemTelemetry> {
