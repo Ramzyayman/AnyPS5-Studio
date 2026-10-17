@@ -725,11 +725,19 @@ function sanitizeModuleDirectory(
     // Check 3: Fake system library stubs dumped by jailbreak tools (e.g. libSceAgc.sprx, libSceAgcDriver.sprx, libScePsml.sprx)
     // AnyPS5 already provides authoritative clean-room translations in libs/.
     // If fake dump stubs are treated as guest modules, they conflict with AnyPS5 native Vulkan/OS drivers and crash at runtime.
-    if (!shouldIsolate && knownSystemLibs) {
+    if (!shouldIsolate) {
       const stem = lower.replace(/(\.sprx|\.prx|\.native|\.guest)+$/i, '');
-      if (knownSystemLibs.has(stem)) {
+      const conflictingDriverStubs = new Set([
+        'libsceagc',
+        'libsceagcdriver',
+        'libscepsml',
+        'libkernel',
+        'libkernel_web',
+        'libkernel_sys',
+      ]);
+      if (conflictingDriverStubs.has(stem)) {
         shouldIsolate = true;
-        isolateReason = `Conflicting system library stub (provided natively by AnyPS5 in libs/${stem}.prx)`;
+        isolateReason = `Conflicting system hardware driver stub (provided natively by AnyPS5 in libs/${stem}.prx)`;
       }
     }
 
@@ -1116,6 +1124,27 @@ function fixGameHierarchyInPlace(
   if (!hasSingular && !hasPlural && !hasPrx) {
     sendLog(`[AnyPS5] Initializing standard guest module directory "app0/sce_module"...`, 'info');
     fs.mkdirSync(sceModuleDir, { recursive: true });
+  }
+
+  // Automatically restore authentic guest libc if it was previously isolated to module_backups
+  const targetModuleDir = hasSingular ? sceModuleDir : (hasPlural ? sceModulesDir : (hasPrx ? prxDir : sceModuleDir));
+  const activeLibc = path.join(targetModuleDir, 'libc.prx');
+  if (!fs.existsSync(activeLibc)) {
+    const candidateBackups = [
+      path.join(targetModuleDir, 'module_backups', 'libc.prx'),
+      path.join(app0Dir, 'module_backups', 'libc.prx'),
+      path.join(app0Dir, 'sce_module_backups', 'libc.prx'),
+      path.join(app0Dir, 'sce_module_backups', 'libc.prx.self_orig'),
+    ];
+    for (const bLoc of candidateBackups) {
+      if (fs.existsSync(bLoc)) {
+        try {
+          fs.copyFileSync(bLoc, activeLibc);
+          sendLog(`[AnyPS5] Restored authentic guest libc.prx into ${path.relative(app0Dir, activeLibc)}`, 'info');
+          break;
+        } catch {}
+      }
+    }
   }
 
   // 7. Discover, clean, unwrap and deduplicate all guest modules across app0/
