@@ -33,7 +33,7 @@ declare global {
       getSettings?: () => Promise<AppSettings>;
       saveSettings?: (settings: Partial<AppSettings>) => Promise<boolean>;
       getAvailableGpus?: () => Promise<DetectedGpu[]>;
-      checkForUpdates?: () => Promise<{ status: string; currentVersion: string; error?: string }>;
+      checkForUpdates?: () => Promise<{ status: string; currentVersion: string; error?: string; updateInfo?: any }>;
       quitAndInstallUpdate?: () => void;
       getAppVersion?: () => Promise<string>;
       openExternal?: (url: string) => Promise<boolean>;
@@ -273,7 +273,7 @@ class ApiBridge {
     return () => {};
   }
 
-  public async checkForUpdates(): Promise<{ status: string; currentVersion: string; error?: string }> {
+  public async checkForUpdates(): Promise<{ status: string; currentVersion: string; error?: string; updateInfo?: any }> {
     if (window.anyps5?.checkForUpdates) {
       return await window.anyps5.checkForUpdates();
     }
