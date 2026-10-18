@@ -36,7 +36,7 @@ const void* ApplicationProcessParameters_nid_no_patch() {
         if (size < 0x40 || address > imageSize || size > imageSize - address) throw std::runtime_error("application heap: process parameters exceed the image");
         result = image + address;
     }
-    if (result == nullptr) return nullptr;
+    if (result == nullptr) throw std::runtime_error("application heap: process metadata is missing; relink the executable");
     return result;
 #elif defined(__linux__)
     struct Search {

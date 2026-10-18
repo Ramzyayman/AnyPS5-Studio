@@ -248,8 +248,7 @@ int APS5_VABI vasprintf_nid_postfix(char** destination, const char* format, VaLi
 }
 
 int APS5_VABI vfprintf_nid_postfix(FileStream* stream, const char* format, VaList* args) {
-    if (!stream) { errno = 22; return -1; }
-    if (!stream->IsOpen()) { errno = 9; return -1; }
+    if (stream && !stream->IsOpen()) { errno = 9; return -1; }
     auto* native = GetNativeStream(stream);
 #ifdef _WIN32
     std::string buffer;
@@ -291,8 +290,7 @@ int APS5_VABI fprintf_nid_postfix(FileStream* stream, const char* format, ...) {
 }
 
 int APS5_VABI fscanf_nid_postfix(FileStream* stream, const char* format, ...) {
-    if (!stream) { errno = 22; return -1; }
-    if (!stream->IsOpen()) { errno = 9; return -1; }
+    if (stream && !stream->IsOpen()) { errno = 9; return -1; }
     auto* native = GetNativeStream(stream);
 #ifdef _WIN32
     __builtin_sysv_va_list args;

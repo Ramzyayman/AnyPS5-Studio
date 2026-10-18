@@ -520,12 +520,7 @@ float APS5_VABI roundf_nid_postfix(float x) { return std::round(x); }
 double APS5_VABI round_nid_postfix(double x) { return std::round(x); }
 float APS5_VABI cbrtf_nid_postfix(float x) { return std::cbrt(x); }
 float APS5_VABI remainderf_nid_postfix(float x, float y) { return std::remainder(x, y); }
-double APS5_VABI nextafter_nid_postfix(double x, double y) { return std::nextafter(x, y); }
 float APS5_VABI nextafterf_nid_postfix(float x, float y) { return std::nextafter(x, y); }
-long double APS5_VABI nextafterl_nid_postfix(long double x, long double y) { return std::nextafter(x, y); }
-double APS5_VABI nexttoward_nid_postfix(double x, long double y) { return std::nexttoward(x, y); }
-float APS5_VABI nexttowardf_nid_postfix(float x, long double y) { return std::nexttoward(x, y); }
-long double APS5_VABI nexttowardl_nid_postfix(long double x, long double y) { return std::nexttoward(x, y); }
 int APS5_VABI __isfinite_nid_postfix(double x) { return std::isfinite(x) ? 1 : 0; }
 int APS5_VABI __isnan_nid_postfix(double x) { return std::isnan(x) ? 1 : 0; }
 int APS5_VABI __isinf_nid_postfix(double x) { return std::isinf(x) ? 1 : 0; }
@@ -693,12 +688,4 @@ union SonyDconst {
 
 static_assert(std::endian::native == std::endian::little);
 SonyDconst _Inf_nid_postfix {{0, 0, 0, 0x7ff0, 0, 0, 0, 0}};
-
-int APS5_VABI ilogbf_nid_postfix(float x) {
-    return std::ilogbf(x);
-}
-
-int APS5_VABI _Dsign_nid_postfix(double x) {
-    return std::signbit(x) ? 1 : 0;
-}
 }

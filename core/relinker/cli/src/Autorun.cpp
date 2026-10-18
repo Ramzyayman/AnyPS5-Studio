@@ -9,9 +9,6 @@
 #include <cerrno>
 
 #ifdef _WIN32
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
 #include <windows.h>
 #endif
 
@@ -73,7 +70,7 @@ int Autorun(const std::string& absPath, bool toWindows) {
 #endif
 
     std::cout << "\nPress Enter to exit...\n";
-    std::cin.ignore((std::numeric_limits<std::streamsize>::max)(), '\n');
+    std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
 
     return exitCode;
 }

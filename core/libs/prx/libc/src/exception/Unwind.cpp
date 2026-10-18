@@ -95,7 +95,7 @@ extern "C" _Unwind_Reason_Code __gcc_personality_v0(int, _Unwind_Action, std::ui
 
 namespace LibcUnwind {
 _Unwind_Reason_Code CallPersonality(Word personality, _Unwind_Action actions, _Unwind_Exception* exception, _Unwind_Context* context) {
-#if defined(_WIN32) || defined(__linux__) || defined(__APPLE__)
+#ifdef _WIN32
     const auto* code = reinterpret_cast<const Byte*>(personality);
     if (code[0] == 0xff && code[1] == 0x25) {
         std::int32_t displacement;

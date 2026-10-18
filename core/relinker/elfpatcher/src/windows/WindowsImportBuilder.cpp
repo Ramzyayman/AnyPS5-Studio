@@ -54,12 +54,6 @@ std::vector<std::string> WindowsImportBuilder::ReadLibraries(const Domain::SysVD
     // Keep the requested module first, then make its shared runtime visible.
     if ((unique.contains("libSceLibcInternal.prx") || unique.contains("libkernel.prx")) && !unique.contains("libc.prx"))
         result.push_back("libc.prx");
-    if (unique.contains("libc.prx")) {
-        for (const auto& runtimeLib : {"libkernel.prx", "libSceLibcInternal.prx", "libSceAmpr.prx"}) {
-            if (unique.insert(runtimeLib).second)
-                result.push_back(runtimeLib);
-        }
-    }
     return result;
 }
 
