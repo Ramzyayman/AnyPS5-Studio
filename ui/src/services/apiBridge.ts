@@ -64,7 +64,7 @@ declare global {
         callback: (data: { level: string; message: string; timestamp?: string }) => void
       ) => () => void;
       onGameExit?: (
-        callback: (data: { code: number | null; exitCodeHex: string; isCrash: boolean }) => void
+        callback: (data: { code: number | null; signal?: string | null; exitCodeHex: string; isCrash: boolean }) => void
       ) => () => void;
       minimizeWindow?: () => Promise<void>;
       maximizeWindow?: () => Promise<void>;
@@ -234,7 +234,7 @@ class ApiBridge {
     return () => {};
   }
 
-  public onGameExit(callback: (data: { code: number | null; exitCodeHex: string; isCrash: boolean }) => void): () => void {
+  public onGameExit(callback: (data: { code: number | null; signal?: string | null; exitCodeHex: string; isCrash: boolean }) => void): () => void {
     if (window.anyps5?.onGameExit) {
       return window.anyps5.onGameExit(callback);
     }

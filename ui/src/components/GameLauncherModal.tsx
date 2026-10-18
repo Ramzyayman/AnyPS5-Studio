@@ -104,12 +104,12 @@ export const GameLauncherModal: React.FC<GameLauncherModalProps> = ({
   }, [launchState]);
 
   // Handle process termination (clean vs crash)
-  const handleProcessExit = useCallback((code: number | null, hex: string | null) => {
+  const handleProcessExit = useCallback((code: number | null, hex: string | null, signal?: string | null) => {
     if (!isMountedRef.current) return;
 
     setPid(null);
     setExitCode(code);
-    const resolvedHex = hex || (code !== null ? '0x' + (code >>> 0).toString(16).toUpperCase() : 'null');
+    const resolvedHex = hex || (code !== null ? '0x' + (code >>> 0).toString(16).toUpperCase() : (signal || 'null'));
     setExitCodeHex(resolvedHex);
 
     if (userRequestedStopRef.current) {
@@ -119,17 +119,17 @@ export const GameLauncherModal: React.FC<GameLauncherModalProps> = ({
       return;
     }
 
-    if (code === 0) {
+    if (code === 0 && !signal) {
       setLaunchState('closed');
       setStatusMessage('Game session ended normally');
       setErrorMessage(null);
     } else {
       setLaunchState('crashed');
-      if (code === 3221225477 || code === -1073741819) {
-        setDetectedAbortReason((prev) => prev || 'Access Violation (0xC0000005)');
+      if (code === 3221225477 || code === -1073741819 || signal === 'SIGSEGV' || code === 11 || code === 139) {
+        setDetectedAbortReason((prev) => prev || 'Access Violation / SIGSEGV');
         setErrorMessage({
           summary: 'The game closed unexpectedly',
-          remedy: 'An access violation (0xC0000005) occurred. In Relinker Studio, verify that "Unused Import Optimization" is set to Level 0 (Safe / Full Compatibility) so virtual tables and C++ error categories are not stripped.',
+          remedy: 'A memory access violation (SIGSEGV / 0xC0000005) occurred. In Relinker Studio, verify that "Unused Import Optimization" is set to Level 0 (Safe / Full Compatibility) so virtual tables and C++ error categories are not stripped.',
           isRelinkHint: true,
         });
       } else if (code === 3221225781 || code === -1073741515) {
@@ -152,21 +152,35 @@ export const GameLauncherModal: React.FC<GameLauncherModalProps> = ({
             isRelinkHint: true,
           };
         });
-      } else if (code === 3221226505 || code === -1073740791) {
-        setDetectedAbortReason((prev) => (prev && prev !== 'unresolved' ? prev : 'Process Abort / Exception (0xC0000409)'));
+      } else if (code === 3221226505 || code === -1073740791 || signal === 'SIGABRT' || code === 6 || code === 134) {
+        setDetectedAbortReason((prev) => (prev && prev !== 'unresolved' ? prev : 'Process Abort / Exception (SIGABRT)'));
         setErrorMessage((prev) => {
           if (prev && prev.remedy && prev.remedy.length > 0) return prev;
           return {
-            summary: 'Process Terminated via Abort (0xC0000409)',
+            summary: 'Process Terminated via Abort (SIGABRT / 0xC0000409)',
             remedy: 'The application encountered an unhandled C++ exception or abort() call during execution. Check Execution Logs below for the runtime error trace.',
             isRelinkHint: false,
           };
+        });
+      } else if (signal === 'SIGILL' || code === 4 || code === 132) {
+        setDetectedAbortReason((prev) => prev || 'Illegal Instruction (SIGILL)');
+        setErrorMessage({
+          summary: 'Illegal Instruction (SIGILL / 4)',
+          remedy: 'Host CPU or VM lacks required CPU extensions (AVX2, F16C, BMI2) or executed an unhandled instruction. Verify CPU virtualization flags in VMware.',
+          isRelinkHint: false,
+        });
+      } else if (signal === 'SIGBUS' || code === 7 || code === 135) {
+        setDetectedAbortReason((prev) => prev || 'Bus Error (SIGBUS)');
+        setErrorMessage({
+          summary: 'Bus Error (SIGBUS / 7)',
+          remedy: 'A memory alignment fault or invalid host page access occurred.',
+          isRelinkHint: false,
         });
       } else {
         setDetectedAbortReason((prev) => prev || `Process Exit (${resolvedHex})`);
         setErrorMessage({
           summary: 'The game closed unexpectedly',
-          remedy: `Process exited with error code ${resolvedHex}. Inspect Technical Details below for complete crash diagnostics.`,
+          remedy: `Process exited with error code ${resolvedHex}${signal ? ` (signal ${signal})` : ''}. Inspect Technical Details below for complete crash diagnostics.`,
           isRelinkHint: false,
         });
       }
@@ -235,7 +249,7 @@ export const GameLauncherModal: React.FC<GameLauncherModalProps> = ({
 
     // Direct IPC exit event listener
     const unsubscribeExit = apiBridge.onGameExit?.((data) => {
-      handleProcessExit(data.code, data.exitCodeHex);
+      handleProcessExit(data.code, data.exitCodeHex, data.signal);
     }) || (() => {});
 
     // Live log stream listener
@@ -283,6 +297,16 @@ export const GameLauncherModal: React.FC<GameLauncherModalProps> = ({
             }
           }
         }
+      }
+
+      // Parse Vulkan initialization failure
+      if (msg.includes('No compatible Vulkan') || msg.includes('no Vulkan 1.1') || msg.includes('Vulkan: no usable device')) {
+        setDetectedAbortReason('Vulkan Initialization Failed');
+        setErrorMessage({
+          summary: 'Vulkan Initialization Failed',
+          remedy: 'No compatible Vulkan 1.1 physical device detected. In VMware, verify "Accelerate 3D graphics" is enabled in Virtual Machine Settings -> Display. On Linux/CachyOS, ensure Vulkan ICD drivers (vulkan-radeon, vulkan-intel, or vulkan-swrast) are installed.',
+          isRelinkHint: false,
+        });
       }
 
       // Parse module load failure from PE loader stub

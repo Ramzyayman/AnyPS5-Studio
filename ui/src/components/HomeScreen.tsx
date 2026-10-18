@@ -263,12 +263,20 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             {selectedGame.status === 'ported' ? (
               <span className="flex items-center space-x-1.5 text-emerald-400 text-xs font-medium">
                 <CheckCircle2 className="w-3.5 h-3.5" />
-                <span>Ported · Windows Native PE</span>
+                <span>
+                  {selectedGame.targetPlatform === 'linux' || (typeof navigator !== 'undefined' && navigator.userAgent.includes('Linux'))
+                    ? 'Ported · Linux Native ELF'
+                    : 'Ported · Windows Native PE'}
+                </span>
               </span>
             ) : (
               <span className="flex items-center space-x-1.5 text-blue-400 text-xs font-medium">
                 <Sparkles className="w-3.5 h-3.5" />
-                <span>Decrypted · Ready to Relink</span>
+                <span>
+                  {(typeof navigator !== 'undefined' && navigator.userAgent.includes('Linux'))
+                    ? 'Ready to Relink (Linux)'
+                    : 'Decrypted · Ready to Relink'}
+                </span>
               </span>
             )}
             <span className="text-neutral-600">•</span>

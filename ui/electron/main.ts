@@ -224,6 +224,41 @@ ipcMain.handle('anyps5:get-games', async () => {
               g.sizeBytes = actualSize;
               changed = true;
             }
+
+            const isLinux = process.platform === 'linux';
+            const hasAppElf = fs.existsSync(path.join(g.path, 'app.elf'));
+            const hasAppExe = fs.existsSync(path.join(g.path, 'app.exe'));
+            if (isLinux) {
+              if (hasAppElf) {
+                if (g.status !== 'ported' || g.executableName !== 'app.elf' || g.targetPlatform !== 'linux') {
+                  g.status = 'ported';
+                  g.executableName = 'app.elf';
+                  g.targetPlatform = 'linux';
+                  changed = true;
+                }
+              } else if (hasAppExe) {
+                if (g.status !== 'ready_to_relink' || g.executableName !== 'app.elf') {
+                  g.status = 'ready_to_relink';
+                  g.executableName = 'app.elf';
+                  changed = true;
+                }
+              }
+            } else if (process.platform === 'win32') {
+              if (hasAppExe) {
+                if (g.status !== 'ported' || g.executableName !== 'app.exe' || g.targetPlatform !== 'windows') {
+                  g.status = 'ported';
+                  g.executableName = 'app.exe';
+                  g.targetPlatform = 'windows';
+                  changed = true;
+                }
+              } else if (hasAppElf) {
+                if (g.status !== 'ready_to_relink' || g.executableName !== 'app.exe') {
+                  g.status = 'ready_to_relink';
+                  g.executableName = 'app.exe';
+                  changed = true;
+                }
+              }
+            }
           }
         }
         if (changed) {
@@ -464,24 +499,66 @@ function detectAvailableGpus(): DetectedGpu[] {
     });
   } else if (platform === 'linux') {
     try {
-      const out = spawnSync('lspci', [], { encoding: 'utf8', timeout: 3000 });
-      if (out.stdout) {
-        const vgaLines = out.stdout.split('\n').filter(l => l.includes('VGA compatible controller') || l.includes('3D controller'));
-        for (const line of vgaLines) {
-          const parts = line.split(': ');
-          const gpuDesc = (parts[1] || line).trim();
-          const lower = gpuDesc.toLowerCase();
-          const isNvidia = lower.includes('nvidia');
-          const isAmd = lower.includes('amd') || lower.includes('radeon');
-          gpus.push({
-            name: gpuDesc,
-            vendor: isNvidia ? 'nvidia' : (isAmd ? 'amd' : 'intel'),
-            isDiscrete: isNvidia || isAmd,
-            isVirtual: false,
-          });
+      const vkOut = spawnSync('vulkaninfo', ['--summary'], { encoding: 'utf8', timeout: 3000 });
+      if (vkOut.stdout) {
+        const lines = vkOut.stdout.split('\n');
+        let currentDevice = '';
+        let currentType = '';
+        let currentVendor = '';
+        for (const rawLine of lines) {
+          const line = rawLine.trim();
+          if (line.startsWith('deviceName')) {
+            const parts = line.split('=');
+            if (parts[1]) currentDevice = parts[1].trim();
+          } else if (line.startsWith('deviceType')) {
+            const parts = line.split('=');
+            if (parts[1]) currentType = parts[1].trim();
+          } else if (line.startsWith('vendorID')) {
+            const parts = line.split('=');
+            if (parts[1]) currentVendor = parts[1].trim();
+          }
+          if (currentDevice && (currentType || currentVendor)) {
+            const lower = currentDevice.toLowerCase();
+            const isNvidia = lower.includes('nvidia') || currentVendor.includes('0x10de');
+            const isAmd = lower.includes('amd') || lower.includes('radeon') || currentVendor.includes('0x1002');
+            const isVirtual = lower.includes('vmware') || lower.includes('virtualbox') || lower.includes('qemu') || lower.includes('virtio') || lower.includes('llvmpipe') || lower.includes('svga') || lower.includes('software');
+            const isDiscrete = !isVirtual && (isNvidia || isAmd || currentType.includes('DISCRETE'));
+            gpus.push({
+              name: currentDevice,
+              vendor: isNvidia ? 'nvidia' : (isAmd ? 'amd' : (isVirtual ? 'other' : 'intel')),
+              isDiscrete,
+              isVirtual,
+            });
+            currentDevice = '';
+            currentType = '';
+            currentVendor = '';
+          }
         }
       }
     } catch {}
+
+    if (gpus.length === 0) {
+      try {
+        const out = spawnSync('lspci', [], { encoding: 'utf8', timeout: 3000 });
+        if (out.stdout) {
+          const vgaLines = out.stdout.split('\n').filter(l => l.includes('VGA compatible controller') || l.includes('3D controller'));
+          for (const line of vgaLines) {
+            const parts = line.split(': ');
+            const gpuDesc = (parts[1] || line).trim();
+            const lower = gpuDesc.toLowerCase();
+            const isNvidia = lower.includes('nvidia');
+            const isAmd = lower.includes('amd') || lower.includes('radeon');
+            const isVirtual = lower.includes('vmware') || lower.includes('virtualbox') || lower.includes('qemu') || lower.includes('virtio') || lower.includes('llvmpipe') || lower.includes('svga');
+            gpus.push({
+              name: gpuDesc,
+              vendor: isNvidia ? 'nvidia' : (isAmd ? 'amd' : (isVirtual ? 'other' : 'intel')),
+              isDiscrete: !isVirtual && (isNvidia || isAmd),
+              isVirtual,
+            });
+          }
+        }
+      } catch {}
+    }
   }
 
   // Deduplicate by name
@@ -657,6 +734,15 @@ function getResolvedLibsPath(): string {
     }
   }
   return baseDir;
+}
+
+function getPythonCommand(): string {
+  if (process.platform === 'win32') return 'python';
+  try {
+    const res = spawnSync('python3', ['--version'], { timeout: 1000 });
+    if (res.status === 0) return 'python3';
+  } catch {}
+  return 'python';
 }
 
 function getResolvedUnwrapScript(): string {
@@ -976,40 +1062,44 @@ function fixGameHierarchyInPlace(
       const lower = file.toLowerCase();
       const isPrx = lower.endsWith('.prx');
       const isDll = lower.endsWith('.dll');
+      const isSo = lower.endsWith('.so') || lower.includes('.so.');
 
       if (isPrx) {
         const stem = lower.replace(/(\.prx|\.native)+$/i, '');
         knownSystemLibs.add(stem);
       }
 
-      // 3a. Deploy to gameDir/libs/ (legacy & relinker search directory)
       const dLibs = path.join(gameLibs, file);
       if (!fs.existsSync(dLibs) || fs.statSync(dLibs).size !== stat.size) {
         try {
           fs.copyFileSync(s, dLibs);
+          if (process.platform !== 'win32') {
+            try { fs.chmodSync(dLibs, 0o755); } catch {}
+          }
           copiedLibsCount++;
         } catch {}
       }
 
-      // 3b. Deploy runtime DLLs (libstdc++-6.dll, libwinpthread-1.dll, libgcc_s_seh-1.dll)
-      // and system PRXs directly into gameDir/ (the application root alongside app.exe).
-      // Windows 0x1100 (LOAD_LIBRARY_SEARCH_APPLICATION_DIR) exclusively searches the exe directory,
-      // resolving runtime dependencies for all guest modules in app0/ without STATUS_DLL_NOT_FOUND (0xC0000135).
-      if (isDll || isPrx) {
+      if (isDll || isPrx || isSo) {
         const dRoot = path.join(resolved, file);
         if (!fs.existsSync(dRoot) || fs.statSync(dRoot).size !== stat.size) {
           try {
             fs.copyFileSync(s, dRoot);
+            if (process.platform !== 'win32') {
+              try { fs.chmodSync(dRoot, 0o755); } catch {}
+            }
             copiedRootCount++;
           } catch {}
         }
 
-        // Also deploy runtime DLLs directly into app0/ for direct DLL load directory searches
-        if (isDll) {
+        if (isDll || isSo) {
           const dApp0 = path.join(app0Dir, file);
           if (!fs.existsSync(dApp0) || fs.statSync(dApp0).size !== stat.size) {
             try {
               fs.copyFileSync(s, dApp0);
+              if (process.platform !== 'win32') {
+                try { fs.chmodSync(dApp0, 0o755); } catch {}
+              }
             } catch {}
           }
         }
@@ -1097,7 +1187,7 @@ function fixGameHierarchyInPlace(
       if (magic === 0x1D3D154F || magic === 0xEEF51454) {
         sendLog(`[AnyPS5] Detected encrypted/signed SELF container in eboot.bin. Unwrapping via tools/unwrap_self.py...`, 'info');
         const unwrapScript = getResolvedUnwrapScript();
-        const unwrapRes = spawnSync('python', [unwrapScript, ebootBin, inputElf], { cwd: resolved });
+        const unwrapRes = spawnSync(getPythonCommand(), [unwrapScript, ebootBin, inputElf], { cwd: resolved });
         if (unwrapRes.status === 0 && fs.existsSync(inputElf)) {
           fs.copyFileSync(inputElf, fallbackElf);
           sendLog(`[AnyPS5] Successfully unwrapped SELF container into eboot.elf.`, 'success');
@@ -1257,7 +1347,7 @@ function fixGameHierarchyInPlace(
             const modInfo = inspectModuleType(fullPrx);
             if (modInfo.isSelf) {
               const unwrapped = fullPrx + '.unwrapped';
-              const res = spawnSync('python', [unwrapScript, fullPrx, unwrapped]);
+              const res = spawnSync(getPythonCommand(), [unwrapScript, fullPrx, unwrapped]);
               if (res.status === 0 && fs.existsSync(unwrapped)) {
                 if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true });
                 fs.copyFileSync(fullPrx, path.join(backupDir, prx + '.self_orig'));
@@ -1618,6 +1708,7 @@ ipcMain.handle('anyps5:run-relinker', async (_, { game, options }) => {
 
           game.status = 'ported';
           game.executableName = targetExeName;
+          game.targetPlatform = isLinux ? 'linux' : (isMacos ? 'macos' : 'windows');
 
           // Auto-extract high-res cover art from sce_sys if available
           const paramSysDir = path.join(gameDir, 'app0/sce_sys');
@@ -1714,10 +1805,11 @@ ipcMain.handle('anyps5:launch-game', async (_, game) => {
   }
 
   if (process.platform === 'linux' && targetExe.endsWith('.exe') && !fs.existsSync(path.join(game.path, 'app.elf'))) {
-    sendLog(`[AnyPS5 Warning] Launching Windows PE executable (.exe) on Linux host without a native ELF (app.elf). If the game fails, please relink this title in Relinker Studio with Target: Linux.`, 'warn');
+    return {
+      error: `Ported Linux binary (app.elf) not found in ${game.path}. This title was ported for Windows (app.exe). Please open Relinker Studio and click Relink to compile the native Linux executable (app.elf).`,
+    };
   }
 
-  // Ensure executable permissions on POSIX
   if (process.platform !== 'win32') {
     try {
       fs.chmodSync(targetExe, 0o755);
@@ -1726,7 +1818,6 @@ ipcMain.handle('anyps5:launch-game', async (_, game) => {
     }
   }
 
-  // Terminate any existing active instance cleanly
   if (activeGameProcess && !activeGameProcess.killed) {
     try {
       activeGameProcess.kill();
@@ -1740,9 +1831,12 @@ ipcMain.handle('anyps5:launch-game', async (_, game) => {
     let gpuToUse = '';
 
     if (userSettings.preferredGpu && userSettings.preferredGpu !== 'auto' && userSettings.preferredGpu.trim() !== '') {
-      gpuToUse = userSettings.preferredGpu.trim();
+      const lower = userSettings.preferredGpu.toLowerCase();
+      const isVirtualSelected = lower.includes('vmware') || lower.includes('virtualbox') || lower.includes('qemu') || lower.includes('virtio') || lower.includes('llvmpipe') || lower.includes('svga');
+      if (!isVirtualSelected) {
+        gpuToUse = userSettings.preferredGpu.trim();
+      }
     } else {
-      // Auto: detect best discrete physical GPU
       const gpus = detectAvailableGpus();
       const bestDiscrete = gpus.find((g) => g.isDiscrete && !g.isVirtual);
       if (bestDiscrete) {
@@ -1813,11 +1907,11 @@ ipcMain.handle('anyps5:launch-game', async (_, game) => {
       }
     });
 
-    child.on('close', (code) => {
-      const exitCodeHex = code !== null ? '0x' + (code >>> 0).toString(16).toUpperCase() : 'null';
-      sendLog(`[AnyPS5] Game process exited with code ${code} (${exitCodeHex})`, code === 0 ? 'info' : 'warn');
+    child.on('close', (code, signal) => {
+      const isCrash = (code !== 0 && code !== null) || Boolean(signal);
+      const exitCodeHex = code !== null ? '0x' + (code >>> 0).toString(16).toUpperCase() : (signal || 'null');
+      sendLog(`[AnyPS5] Game process exited with code ${code} (${exitCodeHex})${signal ? ` killed by signal ${signal}` : ''}`, !isCrash ? 'info' : 'warn');
 
-      // Surface runtime diagnostics from anyps5.log if generated in game directory
       try {
         const anyps5Log = path.join(game.path, 'anyps5.log');
         if (fs.existsSync(anyps5Log)) {
@@ -1834,13 +1928,13 @@ ipcMain.handle('anyps5:launch-game', async (_, game) => {
         console.warn('Failed to read anyps5.log:', logErr);
       }
 
-      if (code === 3221225477 || code === -1073741819) {
-        sendLog(`[AnyPS5 Diagnostics] Crash detected: Access Violation (0xC0000005). If the title was relinked with aggressive import filtering, ensure 'Unused Import Optimization' is set to Level 0 (Safe / Full Compatibility) to preserve all C++ virtual tables and dynamic function pointers.`, 'error');
+      if (code === 3221225477 || code === -1073741819 || signal === 'SIGSEGV' || code === 11 || code === 139) {
+        sendLog(`[AnyPS5 Diagnostics] Crash detected: Access Violation / Segmentation Fault (SIGSEGV / 0xC0000005). If the title was relinked with aggressive import filtering, ensure 'Unused Import Optimization' is set to Level 0 (Safe / Full Compatibility) to preserve all C++ virtual tables and dynamic function pointers.`, 'error');
       } else if (code === 3221225781 || code === -1073741515) {
         if (capturedOutput.toLowerCase().includes('fakelib')) {
           sendLog(`[AnyPS5 Diagnostics] Crash Root Cause: Stale executable attempting to load legacy "fakelib" dump stubs. Open Relinker Studio and click Relink to rebuild with AnyPS5's native translation libraries.`, 'error');
         } else {
-          sendLog(`[AnyPS5 Diagnostics] Crash detected: Missing Dependency DLL (0xC0000135). Ensure all required middleware PRXs and runtime libraries in libs/ are deployed.`, 'error');
+          sendLog(`[AnyPS5 Diagnostics] Crash detected: Missing Dependency DLL / Shared Object (0xC0000135). Ensure all required middleware PRXs and runtime libraries in libs/ are deployed.`, 'error');
         }
       } else if (code === 3221225785 || code === -1073741511) {
         const importMatch = capturedOutput.match(/FAIL:\s*unresolved\s+ELF\s+import\s+([^\r\n]+)/i);
@@ -1849,13 +1943,17 @@ ipcMain.handle('anyps5:launch-game', async (_, game) => {
         } else {
           sendLog(`[AnyPS5 Diagnostics] Crash detected: Unresolved Entry Point / Symbol Import (0xC0000139). Inspect the searched libraries and missing symbols above.`, 'error');
         }
-      } else if (code === 3221226505 || code === -1073740791) {
+      } else if (code === 3221226505 || code === -1073740791 || signal === 'SIGABRT' || code === 6 || code === 134) {
         const whatMatch = capturedOutput.match(/what\(\):\s*([^\r\n]+)/i);
         if (whatMatch && whatMatch[1]) {
-          sendLog(`[AnyPS5 Diagnostics] Crash detected: Fatal Exception / Abort (0xC0000409) -> "${whatMatch[1].trim()}".`, 'error');
+          sendLog(`[AnyPS5 Diagnostics] Crash detected: Fatal Exception / Abort -> "${whatMatch[1].trim()}".`, 'error');
         } else {
-          sendLog(`[AnyPS5 Diagnostics] Crash detected: Process Abort / Fail-Fast (0xC0000409). Check execution log for abort() or assertion failure.`, 'error');
+          sendLog(`[AnyPS5 Diagnostics] Crash detected: Process Abort / Fail-Fast (SIGABRT / 0xC0000409). Check execution log for abort() or assertion failure.`, 'error');
         }
+      } else if (signal === 'SIGILL' || code === 4 || code === 132) {
+        sendLog(`[AnyPS5 Diagnostics] Crash detected: Illegal Instruction (SIGILL / 4). The host CPU or VM may lack required instruction extensions (AVX2, F16C, BMI2) or encountered an unhandled opcode.`, 'error');
+      } else if (signal === 'SIGBUS' || code === 7 || code === 135) {
+        sendLog(`[AnyPS5 Diagnostics] Crash detected: Bus Error (SIGBUS / 7). Check memory alignment and mapped host address space.`, 'error');
       }
 
       if (capturedOutput.toLowerCase().includes('not implemented')) {
@@ -1864,10 +1962,15 @@ ipcMain.handle('anyps5:launch-game', async (_, game) => {
         sendLog(`[AnyPS5 Diagnostics] Unimplemented PlayStation 5 API: "${missingSym}". In AnyPS5 clean-room libraries, unimplemented system calls explicitly throw to avoid silent corruption. Look for community PRs implementing this export or submit a report.`, 'error');
       }
 
+      if (capturedOutput.toLowerCase().includes('no vulkan 1.1') || capturedOutput.toLowerCase().includes('vulkan: no usable device')) {
+        sendLog(`[AnyPS5 Diagnostics] Vulkan initialization error: No compatible Vulkan 1.1 physical device detected. In VMware, ensure 'Accelerate 3D graphics' is checked in Virtual Machine Settings -> Display. On Linux/CachyOS, install appropriate Vulkan ICD drivers (e.g. vulkan-radeon, vulkan-intel, or vulkan-swrast).`, 'error');
+      }
+
       mainWindow?.webContents.send('anyps5:game-exit', {
         code,
+        signal,
         exitCodeHex,
-        isCrash: code !== 0 && code !== null,
+        isCrash,
       });
 
       if (activeGameProcess === child) {

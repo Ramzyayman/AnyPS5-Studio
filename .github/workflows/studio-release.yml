@@ -47,6 +47,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -euo pipefail
           mkdir -p build libs
           echo "Deploying latest core binaries and PRXs for ${{ matrix.platform }}..."
           python tools/deploy_upstream_core.py --platform ${{ matrix.platform }}
@@ -55,8 +56,17 @@ jobs:
             cp -fv core/libs/overrides/* libs/ || true
           fi
           if [ "${{ matrix.platform }}" = "linux" ]; then
-            chmod +x build/relinker || true
+            chmod +x build/relinker
             chmod +x libs/*.prx || true
+            test -x build/relinker || (echo "Error: build/relinker is not executable" && exit 1)
+          else
+            test -f build/relinker.exe || (echo "Error: build/relinker.exe not found" && exit 1)
+          fi
+          prx_count=$(ls -1 libs/*.prx | wc -l)
+          echo "Verified $prx_count PRX libraries deployed."
+          if [ "$prx_count" -lt 50 ]; then
+            echo "Error: Expected at least 50 PRX libraries, found $prx_count"
+            exit 1
           fi
           ls -la build/
           ls -la libs/

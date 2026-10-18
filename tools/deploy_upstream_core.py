@@ -4,9 +4,6 @@ import os
 import shutil
 import subprocess
 import sys
-import tarfile
-import urllib.request
-import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -23,88 +20,57 @@ def deploy(target_platform):
     artifact_name = "anyps5-upstream-core-linux-x64" if is_linux else "anyps5-upstream-core-windows-x64"
     relinker_bin_name = "relinker" if is_linux else "relinker.exe"
 
-    print(f"Checking for latest {artifact_name} artifact from GitHub Actions...")
+    print(f"Resolving latest '{artifact_name}' artifact from GitHub Actions...")
     temp_dir = ROOT / f"dist-upstream-download-{target_platform}"
     if temp_dir.exists():
         shutil.rmtree(temp_dir)
     temp_dir.mkdir(parents=True, exist_ok=True)
 
     downloaded = False
+    candidate_run_id = None
 
-    cmd_run = 'gh run list --workflow build-upstream-core.yml --status success --limit 1 --json databaseId -q ".[0].databaseId"'
-    res_run = run_cmd(cmd_run, check=False)
-    latest_run_id = res_run.stdout.strip()
-    if latest_run_id:
-        print(f"Downloading from latest successful build run #{latest_run_id}...")
-        cmd = f'gh run download {latest_run_id} --name {artifact_name} --dir "{temp_dir}" --repo Ramzyayman/AnyPS5-Studio'
-    else:
-        cmd = f'gh run download --name {artifact_name} --dir "{temp_dir}" --repo Ramzyayman/AnyPS5-Studio'
-    
-    res = run_cmd(cmd, check=False)
-    if res.returncode == 0:
-        downloaded = True
-    else:
-        print(f"Could not download GitHub Actions artifact: {res.stderr.strip()}")
-        print("Attempting upstream GitHub release fallback...")
+    res_api = run_cmd("gh api repos/Ramzyayman/AnyPS5-Studio/actions/artifacts", check=False)
+    if res_api.returncode == 0:
+        try:
+            data = json.loads(res_api.stdout)
+            for art in data.get("artifacts", []):
+                if art.get("name") == artifact_name:
+                    candidate_run_id = art.get("workflow_run", {}).get("id")
+                    print(f"Discovered {artifact_name} in workflow run #{candidate_run_id} (created at {art.get('created_at')})")
+                    break
+        except Exception as json_err:
+            print(f"Warning: Failed to parse GitHub API artifact JSON: {json_err}")
+
+    if not candidate_run_id:
+        cmd_runs = 'gh run list --workflow build-upstream-core.yml --status success --limit 10 --json databaseId -q ".[].databaseId"'
+        res_runs = run_cmd(cmd_runs, check=False)
+        for r_id in res_runs.stdout.splitlines():
+            r_id = r_id.strip()
+            if r_id:
+                candidate_run_id = r_id
+                break
+
+    if candidate_run_id:
+        print(f"Downloading {artifact_name} from run #{candidate_run_id}...")
+        cmd = f'gh run download {candidate_run_id} --name {artifact_name} --dir "{temp_dir}" --repo Ramzyayman/AnyPS5-Studio'
+        res = run_cmd(cmd, check=False)
+        if res.returncode == 0:
+            downloaded = True
+        else:
+            print(f"Warning: Run download for #{candidate_run_id} returned {res.returncode}: {res.stderr.strip()}")
 
     if not downloaded:
-        try:
-            target_build = ROOT / "build"
-            target_build.mkdir(parents=True, exist_ok=True)
-            target_libs = ROOT / "libs"
-            target_libs.mkdir(parents=True, exist_ok=True)
+        print(f"Attempting general artifact download for {artifact_name}...")
+        cmd = f'gh run download --name {artifact_name} --dir "{temp_dir}" --repo Ramzyayman/AnyPS5-Studio'
+        res = run_cmd(cmd, check=False)
+        if res.returncode == 0:
+            downloaded = True
 
-            if is_linux:
-                relinker_url = "https://github.com/boykopovar/AnyPS5/releases/download/v0.1.2/relinker-v0.1.2"
-                prx_url = "https://github.com/boykopovar/AnyPS5/releases/download/v0.1.2/prx-linux-v0.1.2.tar.gz"
-                print(f"Downloading relinker from {relinker_url}...")
-                relinker_dst = target_build / "relinker"
-                urllib.request.urlretrieve(relinker_url, relinker_dst)
-                try:
-                    os.chmod(relinker_dst, 0o755)
-                except OSError:
-                    pass
-
-                print(f"Downloading PRX bundle from {prx_url}...")
-                tar_dst = temp_dir / "prx-linux.tar.gz"
-                urllib.request.urlretrieve(prx_url, tar_dst)
-                with tarfile.open(tar_dst, "r:gz") as tar:
-                    tar.extractall(path=temp_dir)
-            else:
-                relinker_url = "https://github.com/boykopovar/AnyPS5/releases/download/v0.1.2/relinker-v0.1.2.exe"
-                prx_url = "https://github.com/boykopovar/AnyPS5/releases/download/v0.1.2/prx-windows-v0.1.2.zip"
-                print(f"Downloading relinker from {relinker_url}...")
-                relinker_dst = target_build / "relinker.exe"
-                urllib.request.urlretrieve(relinker_url, relinker_dst)
-
-                print(f"Downloading PRX bundle from {prx_url}...")
-                zip_dst = temp_dir / "prx-windows.zip"
-                urllib.request.urlretrieve(prx_url, zip_dst)
-                with zipfile.ZipFile(zip_dst, "r") as zf:
-                    zf.extractall(path=temp_dir)
-
-            extracted_libs = temp_dir / "libs"
-            if not extracted_libs.exists() and (temp_dir / "prx").exists():
-                extracted_libs = temp_dir / "prx"
-            if not extracted_libs.exists():
-                extracted_libs = temp_dir
-
-            for item in extracted_libs.glob("**/*"):
-                if item.is_file() and (item.suffix.lower() in [".prx", ".dll"]):
-                    shutil.copy2(item, target_libs / item.name)
-                    if is_linux:
-                        try:
-                            os.chmod(target_libs / item.name, 0o755)
-                        except OSError:
-                            pass
-
-            print("Successfully deployed core assets via release fallback.")
-            shutil.rmtree(temp_dir, ignore_errors=True)
-            return True
-        except Exception as e:
-            print(f"Fallback download failed: {e}")
-            shutil.rmtree(temp_dir, ignore_errors=True)
-            return False
+    if not downloaded:
+        print(f"ERROR: Could not locate or download required CI artifact '{artifact_name}'.")
+        print("Please ensure that the 'Build Upstream Core Binaries' workflow has completed successfully for this platform.")
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        return False
 
     downloaded_libs = temp_dir / "libs"
     downloaded_build = temp_dir / "build"
@@ -171,6 +137,10 @@ def deploy(target_platform):
                 lib_count += 1
 
     print(f"Successfully deployed {prx_count} PRX libraries and {lib_count} runtime libraries to libs/ and unpacked resources.")
+    if prx_count < 50:
+        print(f"ERROR: Expected at least 50 PRX libraries, but found only {prx_count}!")
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        return False
 
     try:
         shutil.rmtree(temp_dir, ignore_errors=True)
