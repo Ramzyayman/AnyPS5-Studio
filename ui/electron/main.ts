@@ -111,8 +111,7 @@ if (!gotTheLock) {
     try {
       autoUpdater.autoDownload = true;
       autoUpdater.autoInstallOnAppQuit = true;
-      // Stable users only receive full releases; preview builds are excluded from the auto-update feed
-      autoUpdater.allowPrerelease = false;
+      autoUpdater.allowPrerelease = true;
 
       const sendUpdateStatus = (status: {
         status: 'idle' | 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'error';
@@ -2440,8 +2439,20 @@ ipcMain.handle('anyps5:check-for-updates', async () => {
   if (!app.isPackaged) {
     return { status: 'not-available', currentVersion: app.getVersion() };
   }
+  if (process.platform === 'linux' && !process.env.APPIMAGE) {
+    return {
+      status: 'not-available',
+      currentVersion: app.getVersion(),
+    };
+  }
   try {
     const result = await autoUpdater.checkForUpdates();
+    if (!result || !result.updateInfo) {
+      return {
+        status: 'not-available',
+        currentVersion: app.getVersion(),
+      };
+    }
     return {
       status: 'checked',
       currentVersion: app.getVersion(),

@@ -108,17 +108,23 @@ jobs:
             --verify-tag || true
 
           if [ "${{ matrix.platform }}" = "windows" ]; then
+            cp -fv ui/dist-installer/latest.yml ui/dist-installer/preview.yml || true
             gh release upload "$tag" \
               ui/dist-installer/AnyPS5-Studio-Setup-*.exe \
               ui/dist-installer/AnyPS5-Studio-Setup-*.exe.blockmap \
               ui/dist-installer/latest.yml \
+              ui/dist-installer/preview.yml \
               --clobber
           else
             gh release upload "$tag" \
               ui/dist-installer/AnyPS5-Studio-*.AppImage \
               --clobber
             if [ -f ui/dist-installer/latest-linux.yml ]; then
-              gh release upload "$tag" ui/dist-installer/latest-linux.yml --clobber
+              cp -fv ui/dist-installer/latest-linux.yml ui/dist-installer/preview-linux.yml || true
+              gh release upload "$tag" \
+                ui/dist-installer/latest-linux.yml \
+                ui/dist-installer/preview-linux.yml \
+                --clobber
             fi
           fi
 

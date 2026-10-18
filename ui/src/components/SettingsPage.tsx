@@ -134,6 +134,10 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
       const res = await apiBridge.checkForUpdates();
       if (res.status === 'not-available' || res.status === 'dev-mode') {
         setUpdateStatus({ status: 'not-available', version: res.currentVersion });
+      } else if (res.status === 'error') {
+        setUpdateStatus({ status: 'error', error: res.error || 'Update check failed.' });
+      } else if (res.status === 'checked' && !res.updateInfo) {
+        setUpdateStatus({ status: 'not-available', version: res.currentVersion });
       }
     } catch (err: any) {
       setUpdateStatus({ status: 'error', error: err?.message || 'Update check failed.' });
