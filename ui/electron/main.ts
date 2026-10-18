@@ -839,6 +839,8 @@ function sanitizeModuleDirectory(
     if (!shouldIsolate) {
       const stem = lower.replace(/(\.sprx|\.prx|\.native|\.guest)+$/i, '');
       const conflictingDriverStubs = new Set([
+        'libc',
+        'libscelibcinternal',
         'libsceagc',
         'libsceagcdriver',
         'libscepsml',
@@ -848,7 +850,7 @@ function sanitizeModuleDirectory(
       ]);
       if (conflictingDriverStubs.has(stem)) {
         shouldIsolate = true;
-        isolateReason = `Conflicting system hardware driver stub (provided natively by AnyPS5 in libs/${stem}.prx)`;
+        isolateReason = `Conflicting system library stub (provided natively by AnyPS5 in libs/${stem}.prx)`;
       }
     }
 
@@ -1361,22 +1363,33 @@ function fixGameHierarchyInPlace(
     fs.mkdirSync(sceModuleDir, { recursive: true });
   }
 
-  // Automatically restore authentic guest libc if it was previously isolated to module_backups
+  // Ensure conflicting system library stubs (like libc.prx or libkernel.prx) in sce_module are isolated to module_backups
   const targetModuleDir = hasSingular ? sceModuleDir : (hasPlural ? sceModulesDir : (hasPrx ? prxDir : sceModuleDir));
-  const activeLibc = path.join(targetModuleDir, 'libc.prx');
-  if (!fs.existsSync(activeLibc)) {
-    const candidateBackups = [
-      path.join(targetModuleDir, 'module_backups', 'libc.prx'),
-      path.join(app0Dir, 'module_backups', 'libc.prx'),
-      path.join(app0Dir, 'sce_module_backups', 'libc.prx'),
-      path.join(app0Dir, 'sce_module_backups', 'libc.prx.self_orig'),
-    ];
-    for (const bLoc of candidateBackups) {
-      if (fs.existsSync(bLoc)) {
+  for (const sysLib of ['libc.prx', 'libkernel.prx', 'libSceLibcInternal.prx']) {
+    const activeSysPrx = path.join(targetModuleDir, sysLib);
+    if (fs.existsSync(activeSysPrx)) {
+      const backupSysDir = path.join(targetModuleDir, 'module_backups');
+      if (!fs.existsSync(backupSysDir)) fs.mkdirSync(backupSysDir, { recursive: true });
+      const dst = path.join(backupSysDir, sysLib);
+      try {
+        if (fs.existsSync(dst)) fs.unlinkSync(dst);
+        fs.renameSync(activeSysPrx, dst);
+        sendLog(`[AnyPS5] Isolated conflicting system library "${sysLib}" from guest module directory to module_backups/`, 'info');
+      } catch {}
+    }
+  }
+
+  // Clean up any stale guest system library artifacts that conflict with AnyPS5 native translations
+  for (const guestSysPrx of ['libc.prx.guest.prx', 'libkernel.prx.guest.prx', 'libSceLibcInternal.prx.guest.prx']) {
+    for (const searchDir of [resolved, app0Dir, sceModuleDir, prxDir]) {
+      const target = path.join(searchDir, guestSysPrx);
+      if (fs.existsSync(target)) {
         try {
-          fs.copyFileSync(bLoc, activeLibc);
-          sendLog(`[AnyPS5] Restored authentic guest libc.prx into ${path.relative(app0Dir, activeLibc)}`, 'info');
-          break;
+          const backup = path.join(searchDir, 'module_backups', guestSysPrx);
+          if (!fs.existsSync(path.dirname(backup))) fs.mkdirSync(path.dirname(backup), { recursive: true });
+          if (fs.existsSync(backup)) fs.unlinkSync(backup);
+          fs.renameSync(target, backup);
+          sendLog(`[AnyPS5] Isolated obsolete guest system artifact "${guestSysPrx}" to module_backups/`, 'info');
         } catch {}
       }
     }
@@ -1623,6 +1636,10 @@ function fixGameHierarchyInPlace(
     try {
       if (fs.existsSync(outputExe)) {
         const exeBuffer = fs.readFileSync(outputExe);
+        if (exeBuffer.includes(Buffer.from('libc.prx.guest.prx'))) {
+          sendLog(`[AnyPS5 Diagnostics] Stale executable detected: "${path.basename(outputExe)}" contains embedded imports to guest libc.prx.guest.prx. Re-relinking this title in Relinker Studio is required to bind AnyPS5's native C translation library.`, 'warn');
+        }
+
         if (exeBuffer.includes(Buffer.from('fakelib'))) {
           sendLog(`[AnyPS5 Diagnostics] Stale executable detected: "${path.basename(outputExe)}" contains embedded imports to legacy "fakelib" stubs.`, 'warn');
           sendLog(`[AnyPS5 Diagnostics] Re-relinking this title in Relinker Studio is recommended to use AnyPS5's native translation libraries.`, 'info');
