@@ -59,7 +59,7 @@ jobs:
             chmod +x libs/*.prx || true
           fi
           ls -la build/
-          ls -la libs/ | head -n 10
+          ls -la libs/
 
       - name: Install dependencies
         working-directory: ui

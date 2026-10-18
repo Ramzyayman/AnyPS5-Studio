@@ -105,7 +105,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build
+          sudo apt-get install -y ninja-build libxrandr-dev libx11-dev libxext-dev libwayland-dev libxkbcommon-dev libegl-dev libdecor-0-dev libpipewire-0.3-dev libpulse-dev libasound2-dev
 
       - uses: hendrikmuhs/ccache-action@v1.2.24
         with:
