@@ -70,12 +70,25 @@ public:
     const InputConfiguration& Configuration() const;
 
 private:
+    struct StickInput {
+        std::array<double, 4> targets{};
+        std::array<bool, 4> held{};
+    };
+
+    StickInput stickInput() const;
+    std::array<double, 2> triggerTargets() const;
+    bool advanceAxes(Clock::time_point now);
+
     InputConfiguration configuration;
     std::vector<bool> pressed;
     std::vector<Clock::time_point> wheelReleaseTimes;
     MouseStick mouse;
     Clock::time_point lastAdvance{};
+    Clock::time_point lastAxisAdvance{};
+    std::array<double, 4> stickAxes{};
+    std::array<double, 2> triggerAxes{};
     bool advanced = false;
+    bool axesAdvanced = false;
     bool mouseMode = false;
     bool titleReadsMouse = false;
 };

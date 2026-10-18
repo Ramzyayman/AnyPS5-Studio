@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <cstdio>
 #include <functional>
 #include <stdexcept>
@@ -311,6 +312,108 @@ void testKeyboardSticksUnchanged() {
     check(samples[44].state.sticks[0] == 128, "released keys center the stick");
 }
 
+Pad::InputConfiguration withModifier(double scale) {
+    auto configuration = defaults();
+    configuration.bindings.push_back({SDL_SCANCODE_Z, Pad::MouseButton::None, Pad::InputControl::StickModifier});
+    configuration.bindings.push_back({SDL_SCANCODE_UNKNOWN, Pad::MouseButton::X2, Pad::InputControl::StickModifier});
+    configuration.settings.stickModifierScale = scale;
+    return configuration;
+}
+
+void testStickModifier() {
+    const std::vector<TimedEvent> events{
+        At(0.0, KeyEvent(SDL_SCANCODE_W, true)),
+        At(10.0, KeyEvent(SDL_SCANCODE_Z, true)),
+        At(20.0, KeyEvent(SDL_SCANCODE_D, true)),
+        At(30.0, KeyEvent(SDL_SCANCODE_A, true)),
+        At(40.0, KeyEvent(SDL_SCANCODE_Z, false)),
+        At(50.0, KeyEvent(SDL_SCANCODE_A, false)),
+        At(60.0, KeyEvent(SDL_SCANCODE_D, false)),
+        At(70.0, PadSimulation::ButtonEvent(SDL_BUTTON_X2, true)),
+        At(80.0, KeyEvent(SDL_SCANCODE_S, true)),
+        At(90.0, PadSimulation::ButtonEvent(SDL_BUTTON_X2, false))};
+    const auto samples = Simulate(withModifier(0.5), events, 1.0, 100.0);
+    check(samples[4].state.sticks[1] == 0, "keys tilt fully before the modifier is held");
+    check(samples[14].state.sticks[1] == 64 && samples[14].state.sticks[0] == 128, "the modifier halves the tilt of a held key");
+    check(samples[24].state.sticks[0] == 192 && samples[24].state.sticks[1] == 64, "the modifier halves a second axis");
+    check(samples[34].state.sticks[0] == 128, "opposite keys still cancel under the modifier");
+    check(samples[44].state.sticks[1] == 0 && samples[44].state.sticks[0] == 128, "letting go of the modifier restores the full tilt");
+    check(samples[74].state.sticks[1] == 64 && samples[74].state.sticks[0] == 128, "a modifier on a mouse button scales the held keys");
+    check(samples[84].state.sticks[1] == 128, "opposite keys cancel under a mouse button modifier");
+    check(samples[94].state.sticks[1] == 128, "opposite keys still cancel once the mouse button modifier is released");
+    const auto alone = Simulate(withModifier(0.5), {At(0.0, KeyEvent(SDL_SCANCODE_Z, true))}, 1.0, 10.0);
+    check(alone.back().state.sticks[0] == 128 && alone.back().state.sticks[1] == 128, "the modifier alone moves no stick");
+    const auto quarter = Simulate(withModifier(0.25), {At(0.0, KeyEvent(SDL_SCANCODE_Z, true)), At(0.0, KeyEvent(SDL_SCANCODE_D, true))}, 1.0, 10.0);
+    check(quarter.back().state.sticks[0] == 160, "the scale setting sets the tilt");
+    const auto full = Simulate(withModifier(1.0), {At(0.0, KeyEvent(SDL_SCANCODE_Z, true)), At(0.0, KeyEvent(SDL_SCANCODE_D, true))}, 1.0, 10.0);
+    check(full.back().state.sticks[0] == 255, "a scale of 1 tilts fully");
+}
+
+int byteDistance(std::uint8_t value, int expected) {
+    return std::abs(static_cast<int>(value) - expected);
+}
+
+void testKeyboardRamp() {
+    auto configuration = withModifier(0.5);
+    configuration.settings.keyboardRampMs = 100.0;
+    const std::vector<TimedEvent> events{At(0.0, KeyEvent(SDL_SCANCODE_W, true)), At(150.0, KeyEvent(SDL_SCANCODE_W, false))};
+    const auto samples = Simulate(configuration, events, 1.0, 400.0);
+    check(byteDistance(samples[20].state.sticks[1], 102) <= 1, "a ramp of 100 ms is a fifth of the way after 20 ms");
+    check(byteDistance(samples[50].state.sticks[1], 64) <= 1, "a ramp of 100 ms is halfway after 50 ms");
+    check(samples[119].state.sticks[1] == 0, "a ramp ends at full tilt");
+    for (std::size_t index = 2; index < 119; ++index) check(samples[index].state.sticks[1] <= samples[index - 1].state.sticks[1], "the stick only moves on while the key is held");
+    check(byteDistance(samples[199].state.sticks[1], 64) <= 1, "letting go ramps back at the same speed");
+    for (std::size_t index = 152; index < 259; ++index) check(samples[index].state.sticks[1] >= samples[index - 1].state.sticks[1], "the stick only moves back after the key is let go");
+    check(samples[259].state.sticks[1] == 128 && samples[259].state.sticks[0] == 128, "the stick ends centered");
+    const std::vector<TimedEvent> modified{At(0.0, KeyEvent(SDL_SCANCODE_Z, true)), At(0.0, KeyEvent(SDL_SCANCODE_W, true)), PadSimulation::ReleaseAt(80.0)};
+    const auto scaled = Simulate(configuration, modified, 1.0, 120.0);
+    check(byteDistance(scaled[20].state.sticks[1], 102) <= 1, "a ramp toward a modified tilt moves at the ramp speed");
+    check(scaled[70].state.sticks[1] == 64, "a ramp toward a modified tilt stops at it");
+    check(scaled[99].state.sticks[1] == 128, "releasing every key centers a ramped stick at once");
+    const auto held = Simulate(configuration, {At(0.0, KeyEvent(SDL_SCANCODE_Z, true)), At(0.0, KeyEvent(SDL_SCANCODE_W, true))}, 1.0, 120.0);
+    check(held[99].state.sticks[1] == 64, "a ramp stops at the modified tilt");
+}
+
+void testRampKeepsAdvanceReporting() {
+    auto configuration = defaults();
+    configuration.settings.keyboardRampMs = 100.0;
+    Pad::KeyboardMouse keyboardMouse(configuration);
+    const auto start = Pad::KeyboardMouse::Clock::now();
+    keyboardMouse.Advance(start);
+    check(!keyboardMouse.Advance(start + std::chrono::milliseconds(5)), "nothing moves while no key is held");
+    keyboardMouse.HandleEvent(KeyEvent(SDL_SCANCODE_W, true), start + std::chrono::milliseconds(10));
+    check(keyboardMouse.Advance(start + std::chrono::milliseconds(20)), "a ramping stick asks for a new state");
+    keyboardMouse.Advance(start + std::chrono::milliseconds(200));
+    check(!keyboardMouse.Advance(start + std::chrono::milliseconds(210)), "a stick at its tilt asks for nothing");
+}
+
+void testTriggerRamp() {
+    const auto r2 = static_cast<std::uint32_t>(Pad::PadButton::R2);
+    const std::vector<TimedEvent> events{At(0.0, PadSimulation::ButtonEvent(SDL_BUTTON_RIGHT, true)), At(150.0, PadSimulation::ButtonEvent(SDL_BUTTON_RIGHT, false))};
+    const auto instant = Simulate(defaults(), events, 1.0, 10.0);
+    check(instant[0].state.analogButtonsR2 == 255 && (instant[0].state.buttons & r2) != 0, "without a ramp a press is full at once");
+    auto configuration = defaults();
+    configuration.settings.triggerRampMs = 100.0;
+    const auto samples = Simulate(configuration, events, 1.0, 400.0);
+    check(samples[0].state.analogButtonsR2 == 0 && (samples[0].state.buttons & r2) == 0, "a ramped press starts at 0");
+    check(byteDistance(samples[50].state.analogButtonsR2, 128) <= 2 && (samples[50].state.buttons & r2) != 0, "a ramp of 100 ms is halfway after 50 ms");
+    for (std::size_t index = 2; index < 119; ++index) check(samples[index].state.analogButtonsR2 >= samples[index - 1].state.analogButtonsR2, "the trigger only presses on while the button is held");
+    check(samples[119].state.analogButtonsR2 == 255, "a ramp ends at a full press");
+    check(byteDistance(samples[199].state.analogButtonsR2, 128) <= 2, "letting go ramps back at the same speed");
+    check(samples[259].state.analogButtonsR2 == 0 && (samples[259].state.buttons & r2) == 0, "the trigger ends released");
+    check(samples[119].state.analogButtonsL2 == 0, "the other trigger is left alone");
+    Pad::KeyboardMouse keyboardMouse(configuration);
+    const auto start = Pad::KeyboardMouse::Clock::now();
+    keyboardMouse.Advance(start);
+    keyboardMouse.HandleEvent(PadSimulation::ButtonEvent(SDL_BUTTON_RIGHT, true), start);
+    keyboardMouse.Advance(start + std::chrono::milliseconds(30));
+    PadInputState controller;
+    controller.analogButtonsR2 = 200;
+    check(keyboardMouse.Compose(controller).analogButtonsR2 == 200, "a controller trigger above the ramp is passed on");
+    controller.analogButtonsR2 = 10;
+    check(byteDistance(keyboardMouse.Compose(controller).analogButtonsR2, 77) <= 1, "a ramp above a controller trigger is passed on");
+}
+
 void testWheelPress() {
     const auto samples = Simulate(defaults(), {At(0.0, PadSimulation::WheelEvent(1))}, 1.0, 200.0);
     const auto up = static_cast<std::uint32_t>(Pad::PadButton::Up);
@@ -426,6 +529,10 @@ int main() {
             {"vertical scale", testVerticalScale},
             {"mouse mode off", testMouseModeOff},
             {"keyboard sticks unchanged", testKeyboardSticksUnchanged},
+            {"stick modifier", testStickModifier},
+            {"keyboard ramp", testKeyboardRamp},
+            {"trigger ramp", testTriggerRamp},
+            {"ramp keeps advance reporting", testRampKeepsAdvanceReporting},
             {"wheel press", testWheelPress},
             {"wheel and keys on focus loss", testWheelFocusLoss},
             {"focus loss releases the mouse", testFocusLossReleasesMouse},

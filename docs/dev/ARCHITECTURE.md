@@ -47,7 +47,7 @@ flowchart LR
 
 ## Windows deferred module initialization
 
-Runtime-loaded Windows modules export `__aps5_guest_initialize`: the entry RVA, the initializer count and the RVAs of initializer pointer slots. [DynamicLoader.cpp](../../core/libs/prx/libkernel/Module/src/DynamicLoader.cpp) consumes the first two words in the mapped image after initialization, so another reference to that image does not run it again. Unloading the image discards this state; a later load reads the original table from the file, including when Windows reuses the same base address. Native references outside the guest handle table retain the same initialized image. A module with a preinit array exports a thunk as its entry RVA that runs the preinit entries before the module initializer.
+Runtime-loaded Windows modules export `__aps5_guest_initialize`: the entry RVA, the initializer count and the RVAs of initializer pointer slots. [DynamicLoader.cpp](../../core/libs/prx/libkernel/Module/src/DynamicLoader.cpp) consumes the first two words in the mapped image after initialization, so another reference to that image does not run it again. Unloading the image discards this state; a later load reads the original table from the file, including when Windows reuses the same base address. Native references outside the guest handle table retain the same initialized image.
 
 While initialization runs, the count is `UINT32_MAX` and the entry word holds the initializing Windows thread ID. A different thread waits on the loader's condition variable; the owning thread can recursively open its module. Completion clears both words, restores the table's original page protection and wakes waiters. An exception leaves the count at `UINT32_MAX` with thread ID 0, so another load rejects that image until it is unloaded. The table's file format is unchanged and its initializer slots remain intact.
 
@@ -148,7 +148,7 @@ The disk cache stores the table and table operation of each image and sampler, t
 
 A storage image over guest memory that the write watch does not cover (a host-pointer import on a driver that drops its write protection, or an unwatched range) has no block stamps to tell a CPU edit apart, so `StorageTexture::compareUntracked` in [`Texture.cpp`](../../core/libs/prx/libSceAgcDriver/Graphics/src/Texture.cpp) compares the guest bytes with the image's snapshot. A whole-surface comparison that found no change is remembered under a stamp of:
 
-- the calling queue worker's collect epoch (`GuestMemory::CollectEpoch`), which advances at every ordering point where a CPU store may have landed (submission start, a satisfied `WAIT_REG_MEM`, a drain); a thread that never bumps it gets epoch 0 and is never memoized;
+- the calling queue worker's collect epoch (`GuestMemory::CollectEpoch`), which advances at every ordering point where a CPU store may have landed (submission start, a satisfied `WAIT_REG_MEM`, a drain); a thread that never bumps it gets epoch 0 and is never memoized, so the presenter adopts the newest epoch any worker started (`GuestMemory::AdoptLatestCollectEpoch`, never moving a thread back; `APS5_NO_PRESENT_EPOCH=1` disables it);
 - `GuestMemory::NewestStamp` of the surface: the newest block stamp of its watched part, and the generation of the newest driver store (`MarkWritten`, `StoreOwnBytes`) into its unwatched part;
 - `GuestMemory::ForgetSerial`, which changes when guest memory is released or remapped;
 - the recorder's newest pending GPU write note over the surface.

@@ -47,7 +47,6 @@ struct GuestImage {
     std::vector<GuestSymbol> Symbols;
     std::vector<std::string> Dependencies;
     Domain::SysVDynamicSection Dynamic;
-    std::vector<std::uint64_t> PreInitArray;
     std::vector<std::uint64_t> InitArray;
     std::vector<std::uint64_t> FiniArray;
     std::uint64_t Init = 0;

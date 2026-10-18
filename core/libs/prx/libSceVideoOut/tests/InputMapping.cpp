@@ -164,6 +164,51 @@ void nonAsciiPaths() {
     require(message.find(utf8Name) != std::string::npos, "a missing file names the path in UTF-8");
 }
 
+std::size_t stickModifierBindings(const Pad::InputConfiguration& configuration) {
+    std::size_t count = 0;
+    for (const auto& binding : configuration.bindings) count += binding.control == Pad::InputControl::StickModifier ? 1 : 0;
+    return count;
+}
+
+void stickModifier() {
+    useConfig("Cross = KEY:F\n");
+    auto configuration = Pad::LoadInputMapping();
+    require(stickModifierBindings(configuration) == 0, "no key is a stick modifier by default");
+    require(configuration.settings.stickModifierScale == 0.5, "the stick modifier scale defaults to 0.5");
+    useConfig("StickModifier = KEY:Z\nstickmodifier = MOUSE:X2\nStickModifierScale = 0.35\n");
+    configuration = Pad::LoadInputMapping();
+    require(stickModifierBindings(configuration) == 2, "StickModifier takes a key and a mouse button");
+    require(configuration.settings.stickModifierScale == 0.35, "the stick modifier scale is read");
+    require(rejects("StickModifier = WHEEL:Up\n"), "a wheel direction cannot be a stick modifier");
+    require(rejects("StickModifierScale = 0.04\n"), "a stick modifier scale below 0.05 is rejected");
+    require(rejects("StickModifierScale = 1.5\n"), "a stick modifier scale above 1 is rejected");
+    require(rejects("StickModifierScale = half\n"), "a non-numeric stick modifier scale is rejected");
+    require(rejects("StickModifierScale = 0.5\nStickModifierScale = 0.6\n"), "a stick modifier scale given twice is rejected");
+}
+
+void keyboardRamp() {
+    useConfig("Cross = KEY:F\n");
+    require(Pad::LoadInputMapping().settings.keyboardRampMs == 0.0, "the keyboard ramp defaults to 0");
+    useConfig("KeyboardRampMs = 120\n");
+    require(Pad::LoadInputMapping().settings.keyboardRampMs == 120.0, "the keyboard ramp is read");
+    useConfig("keyboardrampms = 0\n");
+    require(Pad::LoadInputMapping().settings.keyboardRampMs == 0.0, "a ramp of 0 is accepted");
+    require(rejects("KeyboardRampMs = -1\n"), "a negative keyboard ramp is rejected");
+    require(rejects("KeyboardRampMs = 2001\n"), "a keyboard ramp above 2000 is rejected");
+    require(rejects("KeyboardRampMs = slow\n"), "a non-numeric keyboard ramp is rejected");
+    require(rejects("KeyboardRampMs = 50\nKeyboardRampMs = 60\n"), "a keyboard ramp given twice is rejected");
+}
+
+void triggerRamp() {
+    useConfig("Cross = KEY:F\n");
+    require(Pad::LoadInputMapping().settings.triggerRampMs == 0.0, "the trigger ramp defaults to 0");
+    useConfig("TriggerRampMs = 80\n");
+    require(Pad::LoadInputMapping().settings.triggerRampMs == 80.0, "the trigger ramp is read");
+    require(rejects("TriggerRampMs = -5\n"), "a negative trigger ramp is rejected");
+    require(rejects("TriggerRampMs = 2500\n"), "a trigger ramp above 2000 is rejected");
+    require(rejects("TriggerRampMs = 10\ntriggerrampms = 20\n"), "a trigger ramp given twice is rejected");
+}
+
 std::size_t toggleMouseBindings(const Pad::InputConfiguration& configuration, SDL_Scancode key, Pad::MouseButton button) {
     std::size_t count = 0;
     for (const auto& binding : configuration.bindings) {
@@ -220,6 +265,9 @@ int main() try {
     mouseLookDefault();
     mouseLookParse();
     mouseLookReject();
+    stickModifier();
+    keyboardRamp();
+    triggerRamp();
     toggleMouseDefaults();
     nonAsciiPaths();
     deadzoneOffMatchesRawSticks();
