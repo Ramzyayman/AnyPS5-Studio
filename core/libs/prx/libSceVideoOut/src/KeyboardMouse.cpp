@@ -9,6 +9,32 @@ Pad::MouseStick::MouseStick(const InputSettings& settings) : settings(settings) 
 void Pad::MouseStick::Move(int deltaX, int deltaY) {
     pendingX += deltaX;
     pendingY += deltaY;
+    pendingCounts += std::hypot(deltaX, deltaY);
+    ++pendingReports;
+}
+
+void Pad::MouseStick::measureReportRate(double step, bool moved) {
+    if (moved) {
+        rateSeconds += std::min(idleSeconds + step, MouseRateGapSeconds);
+        rateCounts += pendingCounts;
+        rateReports += pendingReports;
+    }
+    pendingCounts = 0.0;
+    pendingReports = 0;
+    if (rateSeconds < MouseRateWindowSeconds) return;
+    if (rateReports >= 10 && rateCounts >= 2.0 * rateReports) reportRate = rateReports / rateSeconds;
+    rateSeconds = 0.0;
+    rateCounts = 0.0;
+    rateReports = 0;
+}
+
+double Pad::MouseStick::ReportRate() const {
+    return reportRate;
+}
+
+double Pad::MouseStick::SmoothingMs() const {
+    const double reports = reportRate > 0.0 ? std::min(MouseSmoothingReports * 1000.0 / reportRate, MouseSmoothingLimitMs) : 0.0;
+    return settings.mouseSmoothingMs > 0.0 ? std::max(settings.mouseSmoothingMs, reports) : 0.0;
 }
 
 void Pad::MouseStick::Advance(double seconds) {
@@ -23,13 +49,15 @@ void Pad::MouseStick::Advance(double seconds) {
     const double targetY = pendingY * scale * settings.mouseVerticalScale;
     pendingX = 0.0;
     pendingY = 0.0;
+    measureReportRate(step, moved);
     idleSeconds = moved ? 0.0 : idleSeconds + step;
     if (idleSeconds * 1000.0 >= settings.mouseDecayMs) {
         speedX = 0.0;
         speedY = 0.0;
         return;
     }
-    const double keep = settings.mouseSmoothingMs > 0.0 ? std::exp(-step * 1000.0 / settings.mouseSmoothingMs) : 0.0;
+    const double smoothing = SmoothingMs();
+    const double keep = smoothing > 0.0 ? std::exp(-step * 1000.0 / smoothing) : 0.0;
     speedX = targetX + (speedX - targetX) * keep;
     speedY = targetY + (speedY - targetY) * keep;
     const double speed = std::hypot(speedX, speedY);
@@ -43,6 +71,11 @@ void Pad::MouseStick::Reset() {
     pendingX = 0.0;
     pendingY = 0.0;
     pendingSeconds = 0.0;
+    pendingCounts = 0.0;
+    pendingReports = 0;
+    rateSeconds = 0.0;
+    rateCounts = 0.0;
+    rateReports = 0;
     speedX = 0.0;
     speedY = 0.0;
     idleSeconds = 0.0;
@@ -152,6 +185,7 @@ Pad::InputRequests Pad::KeyboardMouse::HandleEvent(const SDL_Event& event, Clock
             : binding.mouseButton != MouseButton::None && binding.mouseButton == static_cast<MouseButton>(event.button.button);
         if (!matches) continue;
         if (binding.control == InputControl::ToggleFullscreen && keyboard && down && !pressed[index]) requests.toggleFullscreen = true;
+        if (binding.control == InputControl::TogglePerformanceOverlay && keyboard && down && !pressed[index]) requests.togglePerformanceOverlay = true;
         if (binding.control == InputControl::ToggleMouse && down && !pressed[index]) requests.toggleMouse = true;
         pressed[index] = down;
     }
@@ -183,6 +217,7 @@ PadInputState Pad::KeyboardMouse::Compose(const PadInputState& controller) const
             case InputControl::TouchRight: state.touchRight = true; break;
             case InputControl::ToggleMouse: break;
             case InputControl::ToggleFullscreen: break;
+            case InputControl::TogglePerformanceOverlay: break;
         }
     }
     for (std::size_t axis = 0; axis < state.sticks.size(); ++axis) {

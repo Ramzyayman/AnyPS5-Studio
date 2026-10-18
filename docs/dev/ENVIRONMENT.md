@@ -65,6 +65,8 @@ The code reads environment names through `getenv`, `IsEnvironmentSet`, `kibSetti
 | Name | Kind | Source | Default | Description |
 |------|------|--------|---------|-------------|
 | `ANYPS5_GPU` | string | `core/libs/prx/libSceAgcDriver/Execution/src/VulkanDevice.cpp` |  | restricts physical device selection to device names containing this case-insensitive substring |
+| `ANYPS5_OVERLAY` | string | `core/libs/prx/libSceAgcDriver/Execution/src/PerformanceOverlay.cpp` | 0 | 1 shows the performance overlay; 0 or unset hides it, and any other value is refused |
+| `ANYPS5_OVERLAY_POS` | string | `core/libs/prx/libSceAgcDriver/Execution/src/PerformanceOverlay.cpp` | tl | the overlay's corner: tl, tr, bl or br |
 | `ANYPS5_PRESENT_MODE` | string | `core/libs/prx/libSceAgcDriver/Execution/src/VulkanDevice.cpp` | fifo | selects the swapchain present mode: fifo, fifo_latest_ready, mailbox or immediate |
 | `ANYPS5_REQUIRE_DESCRIPTOR_BINDING_FLAGS` | presence | `core/libs/prx/libSceAgcDriver/tests/ComputePipelineReplay.cpp` |  | fails the replay test instead of accepting a device that refuses descriptor binding flags |
 | `ANYPS5_REQUIRE_ROBUST2` | presence | `core/libs/prx/libSceAgcDriver/tests/execution/LdsMixedWidthAtomics.cpp` |  | fails the LDS lock-budget test when the device does not enable robustBufferAccess2, instead of only printing it |
@@ -113,6 +115,7 @@ The code reads environment names through `getenv`, `IsEnvironmentSet`, `kibSetti
 | `APS5_DRAW_KEY_ALL_USER_WORDS` | presence | `core/libs/prx/libSceAgcDriver/Execution/src/Driver/Draw/DrawRegisterKey.cpp` |  | includes all 32 user words in a draw's register key instead of the used count |
 | `APS5_DRAW_SNAPSHOT_MAX_MIB` | integer | `core/libs/prx/libSceAgcDriver/Graphics/src/ShaderResources.cpp` | 64 | upper bound in MiB on the snapshot bytes a draw's bindings may take |
 | `APS5_DRAW_TRANSITIONS` | presence | `core/libs/prx/libSceAgcDriver/Graphics/src/Draw.cpp` |  | keeps the per-draw upload and download barriers and layout transitions instead of the lean recorded path |
+| `APS5_DRAW_UPLOAD_MAX` | integer | `core/libs/prx/libSceAgcDriver/Graphics/src/ShaderResources.cpp` | 4096 | largest draw snapshot in bytes copied into the per-recorder upload chunk; 0 turns the chunk off |
 | `APS5_DUMP_COMPUTE_MIN_WORDS` | integer | `core/libs/prx/libSceAgcDriver/Execution/src/VulkanDevice.cpp` |  | only captures compute pipelines whose SPIR-V has at least this many words |
 | `APS5_DUMP_COMPUTE_PIPELINES` | string | `core/libs/prx/libSceAgcDriver/Execution/src/VulkanDevice.cpp` |  | directory in which captured compute pipelines are written |
 | `APS5_DUMP_DRAW_SHADERS` | integer | `core/libs/prx/libSceAgcDriver/Execution/src/Driver/Draw/Draw.cpp` | 0 | hex color-target or slot-0 address whose draw's shaders are dumped |
@@ -338,7 +341,7 @@ The code reads environment names through `getenv`, `IsEnvironmentSet`, `kibSetti
 | `APS5_SPANNED_WAVE` | presence | `core/libs/prx/libSceAgcDriver/Execution/src/VulkanDevice.cpp` |  | spans a single-wave wave64 compute program over two full 32-lane subgroups |
 | `APS5_SPIRV_OPT` | string | `core/libs/prx/libSceAgcDriver/tests/SpirvOptimizer.cpp` |  | selects the SPIR-V optimization pipeline: `full` restores the performance pipeline, `none` skips optimization |
 | `APS5_SRGB_ATTACHMENT_PROXY` | string | `core/libs/prx/libSceAgcDriver/Graphics/src/Texture.cpp` |  | forces the sRGB color-attachment proxy format; `1` forces it |
-| `APS5_SRGB_SHADER_DECODE` | presence | `core/libs/prx/libSceAgcDriver/Graphics/src/TextureFormat.cpp` |  | forces shader sRGB decode for the sRGB 8-bit formats |
+| `APS5_SRGB_SHADER_DECODE` | presence | `core/libs/prx/libSceAgcDriver/Graphics/src/TextureFormat.cpp` |  | `1` forces shader sRGB decode for the sRGB 8-bit formats; `copy` does the same, except that 8 and 8_8 sRGB sample an RGBA8 sRGB copy when the device can blit to RGBA8 |
 | `APS5_STAGING_POOL_MIB` | integer | `core/libs/prx/libSceAgcDriver/Graphics/src/BufferPool.cpp` |  | size in MiB of the device-local staging buffer pool; `0` disables the device tier |
 | `APS5_STALE_EVICT` | presence | `core/libs/prx/libSceAgcDriver/Graphics/src/Texture.cpp` |  | also evicts a proved-present dead image's pending layers on an access |
 | `APS5_STALL_WATCHDOG_SECS` | integer | `core/libs/prx/libSceAgcDriver/Execution/src/Driver/Queues/SubmissionRing.cpp` | 0 | seconds a queue may go without progress before the submission rings are dumped; 0 disables the watchdog, at most 86400 |

@@ -56,6 +56,7 @@ public:
     static std::uint32_t RuntimeImageMode(const ImageResource& image, const DescriptorValue& descriptor, std::span<const ImageResource> modes);
     static void PrepareImageModes(ShaderInfo& info);
     static const char* UnnormalizedSampleMismatch(const ImageResource& image);
+    static bool NullImageDescriptor(const ImageResource& image, const DescriptorValue& descriptor);
     static ResolvedImageTables ResolveImageTables(const ShaderInfo& info, const ResourceSnapshot& snapshot, std::uint64_t memoKey = 0);
     [[nodiscard]] IrResourcePlan ExtractPlan(const IrProgram& program) const;
     static void CompactPlan(IrResourcePlan& plan);

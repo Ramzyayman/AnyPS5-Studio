@@ -797,6 +797,7 @@ DecodedColorFormat DecodeColorFormat(std::uint32_t format, std::uint32_t number,
             const auto mapping = static_cast<std::uint8_t>(alternate ? 0xecu : 0xe4u);
             if (number == unorm) return {VK_FORMAT_R8G8_UNORM, 2, mapping};
             if (number == snorm) return {VK_FORMAT_R8G8_SNORM, 2, mapping};
+            if (number == uint) return {VK_FORMAT_R8G8_UINT, 2, mapping};
             return fail();
         }
         case 4:
@@ -1114,9 +1115,20 @@ State DecodeState(const QueueState& queue, bool vertexWorkgroup) {
     }
     const bool depthKeepsSampleZero = result.depth && result.depth->samples == 1 && result.samples > 1;
     zero(cx, 0x292, ScanModeMask & ~1u, "scan conversion mode");
+    if (depthKeepsSampleZero && (read(cx, 0x292) & 1u) == 0) {
+        const bool filled = result.topology != VK_PRIMITIVE_TOPOLOGY_POINT_LIST && result.topology != VK_PRIMITIVE_TOPOLOGY_LINE_LIST && result.topology != VK_PRIMITIVE_TOPOLOGY_LINE_STRIP;
+        const auto sampleInputs = read(cx, 0x1b3) & read(cx, 0x1b4) & (ShaderRecompiler::PixelInputBit(ShaderRecompiler::PixelInput::Ancillary) | ShaderRecompiler::PixelInputBit(ShaderRecompiler::PixelInput::SampleCoverage));
+        Require(filled && !result.alphaToCoverage && (PixelProgramSkipped(queue) || ((read(cx, 0x293) & PixelShaderIteratesSamples) == 0 && sampleInputs == 0)) && (read(cx, 0x203) & 0x100u) == 0 && (read(cx, 0x201) & 0x0f0c0000u) == 0, "a one-sample depth target under a multisampled rasterizer without MSAA_ENABLE is unsupported for points or lines and with alpha-to-coverage, PS_ITER_SAMPLE, a sample index or coverage input, a sample-mask export, or DB_EQAA Z interpolation or overrasterization");
+        result.samples = 1;
+        result.customSampleLocations = false;
+        result.sampleLocations.fill(0);
+        result.sampleLocationGrid = false;
+    }
     if (result.samples > 1 && (read(cx, 0x292) & 1u) == 0) {
         const bool filled = result.topology != VK_PRIMITIVE_TOPOLOGY_POINT_LIST && result.topology != VK_PRIMITIVE_TOPOLOGY_LINE_LIST && result.topology != VK_PRIMITIVE_TOPOLOGY_LINE_STRIP;
-        Require(filled && !result.depth && !result.alphaToCoverage, "multisampled targets rasterized without MSAA_ENABLE are unsupported for points, lines, a depth target or alpha-to-coverage");
+        Require(filled && !result.alphaToCoverage, "multisampled targets rasterized without MSAA_ENABLE are unsupported for points, lines or alpha-to-coverage");
+        if (const auto eqaa = find(cx, 0x201); result.depth && eqaa != cx.end() && (eqaa->second & 0x0f0c0000u) != 0) throw std::runtime_error(zeroMessage(0x201, eqaa->second, "a multisampled depth target rasterized without MSAA_ENABLE with Z interpolation or overrasterization (DB_EQAA)"));
+        if (const auto control = find(cx, 0x203); result.depth && control != cx.end() && (control->second & 0x100u) != 0) throw std::runtime_error(zeroMessage(0x203, control->second, "a multisampled depth target rasterized without MSAA_ENABLE with a sample-mask export"));
         result.customSampleLocations = true;
         result.sampleLocations.fill(0);
         result.sampleLocationGrid = false;
@@ -1127,7 +1139,7 @@ State DecodeState(const QueueState& queue, bool vertexWorkgroup) {
     }
     zero(cx, 0x293, ScanControlMask, "primitive discard or out-of-order rasterization");
     result.perSampleShading = result.samples > 1 && (read(cx, 0x293) & PixelShaderIteratesSamples) != 0;
-    if (depthKeepsSampleZero) {
+    if (depthKeepsSampleZero && result.samples > 1) {
         Require(rasterizesSampleZeroOnly(cx, result), "the depth target's sample count differs from the rasterizer's");
         rasterizeSampleZero(result);
     }
@@ -1199,6 +1211,12 @@ State DecodeState(const QueueState& queue, bool vertexWorkgroup) {
         if (slotExport == 7 && ((read(cx, 0x31c + slot * 0xfu) >> 8u) & 7u) != 4u) throw std::runtime_error("AGC graphics: color export format 7 (UINT16_ABGR) into a target that is not unsigned integer is unsupported");
         color.exportIndex = index;
         color.uintExport = slotExport == 7;
+        if (color.samples == 1 && result.samples > 1 && result.colors.empty() && !result.depth && (read(cx, 0x292) & 1u) == 0) {
+            const auto sampleInputs = read(cx, 0x1b3) & read(cx, 0x1b4) & (ShaderRecompiler::PixelInputBit(ShaderRecompiler::PixelInput::Ancillary) | ShaderRecompiler::PixelInputBit(ShaderRecompiler::PixelInput::SampleCoverage));
+            Require(!result.perSampleShading && sampleInputs == 0 && (read(cx, 0x203) & 0x100u) == 0, "a one-sample color target under a multisampled rasterizer without MSAA_ENABLE is unsupported with PS_ITER_SAMPLE, a sample index or coverage input, or a sample-mask export");
+            result.samples = 1;
+            result.customSampleLocations = false;
+        }
         if (color.samples > 1 && result.samples == 1 && result.colors.empty() && !result.depth && !result.alphaToCoverage && (read(cx, 0x292) & 1u) == 0) {
             result.samples = color.samples;
             result.customSampleLocations = true;

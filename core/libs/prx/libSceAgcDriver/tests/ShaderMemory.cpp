@@ -1799,6 +1799,116 @@ void verifyImageTableUnkeyedAccess() {
     }
 }
 
+struct TableManyGuest {
+    std::array<std::array<std::uint32_t, 8>, 128> heap{};
+    std::array<std::uint32_t, 4> output{};
+    std::array<std::uint32_t, 128> srt{};
+};
+
+constexpr std::uint32_t TableManyDirectWord = 96u;
+constexpr std::uint32_t TableManyExtraSamplerWord = 112u;
+
+std::vector<std::uint32_t> TableManyKeyCode(std::uint32_t first, std::uint32_t second, bool twoSamplers, std::uint32_t direct = 0u, bool extraSampler = false) {
+    std::vector<std::uint32_t> code{0xf4080100u, 0xfa000000u, 0xf4080200u, 0xfa000010u, 0xf4080300u, 0xfa000020u, 0xf4080700u, 0xfa000030u, 0xf4080a00u, 0xfa000040u, 0x7e100280u};
+    for (std::uint32_t image = 0; image < direct; image++) code.insert(code.end(), {0xf40c0000u | ((44u + image * 8u) << 6u), 0xfa000000u | ((TableManyDirectWord + image * 8u) * 4u)});
+    if (extraSampler) code.insert(code.end(), {0xf4080f00u, 0xfa000000u | (TableManyExtraSamplerWord * 4u)});
+    for (std::uint32_t read = 0; read < first + second; read++) {
+        code.insert(code.end(), {0xf4000400u, 0xfa000050u + read * 4u, 0x8f108510u, read < first ? 0xf42c0502u : 0xf42c0514u, 0x20000000u, 0xf09c0f08u, 0x00450400u, 0x06100908u});
+        if (twoSamplers) code.insert(code.end(), {0xf09c0f08u, 0x00650400u, 0x06100908u});
+    }
+    for (std::uint32_t image = 0; image < direct; image++) {
+        const auto resource = ((44u + image * 8u) / 4u) << 16u;
+        code.insert(code.end(), {0xf09c0f08u, 0x00400400u | resource, 0x06100908u});
+        if (twoSamplers) code.insert(code.end(), {0xf09c0f08u, 0x00600400u | resource, 0x06100908u});
+        if (extraSampler && image + 1u == direct) code.insert(code.end(), {0xf09c0f08u, 0x01e00400u | resource, 0x06100908u});
+    }
+    code.insert(code.end(), {0xe0700000u, 0x80070800u, 0xbf810000u});
+    return code;
+}
+
+void verifySelectedRecordsWithinLimits(bool pairs, bool direct) {
+    using namespace ShaderRecompiler;
+    namespace Abi = ImageTableAbi;
+    static TableTexture textures[4];
+    alignas(4096) static TableManyGuest guest;
+    auto& heap = guest.heap;
+    for (std::uint32_t record = 0; record < heap.size(); record++) heap[record] = TableT(textures[record % 4u].bytes.data(), TableFormat8888UNorm, TableType2D, record + 1u);
+    const auto heapV = TableV(heap.data(), 32u, static_cast<std::uint32_t>(heap.size()));
+    const auto outputV = TableV(guest.output.data(), 0u, 16u);
+    guest.srt = {};
+    std::copy(heapV.begin(), heapV.end(), guest.srt.begin());
+    guest.srt[8] = 0x92u;
+    std::copy(outputV.begin(), outputV.end(), guest.srt.begin() + 12);
+    std::copy(heapV.begin(), heapV.end(), guest.srt.begin() + 16);
+    for (std::uint32_t read = 0; read + 20u < guest.srt.size(); read++) guest.srt[20u + read] = read + 2u;
+    for (std::uint32_t image = 0; image < 2u; image++) {
+        const auto direct = TableT(textures[image].bytes.data(), TableFormat8888UNorm, TableType2D, 200u + image);
+        std::copy(direct.begin(), direct.end(), guest.srt.begin() + TableManyDirectWord + image * 8u);
+    }
+    guest.srt[TableManyExtraSamplerWord] = 0x91u;
+    const auto address = static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(guest.srt.data()));
+    const std::array<std::uint32_t, 2> userData{static_cast<std::uint32_t>(address), static_cast<std::uint32_t>(address >> 32u)};
+    const auto columnOf = [](const IrResourcePlan& plan, const ImageResource& image) { return *plan.descriptorSources.at(image.source).tableColumn; };
+    const auto selectedTables = [&](const IrResourcePlan& plan) {
+        return static_cast<std::uint32_t>(std::count_if(plan.info.images.begin(), plan.info.images.end(), [&](const ImageResource& image) { return image.table != NoTable && columnOf(plan, image).selected; }));
+    };
+    const std::string name = pairs ? "selected records within the pair limit" : "selected records within the image limit";
+    const std::uint32_t limit = pairs ? ShaderInfo::MaxSampledPairs / 2u : ShaderInfo::MaxImages;
+    const auto outside = Abi::PoisonCode(static_cast<std::uint32_t>(Abi::PoisonReason::OutsideDomain));
+    if (direct) {
+        const auto directImages = [&](const IrResourcePlan& plan) {
+            return static_cast<std::uint32_t>(std::count_if(plan.info.images.begin(), plan.info.images.end(), [](const ImageResource& image) { return image.table == NoTable; }));
+        };
+        const auto reads = limit - 1u;
+        const auto fittingDirectCode = TableManyKeyCode(reads, 0u, pairs, 1u);
+        const auto fittingDirect = GetResourcePlan(TableRequest(fittingDirectCode, userData));
+        const auto describe = [&](const IrResourcePlan& plan) {
+            return std::to_string(plan.info.images.size()) + " images (" + std::to_string(selectedTables(plan)) + " selected tables, " + std::to_string(directImages(plan)) + " direct), " + std::to_string(plan.info.sampledPairs.size()) + " pairs";
+        };
+        require(fittingDirect->info.images.size() == limit && selectedTables(*fittingDirect) == reads && directImages(*fittingDirect) == 1u && fittingDirect->info.sampledPairs.size() == (pairs ? 2u : 1u) * limit, (name + ": selected reads and a direct image that fit lost the per-key split").c_str());
+        std::cout << name << ": " << reads << " selected reads and 1 direct image" << (pairs ? ", each with 2 samplers" : "") << ": " << describe(*fittingDirect) << '\n';
+        const auto pastDirectCode = TableManyKeyCode(reads, 0u, pairs, pairs ? 1u : 2u, pairs);
+        const auto pastDirectRequest = TableRequest(pastDirectCode, userData);
+        const auto pastDirect = GetResourcePlan(pastDirectRequest);
+        const auto mergedDirect = std::find_if(pastDirect->info.images.begin(), pastDirect->info.images.end(), [](const ImageResource& image) { return image.table != NoTable; });
+        require(pastDirect->info.images.size() == (pairs ? 2u : 3u) && selectedTables(*pastDirect) == 0u && directImages(*pastDirect) == (pairs ? 1u : 2u) && pastDirect->info.sampledPairs.size() == (pairs ? 5u : 3u) && mergedDirect != pastDirect->info.images.end(), (name + ": selected reads that the direct " + (pairs ? "sampler" : "images") + " push past the limit were not merged into one table").c_str());
+        const auto mergedColumn = columnOf(*pastDirect, *mergedDirect);
+        require(!mergedColumn.selected && mergedColumn.selection == 0u && !mergedColumn.unkeyed && mergedColumn.keyDomains.size() == reads, (name + ": the table merged beside the direct " + (pairs ? "sampler" : "images") + " is not the union of the keys").c_str());
+        const auto compiledDirect = CompileTable(pastDirectRequest);
+        const auto& directTables = compiledDirect.capture->snapshot.tables;
+        require(directTables.tables.size() == 1u, (name + ": the snapshot beside the direct " + (pairs ? "sampler" : "images") + " does not hold one table").c_str());
+        const auto& directSnapshot = directTables.tables[mergedDirect->table];
+        for (const auto key : {2u, 2u + reads / 2u, 1u + reads}) {
+            require(key < directSnapshot.codes.size() && (directSnapshot.codes[key] & Abi::PoisonFlag) == 0u && directTables.words.at(directSnapshot.codes[key]).dwords == heap[key], (name + ": a key beside the direct " + (pairs ? "sampler" : "images") + " does not bind its record").c_str());
+        }
+        require(directSnapshot.codes.at(1) == outside && directSnapshot.codes.at(reads + 2u) == outside, (name + ": a key no read selects was bound beside the direct " + (pairs ? "sampler" : "images")).c_str());
+        std::cout << name << ": " << reads << " selected reads and " << (pairs ? "1 direct image with a third sampler" : "2 direct images") << ": " << describe(*pastDirect) << ", the reads merged into one table with " << mergedColumn.keyDomains.size() << " key domains\n";
+        return;
+    }
+    const auto fitting = TableManyKeyCode(limit, 0u, pairs);
+    const auto atLimit = GetResourcePlan(TableRequest(fitting, userData));
+    require(atLimit->info.images.size() == limit && selectedTables(*atLimit) == limit && atLimit->info.sampledPairs.size() == (pairs ? 2u : 1u) * limit, (name + ": reads that fit lost the per-key split").c_str());
+    const auto past = TableManyKeyCode(limit + 1u, 0u, pairs);
+    const auto request = TableRequest(past, userData);
+    const auto plan = GetResourcePlan(request);
+    require(plan->info.images.size() == 1u && plan->info.images[0].table == 0u && plan->info.sampledPairs.size() == (pairs ? 2u : 1u), (name + ": reads past the limit were not merged into one table").c_str());
+    const auto merged = columnOf(*plan, plan->info.images[0]);
+    require(!merged.selected && merged.selection == 0u && !merged.unkeyed && merged.keyDomains.size() == limit + 1u, (name + ": the merged table is not the union of the keys").c_str());
+    const auto compiled = CompileTable(request);
+    const auto& tables = compiled.capture->snapshot.tables;
+    require(tables.tables.size() == 1u, (name + ": the snapshot does not hold one table").c_str());
+    const auto& snapshot = tables.tables[0];
+    for (const auto key : {2u, 2u + limit / 2u, 2u + limit}) {
+        require(key < snapshot.codes.size() && (snapshot.codes[key] & Abi::PoisonFlag) == 0u && tables.words.at(snapshot.codes[key]).dwords == heap[key], (name + ": a key does not bind its record").c_str());
+    }
+    require(snapshot.codes.at(1) == outside && snapshot.codes.at(limit + 3u) == outside, (name + ": a key no read selects was bound").c_str());
+    if (pairs) return;
+    const auto split = TableManyKeyCode(40u, 30u, false);
+    const auto twoHeaps = GetResourcePlan(TableRequest(split, userData));
+    const auto unselected = std::find_if(twoHeaps->info.images.begin(), twoHeaps->info.images.end(), [&](const ImageResource& image) { return !columnOf(*twoHeaps, image).selected; });
+    require(twoHeaps->info.images.size() == 31u && selectedTables(*twoHeaps) == 30u && unselected != twoHeaps->info.images.end() && columnOf(*twoHeaps, *unselected).keyDomains.size() == 40u, (name + ": the larger heap was not merged first, or the smaller one lost its split").c_str());
+}
+
 void verifyImageTableSrtKey() {
     using namespace ShaderRecompiler;
     namespace Abi = ImageTableAbi;
@@ -4507,7 +4617,7 @@ void verifySpecializedBufferAtomicBindings() {
     }
     require(!physical, "specialized buffer atomic: the module addresses physical storage without an address access");
     require(int64, "specialized buffer atomic: the fault address is 64-bit and the module does not declare Int64");
-    require(faultFunction != 0 && faultCalls == 1, "specialized buffer atomic: an unaligned atomic does not record exactly one fault");
+    require(faultCalls == 0, "specialized buffer atomic: a 32-bit atomic records an unaligned fault instead of acting on its dword");
     const std::array<std::uint32_t, 1> shaderOnly{spv::CapabilityShader};
     expectFailure([&] { static_cast<void>(compile(shaderOnly)); }, "buffer atomic fault addresses require shaderInt64", "specialized buffer atomic: the program compiled without shaderInt64");
 }
@@ -4878,6 +4988,47 @@ void verifyUnnormalizedSamplers() {
         cursor += count;
     }
     require(proven(pixelOffsetNormalized, false) && implicitMasks.size() == 1u && (implicitMasks[0] & (spv::ImageOperandsConstOffsetMask | spv::ImageOperandsOffsetMask)) != 0u, "unnormalized texel offsets: a normalized pixel image_sample_o is not an implicit-LOD sample with its offset");
+}
+
+void verifyNullVolumeUnnormalizedSampler() {
+    using namespace ShaderRecompiler;
+    ImageResource volume{};
+    volume.resourceClass = ImageResourceClass::Sampled;
+    volume.numericClass = IrTextureNumericClass::Float;
+    volume.dimension = RdnaImageDimension::Dim3D;
+    volume.read = true;
+    ImageResource plane = volume;
+    plane.dimension = RdnaImageDimension::Dim2D;
+    SamplerResource sampler{};
+    sampler.uses = SamplerUseExplicitLod;
+    const DescriptorValue nullDescriptor{{0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u}, 8u};
+    const DescriptorValue volumeDescriptor{{0x00001000u, 0x03800000u, 0x0000c000u, 0xa0000facu, 3u, 0u, 0u, 0u}, 8u};
+    const DescriptorValue planeDescriptor{{0x00002000u, 0x03800000u, 0x0000c000u, 0x90000facu, 0u, 0u, 0u, 0u}, 8u};
+    const DescriptorValue unnormalized{{0x00008092u, 0x00fff000u, 0x02500000u, 0u}, 4u};
+    const auto populate = [&](std::vector<ImageResource> images, std::vector<DescriptorValue> descriptors) {
+        ShaderInfo info;
+        info.images = images;
+        info.samplers = {sampler};
+        for (std::uint32_t index = 0; index < images.size(); ++index) {
+            info.sampledPairs.push_back({index, 0u, 0u});
+            info.runtimeImageModes.push_back(ResourceMaterializer::RuntimeImageModes(images[index]));
+        }
+        ResourceSnapshot snapshot;
+        snapshot.images = descriptors;
+        snapshot.samplers = {unnormalized};
+        BindingAllocationResult allocation;
+        for (std::uint32_t index = 0; index < images.size(); ++index) allocation.layout.descriptors.push_back({DescriptorBindingForImage(images[index]), {index}});
+        allocation.layout.descriptors.push_back({DescriptorBindingKind::Samplers, {0u}});
+        DescriptorBindingBuilder{}.Populate(allocation, info, IrShaderStage::Compute, 0u, snapshot, {});
+        return allocation.bindings.back();
+    };
+    const auto nullOnly = populate({volume}, {nullDescriptor});
+    require(nullOnly.samplerUnnormalized == std::vector<bool>{false} && nullOnly.samplerCoordinatesIgnored == std::vector<bool>{true}, "unnormalized samplers: an S# paired only with a null 3D T# was refused or kept its unnormalized coordinates");
+    const DescriptorValue zeroSwizzle{{0x00003000u, 0x00100000u, 0u, 0xa0000000u, 0u, 0u, 0u, 0u}, 8u};
+    const auto constantAndNull = populate({volume, volume}, {zeroSwizzle, nullDescriptor});
+    require(constantAndNull.samplerUnnormalized == std::vector<bool>{false} && constantAndNull.samplerCoordinatesIgnored == std::vector<bool>{true}, "unnormalized samplers: an S# paired with a null 3D T# and a 3D T# whose channels all select constants was refused or kept its unnormalized coordinates");
+    expectFailure([&] { static_cast<void>(populate({volume}, {volumeDescriptor})); }, "samples a 1D-array, 2D-array, 3D, cube or multisampled image", "unnormalized samplers: a 3D T# was accepted");
+    expectFailure([&] { static_cast<void>(populate({volume, plane}, {nullDescriptor, planeDescriptor})); }, "samples a 1D-array, 2D-array, 3D, cube or multisampled image", "unnormalized samplers: an S# shared by a null 3D T# and a 2D T# was accepted");
 }
 
 void verifyUnusedUnnormalizedSampler() {
@@ -5951,6 +6102,11 @@ void verifySrgbDepthCompareModes() {
 
 int main(int argc, char** argv) {
     try {
+#ifdef _WIN32
+        _putenv_s("ANYPS5_NO_SHADER_CACHE", "1");
+#else
+        setenv("ANYPS5_NO_SHADER_CACHE", "1", 1);
+#endif
         using namespace ShaderRecompiler;
         if (argc == 2 && std::string_view(argv[1]) == "--quad-mask-no-demote") {
             verifyQuadMaskNeighbourReads();
@@ -5994,6 +6150,26 @@ int main(int argc, char** argv) {
             verifySelectedRecordUniformIndex();
             verifyChainedTableOffset();
             std::cout << "Image table keys, maps, records and registration passed\n";
+            return 0;
+        }
+        if (argc == 2 && std::string_view(argv[1]) == "--selected-records-image-limit") {
+            verifySelectedRecordsWithinLimits(false, false);
+            std::cout << "Selected image-table records past the image limit merge back into one table per heap\n";
+            return 0;
+        }
+        if (argc == 2 && std::string_view(argv[1]) == "--selected-records-pair-limit") {
+            verifySelectedRecordsWithinLimits(true, false);
+            std::cout << "Selected image-table records past the sampled pair limit merge back into one table per heap\n";
+            return 0;
+        }
+        if (argc == 2 && std::string_view(argv[1]) == "--selected-records-direct-image-limit") {
+            verifySelectedRecordsWithinLimits(false, true);
+            std::cout << "Direct images count toward the image limit beside selected image-table records\n";
+            return 0;
+        }
+        if (argc == 2 && std::string_view(argv[1]) == "--selected-records-direct-pair-limit") {
+            verifySelectedRecordsWithinLimits(true, true);
+            std::cout << "Direct samplers count toward the sampled pair limit beside selected image-table records\n";
             return 0;
         }
         if (argc == 2 && std::string_view(argv[1]) == "--srt-read-patching") {
@@ -6051,6 +6227,7 @@ int main(int argc, char** argv) {
         verifyCoherentBufferAccesses();
         verifyUnnormalizedSamplers();
         verifyUnusedUnnormalizedSampler();
+        verifyNullVolumeUnnormalizedSampler();
         verifyWaveUniformValues();
         verifyTwoLaneUniformValues();
         verifyBdaReadFallbackFunctions();
