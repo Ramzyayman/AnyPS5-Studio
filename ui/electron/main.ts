@@ -1377,22 +1377,6 @@ function fixGameHierarchyInPlace(
     fs.mkdirSync(sceModuleDir, { recursive: true });
   }
 
-  // Ensure conflicting system library stubs (like libc.prx or libkernel.prx) in sce_module are isolated to module_backups
-  const targetModuleDir = hasSingular ? sceModuleDir : (hasPlural ? sceModulesDir : (hasPrx ? prxDir : sceModuleDir));
-  for (const sysLib of ['libc.prx', 'libkernel.prx', 'libSceLibcInternal.prx']) {
-    const activeSysPrx = path.join(targetModuleDir, sysLib);
-    if (fs.existsSync(activeSysPrx)) {
-      const backupSysDir = path.join(targetModuleDir, 'module_backups');
-      if (!fs.existsSync(backupSysDir)) fs.mkdirSync(backupSysDir, { recursive: true });
-      const dst = path.join(backupSysDir, sysLib);
-      try {
-        if (fs.existsSync(dst)) fs.unlinkSync(dst);
-        fs.renameSync(activeSysPrx, dst);
-        sendLog(`[AnyPS5] Isolated conflicting system library "${sysLib}" from guest module directory to module_backups/`, 'info');
-      } catch {}
-    }
-  }
-
   // Check if existing executable or guest modules rely on guest libc.prx.guest.prx (backward compatibility)
   const targetExeName = getDefaultOutputExecutableName();
   const candidateExes = [
@@ -1440,6 +1424,15 @@ function fixGameHierarchyInPlace(
         } catch {}
       }
     }
+  }
+
+  // Ensure all module directories, app0, and root are sanitized for backup artifacts (.bak_*), non-shared ELFs, and conflicting system stubs
+  const targetModuleDir = hasSingular ? sceModuleDir : (hasPlural ? sceModulesDir : (hasPrx ? prxDir : sceModuleDir));
+  if (fs.existsSync(targetModuleDir)) {
+    sanitizeModuleDirectory(targetModuleDir, inputElf, sendLog, knownSystemLibs, needsGuestLibc);
+  }
+  if (fs.existsSync(app0Dir)) {
+    sanitizeModuleDirectory(app0Dir, inputElf, sendLog, knownSystemLibs, needsGuestLibc);
   }
 
   // Clean up any stale guest system library artifacts that conflict with AnyPS5 native translations
@@ -1548,7 +1541,16 @@ function fixGameHierarchyInPlace(
           }
         } else if (stat.isFile()) {
           const lower = entry.toLowerCase();
-          if (lower.endsWith('.prx') || lower.endsWith('.sprx')) {
+          if (
+            lower.endsWith('.prx') ||
+            lower.endsWith('.sprx') ||
+            lower.includes('.prx.') ||
+            lower.includes('.sprx.') ||
+            lower.includes('.bak') ||
+            lower.includes('.esbak') ||
+            lower.includes('.old') ||
+            lower.includes('.orig')
+          ) {
             prxFiles.push(entry);
           }
         }
