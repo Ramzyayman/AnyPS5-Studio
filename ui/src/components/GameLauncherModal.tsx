@@ -184,6 +184,7 @@ export const GameLauncherModal: React.FC<GameLauncherModalProps> = ({
           isRelinkHint: false,
         });
       }
+      setShowTechnicalDetails(true);
       audioService.playCancel();
     }
   }, []);
@@ -198,6 +199,7 @@ export const GameLauncherModal: React.FC<GameLauncherModalProps> = ({
     setLaunchState('launching');
     setStatusMessage('Starting native 64-bit executable...');
     setErrorMessage(null);
+    setDetectedAbortReason(null);
     setExitCode(null);
     setExitCodeHex(null);
     setElapsedSeconds(0);

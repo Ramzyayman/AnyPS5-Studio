@@ -1635,9 +1635,6 @@ ipcMain.handle('anyps5:run-relinker', async (_, { game, options }) => {
     if (options.cpuTranslation === 'intel') args.push('--to-intel');
     if (options.cpuTranslation === 'rosetta') args.push('--to-rosetta');
     if (isWindows && options.traceImports) args.push('--trace-imports');
-    if (isLinux) {
-      args.push('--rpath', '$ORIGIN/libs');
-    }
 
     // Register all discovered guest module directories (e.g. games, Media/Plugins, etc.)
     for (const modDir of moduleDirs) {
@@ -1701,8 +1698,22 @@ ipcMain.handle('anyps5:run-relinker', async (_, { game, options }) => {
           if (process.platform !== 'win32') {
             try {
               fs.chmodSync(targetOutputExe, 0o755);
+              const makeExecutable = (dir: string) => {
+                if (!fs.existsSync(dir)) return;
+                const entries = fs.readdirSync(dir, { withFileTypes: true });
+                for (const e of entries) {
+                  const full = path.join(dir, e.name);
+                  if (e.isDirectory()) {
+                    makeExecutable(full);
+                  } else if (e.isFile() && (e.name.endsWith('.prx') || e.name.endsWith('.so') || e.name.endsWith('.elf'))) {
+                    try { fs.chmodSync(full, 0o755); } catch {}
+                  }
+                }
+              };
+              makeExecutable(path.join(gameDir, 'libs'));
+              makeExecutable(path.join(gameDir, 'app0'));
             } catch (chmodErr) {
-              console.warn('Failed to chmod output executable:', chmodErr);
+              console.warn('Failed to chmod output executable/libraries:', chmodErr);
             }
           }
 
@@ -1776,10 +1787,11 @@ ipcMain.handle('anyps5:launch-game', async (_, game) => {
     });
   };
 
+  let hierarchyResult: { gameDir: string; inputElf: string; outputExe: string; moduleDirs: string[] } | null = null;
   try {
     sendLog(`[AnyPS5] Launching native ported executable: ${game.path}/${game.executableName || getDefaultOutputExecutableName()}`);
     sendLog(`[AnyPS5] Checking runtime layout: libs/ system PRX and app0/ guest filesystem...`);
-    fixGameHierarchyInPlace(game.path, sendLog, 'launch');
+    hierarchyResult = fixGameHierarchyInPlace(game.path, sendLog, 'launch');
   } catch (err: any) {
     console.error('Launch hierarchy check error:', err);
     sendLog(`[AnyPS5 Warning] Hierarchy check: ${err?.message || err}`, 'warn');
@@ -1813,6 +1825,20 @@ ipcMain.handle('anyps5:launch-game', async (_, game) => {
   if (process.platform !== 'win32') {
     try {
       fs.chmodSync(targetExe, 0o755);
+      const makeExecutable = (dir: string) => {
+        if (!fs.existsSync(dir)) return;
+        const entries = fs.readdirSync(dir, { withFileTypes: true });
+        for (const e of entries) {
+          const full = path.join(dir, e.name);
+          if (e.isDirectory()) {
+            makeExecutable(full);
+          } else if (e.isFile() && (e.name.endsWith('.prx') || e.name.endsWith('.so') || e.name.endsWith('.elf'))) {
+            try { fs.chmodSync(full, 0o755); } catch {}
+          }
+        }
+      };
+      makeExecutable(path.join(game.path, 'libs'));
+      makeExecutable(path.join(game.path, 'app0'));
     } catch (chmodErr) {
       console.warn('Failed to chmod target executable before launch:', chmodErr);
     }
@@ -1848,13 +1874,35 @@ ipcMain.handle('anyps5:launch-game', async (_, game) => {
       childEnv.ANYPS5_GPU = gpuToUse;
     }
 
+    const gpus = detectAvailableGpus();
+    const isVmEnvironment = gpus.some((g) => g.isVirtual) ||
+      Boolean(process.env.VAGRANT) ||
+      Boolean(process.env.container) ||
+      Boolean(process.env.VMWARE) ||
+      (process.platform === 'linux' && (
+        fs.existsSync('/sys/class/dmi/id/product_name') &&
+        ['vmware', 'virtualbox', 'kvm', 'qemu'].some((v) => {
+          try {
+            return fs.readFileSync('/sys/class/dmi/id/product_name', 'utf8').toLowerCase().includes(v);
+          } catch {
+            return false;
+          }
+        })
+      ));
+
+    if (isVmEnvironment) {
+      childEnv.APS5_NO_WRITE_WATCH = '1';
+      sendLog('[AnyPS5 Environment] Virtualized graphics/environment detected: enabled APS5_NO_WRITE_WATCH=1 for guest stability', 'info');
+    }
+
     // Prepend application root, libs/, and app0/ to PATH and LD_LIBRARY_PATH so child processes and loaders locate all dependencies
-    const runtimeDirs = [
+    const runtimeDirs = Array.from(new Set([
       game.path,
       path.join(game.path, 'libs'),
       path.join(game.path, 'app0'),
       path.join(game.path, 'app0', 'sce_module'),
-    ];
+      ...(hierarchyResult?.moduleDirs || []).map((d) => path.join(game.path, 'app0', d)),
+    ]));
     if (process.platform === 'win32') {
       const existingPath = childEnv.Path || childEnv.PATH || '';
       const newPath = runtimeDirs.join(';') + (existingPath ? ';' + existingPath : '');
