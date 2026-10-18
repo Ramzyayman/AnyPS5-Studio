@@ -17,6 +17,7 @@
 #include <span>
 #include <array>
 #include <sstream>
+#include <string_view>
 
 namespace AgcDriver::Graphics {
 namespace {
@@ -48,6 +49,25 @@ std::string zeroMessage(std::uint32_t offset, std::uint32_t value, const char* n
     char detail[64];
     std::snprintf(detail, sizeof(detail), " (register 0x%x = 0x%08x)", offset, value);
     return std::string(name) + " is unsupported" + detail;
+}
+
+std::string tessellationMessage(std::uint32_t config, std::uint32_t parameters, const ShaderRecompiler::TessellationConfiguration& tess) {
+    static constexpr std::array<std::string_view, 3> Types{"TESS_ISOLINE", "TESS_TRIANGLE", "TESS_QUAD"};
+    static constexpr std::array<std::string_view, 4> Partitionings{"PART_INTEGER", "PART_POW2", "PART_FRAC_ODD", "PART_FRAC_EVEN"};
+    static constexpr std::array<std::string_view, 4> Topologies{"OUTPUT_POINT", "OUTPUT_LINE", "OUTPUT_TRIANGLE_CW", "OUTPUT_TRIANGLE_CCW"};
+    std::ostringstream message;
+    const auto field = [&](std::string_view name, std::uint32_t value, std::span<const std::string_view> names) {
+        message << name << '=' << value;
+        if (value < names.size()) message << ' ' << names[value];
+    };
+    message << "VGT_TF_PARAM=0x" << std::hex << parameters << std::dec << " (";
+    field("TYPE", tess.domain, Types);
+    message << ", ";
+    field("PARTITIONING", tess.partitioning, Partitionings);
+    message << ", ";
+    field("TOPOLOGY", tess.outputTopology, Topologies);
+    message << "), VGT_LS_HS_CONFIG=0x" << std::hex << config << std::dec << " (NUM_PATCHES=" << tess.patchesPerGroup << ", HS_NUM_INPUT_CP=" << tess.inputControlPoints << ", HS_NUM_OUTPUT_CP=" << tess.outputControlPoints << "): only triangle and quad domains with integer, fractional-even or fractional-odd partitioning and triangle output are supported by the reference path";
+    return message.str();
 }
 
 void zero(const Registers& registers, std::uint32_t offset, std::uint32_t mask, const char* name, RegisterBank bank = RegisterBank::Context) {
@@ -92,7 +112,7 @@ VkConservativeRasterizationModeEXT decodeConservativeRasterization(const QueueSt
         requireConservativeTriangles((domain == 1u || domain == 2u) && (topology == 2u || topology == 3u), topology == 0u ? "points" : topology == 1u || domain == 0u ? "lines" : "other primitive types", "VGT_TF_PARAM", parameters);
     } else {
         const auto primitive = read(queue.userConfig, 0x242, RegisterBank::UserConfig);
-        requireConservativeTriangles(primitive == 4u || primitive == 5u || primitive == 6u, primitive == 1u ? "points" : primitive == 2u || primitive == 3u ? "lines" : primitive == 7u || primitive == 17u ? "rectangles" : "other primitive types", "VGT_PRIMITIVE_TYPE", primitive);
+        requireConservativeTriangles(primitive == 4u || primitive == 5u || primitive == 6u || primitive == 21u, primitive == 1u ? "points" : primitive == 2u || primitive == 3u ? "lines" : primitive == 7u || primitive == 17u ? "rectangles" : "other primitive types", "VGT_PRIMITIVE_TYPE", primitive);
     }
     Require((read(cx, 0x1b3) & 0x44u) == 0, "conservative rasterization with centroid interpolation is unsupported");
     return VK_CONSERVATIVE_RASTERIZATION_MODE_OVERESTIMATE_EXT;
@@ -118,6 +138,7 @@ std::uint32_t inactiveVertexPointSize(const QueueState& queue) {
         case 6:
         case 7:
         case 17:
+        case 21:
             return 1u << 16u;
         default:
             return 0;
@@ -401,7 +422,7 @@ std::string nonTriangleRejection(const QueueState& queue, const char* message, b
             const auto topology = (*parameters >> 5u) & 7u;
             if ((domain != 1u && domain != 2u) || (topology != 2u && topology != 3u)) return zeroMessage(0x2db, *parameters, message);
         }
-    } else if (const auto primitive = word(queue.userConfig, 0x242, RegisterBank::UserConfig); primitive && *primitive != 4u && *primitive != 5u && *primitive != 6u && !(rectangles && (*primitive == 7u || *primitive == 17u))) {
+    } else if (const auto primitive = word(queue.userConfig, 0x242, RegisterBank::UserConfig); primitive && *primitive != 4u && *primitive != 5u && *primitive != 6u && *primitive != 21u && !(rectangles && (*primitive == 7u || *primitive == 17u))) {
         return zeroMessage(0x242, *primitive, message);
     }
     return {};
@@ -743,6 +764,10 @@ struct DecodedColorFormat {
     ShaderRecompiler::ColorExportPacking packing = ShaderRecompiler::ColorExportPacking::None;
 };
 
+const char* PackedColorTargetName(ShaderRecompiler::ColorExportPacking packing) {
+    return packing == ShaderRecompiler::ColorExportPacking::Float11_11_10 ? "11_11_10 float" : "10_11_11 unorm";
+}
+
 // CB_COLOR_INFO FORMAT / NUMBER_TYPE / COMP_SWAP to a Vulkan attachment format. AMD formats list
 // components from the least significant bits, as Vulkan's non-packed formats do.
 DecodedColorFormat DecodeColorFormat(std::uint32_t format, std::uint32_t number, std::uint32_t swap) {
@@ -753,7 +778,7 @@ DecodedColorFormat DecodeColorFormat(std::uint32_t format, std::uint32_t number,
     };
     const bool alternate = swap == 1;
     const auto single = [&](VkFormat vkFormat, std::uint32_t bytes) { return DecodedColorFormat{vkFormat, bytes, static_cast<std::uint8_t>((0xe4u & ~3u) | swap)}; };
-    if (swap > 1 && format != 1 && format != 2 && format != 4 && format != 10 && format != 12) return fail();
+    if (swap > 1 && format != 1 && format != 2 && format != 4 && format != 7 && format != 10 && format != 12 && format != 16) return fail();
     switch (format) {
         case 1:
             if (number == unorm) return single(VK_FORMAT_R8_UNORM, 1);
@@ -791,6 +816,9 @@ DecodedColorFormat DecodeColorFormat(std::uint32_t format, std::uint32_t number,
             if (swap != 0 || (number != floating && number != unorm)) return fail();
             if (number == unorm) return {VK_FORMAT_R32_UINT, 4, 0xe4u, ShaderRecompiler::ColorExportPacking::Unorm10_11_11};
             return {VK_FORMAT_B10G11R11_UFLOAT_PACK32, 4};
+        case 7:
+            if (swap != 2 || number != floating) return fail();
+            return {VK_FORMAT_R32_UINT, 4, 0xc6u, ShaderRecompiler::ColorExportPacking::Float11_11_10};
         case 9:
             // COLOR_2_10_10_10 keeps red in the low bits, the Vulkan A2B10G10R10 packing.
             if (number != unorm) return fail();
@@ -821,6 +849,9 @@ DecodedColorFormat DecodeColorFormat(std::uint32_t format, std::uint32_t number,
             if (number == floating) return {VK_FORMAT_R32G32B32A32_SFLOAT, 16};
             if (number == uint) return {VK_FORMAT_R32G32B32A32_UINT, 16};
             return fail();
+        case 16:
+            if ((swap != 0 && swap != 2) || number != unorm) return fail();
+            return {VK_FORMAT_R5G6B5_UNORM_PACK16, 2, static_cast<std::uint8_t>(swap == 2 ? 0xe4u : 0xc6u)};
         case 17:
             if (swap != 0 || number != unorm) return fail();
             return {VK_FORMAT_A1R5G5B5_UNORM_PACK16, 2, 0xc6u};
@@ -904,7 +935,7 @@ ShaderStages DecodeShaderStages(const QueueState& queue, bool vertexWorkgroup) {
         validate(tess.inputControlPoints != 0 && tess.inputControlPoints <= 32 && tess.outputControlPoints != 0 && tess.outputControlPoints <= 32, "invalid tessellation control-point counts");
         validate(tess.patchesPerGroup != 0, "VGT_LS_HS_CONFIG.NUM_PATCHES is zero");
         if ((parameters & ~0x000600ffu) != 0) Require(false, zeroMessage(0x2db, parameters, "VGT_TF_PARAM donut, factor detection, memory type or reserved state"));
-        validate((tess.domain == 1 || tess.domain == 2) && (tess.partitioning == 0 || tess.partitioning == 2 || tess.partitioning == 3) && (tess.outputTopology == 2 || tess.outputTopology == 3), "only triangle and quad domains with integer, fractional-even or fractional-odd partitioning and triangle output are supported by the reference path");
+        if (!((tess.domain == 1 || tess.domain == 2) && (tess.partitioning == 0 || tess.partitioning == 2 || tess.partitioning == 3) && (tess.outputTopology == 2 || tess.outputTopology == 3))) validate(false, tessellationMessage(config, parameters, tess).c_str());
         result.minTessellationLevel = readFloat(queue.context, 0x287);
         result.maxTessellationLevel = readFloat(queue.context, 0x286);
         Require(result.minTessellationLevel >= 0.0f && result.minTessellationLevel <= 63.0f && result.minTessellationLevel <= result.maxTessellationLevel && result.maxTessellationLevel >= 1.0f, "tessellation level clamps need 0 <= VGT_HOS_MIN_TESS_LEVEL <= 63, VGT_HOS_MAX_TESS_LEVEL >= 1 and the minimum at most the maximum");
@@ -935,7 +966,9 @@ ShaderStages DecodeShaderStages(const QueueState& queue, bool vertexWorkgroup) {
         validate(amplification != 0, "fast launch subgroup amplifies to no primitives");
         const auto maxPrimitives = outputSize == 2u && !fastLaunch ? std::max(primitives * amplification, maxVertices) : primitives * amplification;
         const auto threads = std::max({(groupPrimitives - 1u) * inputStep + inputSize, primitives, maxVertices, maxPrimitives});
-        result.mesh = ShaderRecompiler::MeshConfiguration{primitive, groupPrimitives, (groupPrimitives - 1u) * inputStep + inputSize, maxVertices, maxPrimitives, ((threads + result.vertexWaveSize - 1u) / result.vertexWaveSize) * result.vertexWaveSize, ((resources >> 19u) & 0xffu) * 128u, 0, esgsItemSize, outputSize};
+        const auto raster = find(queue.context, 0x205);
+        const auto provokingVertex = raster != queue.context.end() && (raster->second & (1u << 19u)) != 0 ? outputSize - 1u : 0u;
+        result.mesh = ShaderRecompiler::MeshConfiguration{primitive, groupPrimitives, (groupPrimitives - 1u) * inputStep + inputSize, maxVertices, maxPrimitives, ((threads + result.vertexWaveSize - 1u) / result.vertexWaveSize) * result.vertexWaveSize, ((resources >> 19u) & 0xffu) * 128u, provokingVertex, esgsItemSize, outputSize};
     }
     return result;
 }
@@ -1029,7 +1062,10 @@ State DecodeState(const QueueState& queue, bool vertexWorkgroup) {
             break;
         case 9: result.topology = VK_PRIMITIVE_TOPOLOGY_PATCH_LIST; break;
         case 4: result.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST; break;
-        case 5: result.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_FAN; break;
+        case 5:
+        case 21:
+            result.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_FAN;
+            break;
         case 6: result.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP; break;
         default: throw std::runtime_error("AGC graphics: unsupported primitive type " + std::to_string(primitive));
     }
@@ -1303,15 +1339,21 @@ State DecodeState(const QueueState& queue, bool vertexWorkgroup) {
             }
         }
         if (color.packing != ShaderRecompiler::ColorExportPacking::None) {
+            const std::string packed = std::string(color.packing == ShaderRecompiler::ColorExportPacking::Float11_11_10 ? "an " : "a ") + PackedColorTargetName(color.packing);
             const auto slotExport = (exportFormat >> (4u * color.exportIndex)) & 0xfu;
-            if (slotExport == 5 || slotExport == 6) throw std::runtime_error("AGC graphics: color export format " + std::to_string(slotExport) + " into a 10_11_11 unorm target is unsupported");
-            Require(!state.blendEnable, "blending into a 10_11_11 unorm color target is unsupported");
-            Require((exportedMask & 7u) == 7u, "partial writes of a 10_11_11 unorm color target are unsupported");
+            if (slotExport == 5 || slotExport == 6) throw std::runtime_error("AGC graphics: color export format " + std::to_string(slotExport) + " into " + packed + " target is unsupported");
+            Require(!state.blendEnable, "blending into " + packed + " color target is unsupported");
+            Require((exportedMask & 7u) == 7u, "partial writes of " + packed + " color target are unsupported");
         }
         if (state.blendEnable && !reversed && (secondSource(state.srcColorBlendFactor) || secondSource(state.dstColorBlendFactor) || secondSource(state.srcAlphaBlendFactor) || secondSource(state.dstAlphaBlendFactor))) {
             const auto addition = [](VkBlendOp op) { return op == VK_BLEND_OP_ADD || op == VK_BLEND_OP_SUBTRACT || op == VK_BLEND_OP_REVERSE_SUBTRACT; };
             Require(addition(state.colorBlendOp) && addition(state.alphaBlendOp), "dual-source blending with a MIN or MAX operation is unsupported");
             result.dualSourceBlend = true;
+        }
+        if (const auto info = read(cx, 0x31c + slot * 0xfu); state.blendEnable && (info & 0x8000u) == 0 && ((info >> 8u) & 7u) <= 1u) {
+            char detail[80];
+            std::snprintf(detail, sizeof(detail), " (CB_COLOR_INFO 0x%08x, CB_BLEND%u_CONTROL 0x%08x)", info, slot, blend);
+            throw std::runtime_error(std::string("AGC graphics: blending unclamped normalized color is not implemented") + detail);
         }
         result.blends[color.exportIndex] = state;
     }
@@ -1470,9 +1512,9 @@ ColorTarget DecodeColorBuffer(const Registers& cx, std::uint32_t slot, bool allo
     Require(color.samples <= 8u, "color targets with more than eight samples are unsupported");
     Require((1u << ((attrib >> 15u) & 3u)) == color.samples, "color targets with fewer fragments than samples (EQAA) are unsupported");
     const auto multisampleInfo = color.samples > 1 ? 0x0c006000u : 0u;
-    // ROUND_MODE (bit 18) only affects unorm rounding. With DCC_ENABLE (bit 28) the target is written
+    // ROUND_MODE (bit 18) only affects unorm rounding and packed float truncation. With DCC_ENABLE (bit 28) the target is written
     if ((info & ~(0x00039f7cu | 0x00040000u | 0x10000000u | 0x00002000u | multisampleInfo)) != 0) throw std::runtime_error("AGC graphics: color compression, DCC, endian conversion, nonstandard rounding or color optimization is unsupported (CB_COLOR_INFO 0x" + [&] { char text[16]; std::snprintf(text, sizeof(text), "%08x", info); return std::string(text); }() + ")");
-    Require((info & 0x8000u) != 0 || number == 7 || number == 4 || number == 5, "unclamped normalized color is unsupported");
+    Require((info & 0x8000u) != 0 || number <= 1u || number == 7 || number == 4 || number == 5, "unclamped normalized color is unsupported");
     const auto view = read(cx, 0x31b + stride);
     Require((view & ~0x3fffffffu) == 0, "reserved CB_COLOR_VIEW bits are set");
     const auto slice = view & 0x1fffu;
@@ -1489,7 +1531,11 @@ ColorTarget DecodeColorBuffer(const Registers& cx, std::uint32_t slot, bool allo
     Require(((attrib3 >> 24u) & 3u) != 0u || (attrib2 & 0x3fffu) == 0u, "1D color targets taller than one row are unsupported");
     if (volume) {
         color.depth = (attrib3 & 0x1fffu) + 1u;
-        Require(maxMip == 0, "mipmapped 3D color targets are unsupported");
+        if (maxMip != 0) {
+            char message[384];
+            std::snprintf(message, sizeof(message), "mipmapped 3D color targets are unsupported (slot %u, %ux%ux%u, viewMip %u, maxMip %u, slices %u..%u, CB_COLOR_INFO 0x%08x, ATTRIB2 0x%08x, ATTRIB3 0x%08x, VIEW 0x%08x)", slot, ((attrib2 >> 14u) & 0x3fffu) + 1u, (attrib2 & 0x3fffu) + 1u, color.depth, viewMip, maxMip, slice, lastSlice, info, attrib2, attrib3, view);
+            Require(false, message);
+        }
         Require(slice < color.depth && lastSlice >= slice, "the color view slices are outside the 3D surface");
         color.depthSlice = slice;
         color.layers = std::min(lastSlice + 1u, color.depth) - slice;
@@ -1508,13 +1554,19 @@ ColorTarget DecodeColorBuffer(const Registers& cx, std::uint32_t slot, bool allo
     color.surfaceExtent = color.extent;
     color.mipCount = maxMip + 1u;
     color.mip = viewMip;
+    std::uint32_t firstTailLevel = maxMip + 1u;
     if (maxMip != 0) {
-        // A mipmapped surface is addressed like a texture; the view renders into one mip of it.
         const auto mips = ComputeElementMipLayout(ColorTextureTileMode(color.tileMode), color.elementBytes, color.extent.width, color.extent.height, maxMip + 1u);
         const auto& mip = mips.at(viewMip);
         mipOffset = mip.tiledOffset;
         color.mipTail = mip.tail;
         color.extent = {mip.width, mip.height};
+        for (std::uint32_t level = 0; level < mips.size(); ++level) {
+            if (mips[level].tail) {
+                firstTailLevel = level;
+                break;
+            }
+        }
     }
     const ColorTargetLayout colorLayout(color.extent.width, color.extent.height, color.tileMode, color.elementBytes);
     const auto high = read(cx, 0x390 + slot);
@@ -1543,23 +1595,44 @@ ColorTarget DecodeColorBuffer(const Registers& cx, std::uint32_t slot, bool allo
     color.format = decoded.format;
     color.componentMapping = decoded.componentMapping;
     color.packing = decoded.packing;
-    Require(color.packing == ShaderRecompiler::ColorExportPacking::None || (info & 0x10000000u) == 0, "DCC-compressed 10_11_11 unorm color targets are unsupported");
-    Require(color.packing == ShaderRecompiler::ColorExportPacking::None || (info & 0x00040000u) == 0, "truncating (ROUND_MODE) 10_11_11 unorm color targets are unsupported");
+    if (color.packing != ShaderRecompiler::ColorExportPacking::None && (info & 0x10000000u) != 0) throw std::runtime_error("AGC graphics: DCC-compressed " + std::string(PackedColorTargetName(color.packing)) + " color targets are unsupported");
+    Require(color.packing != ShaderRecompiler::ColorExportPacking::Unorm10_11_11 || (info & 0x00040000u) == 0, "truncating (ROUND_MODE) 10_11_11 unorm color targets are unsupported");
+    Require(color.packing != ShaderRecompiler::ColorExportPacking::Float11_11_10 || (info & 0x00040000u) != 0, "rounding (ROUND_MODE 0) 11_11_10 float color targets are unsupported");
     for (std::uint32_t word = 0; word < 2; ++word) {
         const auto clear = find(cx, 0x323 + word + stride);
         color.clearWords[word] = clear == cx.end() ? 0u : clear->second;
     }
     if (((info & 0x2000u) != 0 || (color.samples > 1 && (info & 0x4000u) != 0)) && (color.samples > 1 || viewMip == 0)) {
-        Require(color.samples > 1 || (maxMip == 0 && !volume && slice == 0), "CMASK fast clears of a mipmapped, 3D or array color target are unsupported");
+        Require(color.samples > 1 || (!volume && slice == 0 && color.arrayLastSlice == 0), "CMASK fast clears of a 3D or array color target are unsupported");
         Require(((attrib3 >> 19u) & 0x1fu) == 0x18u && (attrib3 & 0x4000000u) != 0, "CMASK fast clears need pipe-aligned SW_64KB_Z_X metadata (CB_COLOR_ATTRIB3 FMASK_SW_MODE 24, CMASK_PIPE_ALIGNED)");
-        if (color.samples == 1) Require(color.elementBytes <= 8, "CMASK fast clears of texels over 64 bits are unsupported");
+        if (color.samples == 1) {
+            Require(color.elementBytes <= 8, "CMASK fast clears of texels over 64 bits are unsupported");
+            if (maxMip != 0) Require(color.elementBytes > 2, "CMASK fast clears of mipmapped color targets with 8 or 16 bpp are unsupported");
+        }
         const auto cmaskHigh = find(cx, 0x398 + slot);
         const auto cmask = ((cmaskHigh == cx.end() ? 0ull : static_cast<std::uint64_t>(cmaskHigh->second & 0xffu)) << 40u) | (static_cast<std::uint64_t>(read(cx, 0x31f + stride)) << 8u);
         Require((info & 0x2000u) == 0 || cmask != 0, "CMASK fast clears without a CMASK address are unsupported");
         if (cmask != 0) {
-            color.cmaskAddress = cmask;
+            std::size_t precedingBlocks = 0;
+            std::size_t totalBlocks = static_cast<std::size_t>((color.surfaceExtent.width + 1023u) / 1024u) * ((color.surfaceExtent.height + 511u) / 512u);
+            if (maxMip != 0) {
+                if (firstTailLevel > 0) {
+                    precedingBlocks = firstTailLevel < color.mipCount ? 1u : 0u;
+                    for (auto level = firstTailLevel; level-- > 1u;) {
+                        const auto w = std::max((color.surfaceExtent.width + (1u << level) - 1u) >> level, 1u);
+                        const auto h = std::max((color.surfaceExtent.height + (1u << level) - 1u) >> level, 1u);
+                        precedingBlocks += static_cast<std::size_t>((w + 1023u) / 1024u) * ((h + 511u) / 512u);
+                    }
+                    totalBlocks += precedingBlocks;
+                } else {
+                    totalBlocks = 1u;
+                }
+            }
+            const auto cmaskMip0Offset = precedingBlocks * CmaskLayout::Alignment;
+            const auto totalCmaskBytes = totalBlocks * CmaskLayout::Alignment;
+            color.cmaskAddress = cmask + cmaskMip0Offset;
             color.cmaskBytes = CmaskBytes(color.extent.width, color.extent.height);
-            if (color.samples == 1) GuestMemory::CheckRange(reinterpret_cast<const void*>(color.cmaskAddress), color.cmaskBytes, CmaskLayout::Alignment, true);
+            if (color.samples == 1) GuestMemory::CheckRange(reinterpret_cast<const void*>(cmask), totalCmaskBytes, CmaskLayout::Alignment, true);
         }
         color.cmaskFastClear = (info & 0x2000u) != 0;
     }
@@ -1643,6 +1716,7 @@ std::optional<ColorMetadataPass> DecodeColorMetadataPass(const QueueState& queue
         Require(destination.samples == 1, "CB resolve into a multisampled target is unsupported");
         Require(destination.cmaskAddress == 0, "CB resolve into a fast-clear color target is unsupported (the resolve does not update its CMASK)");
         Require(source.format == destination.format && source.extent.width == destination.extent.width && source.extent.height == destination.extent.height, "CB resolve between different formats or extents is unsupported");
+        if (source.packing != ShaderRecompiler::ColorExportPacking::None) throw std::runtime_error("AGC graphics: CB resolves of " + std::string(PackedColorTargetName(source.packing)) + " color targets are unsupported");
         requireCovered(destination);
         pass.source = source;
         pass.targets.push_back(destination);
@@ -1685,7 +1759,7 @@ std::string DrawRejection(const QueueState& queue, bool indexed) {
     if (indexed && value(queue.userConfig, 0x24b, word) && word != 0) {
         std::uint32_t primitive = 0;
         std::uint32_t resetIndex = 0;
-        if (value(queue.userConfig, 0x242, primitive) && (primitive & 0x3fu) != 1 && (primitive & 0x3fu) != 2 && (primitive & 0x3fu) != 3 && (primitive & 0x3fu) != 4 && (primitive & 0x3fu) != 5 && (primitive & 0x3fu) != 6) return "AGC graphics: primitive restart is only supported for point, line and triangle topologies";
+        if (value(queue.userConfig, 0x242, primitive) && (primitive & 0x3fu) != 1 && (primitive & 0x3fu) != 2 && (primitive & 0x3fu) != 3 && (primitive & 0x3fu) != 4 && (primitive & 0x3fu) != 5 && (primitive & 0x3fu) != 6 && (primitive & 0x3fu) != 21) return "AGC graphics: primitive restart is only supported for point, line and triangle topologies";
         if (value(cx, 0x103, resetIndex) && (resetIndex & 0xffffu) != 0xffffu) return "AGC graphics: primitive restart index other than all ones is unsupported";
     }
     if (auto reason = nonzero(cx, 0x207, ~(LayerExports | ClipCullExports | inactiveVertexPointSize(queue)), "layer, viewport or auxiliary vertex exports"); !reason.empty()) return reason;

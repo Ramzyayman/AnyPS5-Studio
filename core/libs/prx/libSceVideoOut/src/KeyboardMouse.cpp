@@ -126,6 +126,7 @@ Pad::InputRequests Pad::KeyboardMouse::HandleEvent(const SDL_Event& event, Clock
         return requests;
     }
     if (event.type == SDL_MOUSEWHEEL) {
+        if (titleReadsMouse) return requests;
         int direction = (event.wheel.y > 0) - (event.wheel.y < 0);
         if (event.wheel.direction == SDL_MOUSEWHEEL_FLIPPED) direction = -direction;
         if (direction == 0) return requests;

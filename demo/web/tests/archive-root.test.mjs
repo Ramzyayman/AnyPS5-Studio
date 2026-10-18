@@ -14,6 +14,37 @@ async function zipped(entries) {
   return writer.close();
 }
 
+const { packageArchive } = await import(pathToFileURL(path.join(process.argv[2], "archive.mjs")));
+const libraryBundle = await zipped([["libs/provider.prx", false]]);
+for (const conflict of ["sce_module/provider.guest.prx/child", "sce_module/PROVIDER.GUEST.PRX/child", "sce_module/provider.guest.prx/"]) {
+  const input = new Archive(await zipped([["main.elf", false], ["sce_module/provider.prx", false], [conflict, conflict.endsWith("/")]]));
+  try {
+    await input.inspect(() => {});
+    const written = [];
+    const destination = {
+      async directory(name) { written.push(name); },
+      async file(name) { written.push(name); return new WritableStream(); }
+    };
+    const converted = { executable: header, modules: [{ name: "app0/sce_module/provider.guest.prx", bytes: header }] };
+    await assert.rejects(packageArchive(input, converted, "main", libraryBundle, destination, () => {}, true), /Output path collision/);
+    assert.deepEqual(written, []);
+  } finally { await input.close(); }
+}
+
+const distinctOutput = new Archive(await zipped([["main.elf", false], ["sce_module/provider.prx", false], ["assets/", true]]));
+try {
+  await distinctOutput.inspect(() => {});
+  const written = [];
+  await packageArchive(distinctOutput, { executable: header, modules: [{ name: "app0/sce_module/provider.guest.prx", bytes: header }] },
+    "main", libraryBundle, {
+      async directory(name) { written.push(name); },
+      async file(name) { written.push(name); return new WritableStream(); }
+    }, () => {}, true);
+  assert(written.includes("app0/assets/"));
+  assert(written.includes("app0/sce_module/provider.guest.prx"));
+  assert(written.includes("libs/provider.prx"));
+} finally { await distinctOutput.close(); }
+
 const metadata = new Uint8Array(86);
 const metadataView = new DataView(metadata.buffer);
 metadataView.setUint32(0, 0x00051607);
@@ -148,6 +179,56 @@ for (const directories of [[], parents, [...parents].reverse()]) {
     assert.equal(summary.files, 1);
     assert.deepEqual((await archive.conversionInput("linux", false, () => {})).executable, header);
   } finally { await archive.close(); }
+}
+
+{
+  const originalFetch = globalThis.fetch;
+  const originalSelf = globalThis.self;
+  globalThis.self = { postMessage() {} };
+  try {
+    const { downloadLibraries } = await import(pathToFileURL(path.join(process.argv[2], "worker.mjs")));
+    const bytes = Uint8Array.from({ length: 32 }, (_, index) => index);
+    const sha256 = [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))].map(byte => byte.toString(16).padStart(2, "0")).join("");
+    const asset = { path: "libraries/linux-1234.zip", size: bytes.length, expandedBytes: 100, sha256 };
+    let cancelled = false;
+    let pulled = 0;
+    const configureDownload = (chunks, size = bytes.length) => {
+      cancelled = false;
+      pulled = 0;
+      globalThis.fetch = async url => {
+        if (url === "./release.json") return Response.json({ tag: "v1", platforms: { linux: { ...asset, size } } });
+        if (url.startsWith("https://api.github.com/")) return Response.json({ tag_name: "v1" });
+        return new Response(new ReadableStream({
+          pull(controller) {
+            if (pulled < chunks.length) controller.enqueue(chunks[pulled++]);
+            else controller.close();
+          },
+          cancel() { cancelled = true; }
+        }));
+      };
+    };
+    configureDownload(Array.from({ length: 8 }, () => bytes));
+    await assert.rejects(downloadLibraries("linux"), /System library download is incomplete/);
+    assert.equal(cancelled, true);
+    assert(pulled < 8);
+    for (const chunks of [[], [bytes.subarray(0, 31)]]) {
+      configureDownload(chunks);
+      await assert.rejects(downloadLibraries("linux"), /System library download is incomplete/);
+    }
+    configureDownload([bytes.subarray(0, 3), bytes.subarray(3)]);
+    const downloaded = await downloadLibraries("linux");
+    assert.deepEqual(new Uint8Array(await downloaded.file.arrayBuffer()), bytes);
+    assert.equal(downloaded.expandedBytes, 100);
+    for (const size of [-1, 1.5, 512 * 1024 * 1024 + 1]) {
+      configureDownload([bytes], size);
+      await assert.rejects(downloadLibraries("linux"), /Invalid release manifest/);
+      assert.equal(pulled, 0);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalSelf === undefined) delete globalThis.self;
+    else globalThis.self = originalSelf;
+  }
 }
 
 const folder = new Archive([{ path: "outer/inner/title/main.elf", file: new Blob([header]) }]);

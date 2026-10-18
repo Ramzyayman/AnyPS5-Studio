@@ -1,7 +1,6 @@
 import argparse
 import hashlib
 import json
-import re
 import struct
 import subprocess
 import sys
@@ -14,7 +13,6 @@ import progress
 
 ROOT = Path(__file__).resolve().parent.parent
 PRX = ROOT / "core" / "libs" / "prx"
-NID = re.compile(r"[A-Za-z0-9+\-]{11}")
 NID_POSTFIX = "_nid_postfix"
 MODULE_SUFFIX = "#"
 CLASSES = ("implemented", "stub", "absent", "module")
@@ -441,10 +439,10 @@ def read_modules(directories):
     return imports, {name: sorted(files) for name, files in exports.items()}
 
 
-def nid_of(name, aliases):
+def nids_of(name, aliases):
     if name in aliases:
         return aliases[name]
-    return nid_names.compute_nid(name.removesuffix(NID_POSTFIX))
+    return {nid_names.compute_nid(name.removesuffix(NID_POSTFIX))}
 
 
 def source_stubs(source):
@@ -454,16 +452,15 @@ def source_stubs(source):
     shared = {}
     for library in sorted(item for item in Path(source).iterdir() if item.is_dir()):
         aliases = {}
-        for file in library.rglob("*.cpp"):
+        for file in nid_names.source_files(library):
             for nid, name in nid_names.source_aliases(file.read_text(errors="ignore")):
-                aliases[name] = nid
+                aliases.setdefault(name, set()).add(nid)
         group = progress.scan_library(library)
         if "shared_sources" in group:
             shared[library.name] = group["shared_sources"]
-        done = {nid_of(name, aliases) for name in group["done_names"]}
+        done = {nid for name in group["done_names"] for nid in nids_of(name, aliases)}
         for name in group["todo_names"]:
-            nid = nid_of(name, aliases)
-            if nid not in done:
+            for nid in nids_of(name, aliases) - done:
                 stubs.setdefault((library.name + ".prx", nid), name)
     for library, owner in shared.items():
         chain = [library]
@@ -490,8 +487,8 @@ def read_registry(path):
         if not isinstance(entry, dict) or not isinstance(entry.get("nid"), str) or not isinstance(entry.get("library"), str):
             raise AuditError(f"{path}: entry {index} needs string fields 'nid' and 'library': {entry!r}")
         nid = entry["nid"].split("#", 1)[0]
-        if not NID.fullmatch(nid):
-            raise AuditError(f"{path}: entry {index} has an invalid NID {entry['nid']!r}")
+        if not nid or any(character.isspace() or ord(character) < 32 or ord(character) == 127 for character in nid):
+            raise AuditError(f"{path}: entry {index} has an invalid import symbol {entry['nid']!r}")
         weak = entry.get("weak", False)
         if not isinstance(weak, bool):
             raise AuditError(f"{path}: entry {index} needs a boolean 'weak' field")
@@ -545,11 +542,17 @@ def audit(imports, exports, stubs, libraries, modules, module_imports=None, modu
         providers = exports.get(nid, [])
         if library is None:
             providers = sorted(set(providers) | set((module_exports or {}).get(nid, [])))
-        kind = classify(nid, library, providers, stubs, modules)
+        resolved_nid = nid
+        if not providers:
+            resolved_nid = nid_names.compute_nid(nid)
+            providers = exports.get(resolved_nid, [])
+            if library is None:
+                providers = sorted(set(providers) | set((module_exports or {}).get(resolved_nid, [])))
+        kind = classify(resolved_nid, library, providers, stubs, modules)
         record["class"] = kind
         record["providers"] = providers
         record["library_mismatch"] = kind in ("implemented", "stub") and bool(library) and library not in providers and "libc.prx" not in providers
-        record["name"] = next((stubs[(provider, nid)] for provider in providers if (provider, nid) in stubs), None) if kind == "stub" else None
+        record["name"] = next((stubs[(provider, resolved_nid)] for provider in providers if (provider, resolved_nid) in stubs), None) if kind == "stub" else None
     ordered = sorted(records.values(), key=lambda record: (record["class"], record["library"] or "", record.get("module") or "", record["nid"]))
     check_conservation(len(imports) + sum(len(symbols) for symbols, _ in (module_imports or {}).values()), ordered)
     missing = defaultdict(int)
@@ -709,8 +712,10 @@ def main(argv=None):
         exports, libraries = built_libraries(args.libs)
         host_dependencies = built_host_dependencies(args.libs)
         module_imports, module_exports = read_modules(args.modules)
-        records, missing = audit(imports, exports, source_stubs(args.source), libraries, set(module_imports), module_imports, module_exports, needed_libraries=needed)
-        missing_hosts = audit_host_dependencies(host_dependencies, libraries, set(module_imports))
+        modules = set(module_imports)
+        modules |= {name.removesuffix(".guest.prx") for name in modules if name.endswith(".guest.prx")}
+        records, missing = audit(imports, exports, source_stubs(args.source), libraries, modules, module_imports, module_exports, needed_libraries=needed)
+        missing_hosts = audit_host_dependencies(host_dependencies, libraries, modules)
         if args.names:
             attach_names(records, load_names(args.names))
         summary = summarize(records, sum(record["references"] for record in records), missing, missing_hosts)

@@ -1,16 +1,19 @@
 import argparse
+import io
 import json
 import os
 import posixpath
 import re
 import subprocess
 import sys
+import tokenize
 from collections import defaultdict
 from pathlib import Path, PurePosixPath
 from urllib.parse import unquote
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from nid_names import CPP_TOKEN
+import env_reference
 
 RULES = {
     "comment": ("error", "docs/dev/CONVENTIONS.md", "Comments are only for technical debt, so they need a change to docs/dev/TechnicalDebt.md or docs/dev/debt/ in the same pull request; #endif and namespace ends are always allowed"),
@@ -27,6 +30,7 @@ RULES = {
     "commit-subject": ("error", "docs/dev/CONVENTIONS.md", "Commit subject is not Conventional Commits"),
     "pr-title": ("error", "docs/dev/CONVENTIONS.md", "Pull request title is not Conventional Commits"),
     "pr-template": ("error", ".github/pull_request_template.md", "Fill in the pull request template"),
+    "env-reference": ("error", "docs/dev/ENVIRONMENT.md", "Every APS5_* or ANYPS5_* name a pull request adds to the code has a row in docs/dev/ENVIRONMENT.md, a row whose name the pull request stops reading is removed, and a row the pull request removes is no longer read"),
 }
 
 CPP = {".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".inl", ".ipp"}
@@ -43,6 +47,7 @@ DEBT_TARGET = re.compile(r"\]\((?:\.\./)+(core/[^)#\s]+)")
 CONVENTIONAL = re.compile(r"^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([^)]+\))?!?: \S")
 STRINGS = re.compile(r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'')
 ALLOWED_COMMENT = re.compile(r"^\s*(#\s*endif\b|}\s*;?\s*//\s*(end\s+)?namespace\b)")
+CMAKE_TOKEN = re.compile(r'\[(=*)\[.*?\]\1\]|"(?:\\.|[^"\\])*"|(?P<comment>#\[(?P<level>=*)\[.*?\](?P=level)\]|#[^\n]*)|\\.', re.S)
 EXPORT = re.compile(r"\bAPS5_VABI\s+(\w+)\s*\(")
 STUB_BODY = re.compile(r"^(?:\(void\)\s*\w+\s*;|static_cast<void>\(\s*\w+\s*\)\s*;)*"
                        r"(?:return\s*\(?\s*(?:-?(?:0x[0-9a-fA-F]+|\d+)[uUlL]*|nullptr|true|false|\w*_OK)?\s*\)?\s*;)?$")
@@ -159,9 +164,12 @@ class Check:
                         self.report("silent-stub", path, number, match.group(1))
         self.duplicates(exports)
         for path, lines in self.files(lambda p: p.suffix in (".py", ".cmake") or p.name == "CMakeLists.txt"):
+            source = self.show(path)
+            comments = python_comments(source) if path.endswith(".py") else cmake_comments(source)
             for number, text in lines:
                 shebang = text.startswith("#!") or (number == 1 and text.startswith("\ufeff#!"))
-                if "#" in STRINGS.sub('""', text) and not shebang:
+                comment = number in comments if comments is not None else "#" in STRINGS.sub('""', text)
+                if comment and not shebang:
                     self.report("comment", path, number)
         if any(is_debt(path) for path in self.status):
             self.findings = [finding for finding in self.findings if finding[0] != "comment"]
@@ -173,10 +181,17 @@ class Check:
         result = subprocess.run(["git", "-c", "core.quotePath=false", "grep", "-nE", "--full-name", pattern, self.head, "--", ":(top)core/libs/prx"], capture_output=True, encoding="utf-8", errors="replace")
         hits = [line.split(":", 3)[1:] for line in filter(None, result.stdout.split("\n"))]
         self.read(path for path, _, _ in hits)
+        sources = {}
         for path, number, text in hits:
-            name = EXPORT.search(text).group(1)
+            if path not in sources:
+                sources[path] = cpp_text(self.show(path)).split("\n")
+            source = sources[path]
+            match = next((match for match in EXPORT.finditer(source[int(number) - 1]) if match.group(1) in exports), None)
+            if match is None:
+                continue
+            name = match.group(1)
             own, own_number = exports[name]
-            if library(path) != library(own) and "tests" not in PurePosixPath(path).parts and function_body(self.show(path).splitlines(), int(number) - 1) is not None:
+            if library(path) != library(own) and "tests" not in PurePosixPath(path).parts and function_body(source, int(number) - 1) is not None:
                 self.report("duplicate-export", own, own_number, f"{name} is also in {library(path)}")
 
     def build(self):
@@ -261,6 +276,43 @@ class Check:
             sha, subject = line.split(" ", 1)
             if not CONVENTIONAL.match(subject):
                 self.report("commit-subject", "", 0, f"{sha} {subject}")
+
+    def env_reference(self):
+        doc = "docs/dev/ENVIRONMENT.md"
+        added, removed, dropped = {}, set(), set()
+        path, number, in_hunk = "", 0, False
+        for line in git("diff", "-U0", self.base, self.head, "--", "core", doc).splitlines():
+            if line.startswith("diff --git"):
+                path, in_hunk = "", False
+            elif line.startswith("@@"):
+                number = int(re.search(r"\+(\d+)", line).group(1)) - 1
+                in_hunk = True
+            elif in_hunk:
+                if path == doc:
+                    if line.startswith("-"):
+                        dropped.update(env_reference.documented_pattern(env_reference.PREFIXES).findall(line[1:]))
+                elif line.startswith("+"):
+                    number += 1
+                    for _, match in env_reference.line_reads(line[1:]):
+                        added.setdefault(match.group("name"), (path, number))
+                elif line.startswith("-"):
+                    removed.update(match.group("name") for _, match in env_reference.line_reads(line[1:]))
+            elif line.startswith("+++ b/"):
+                path = line[6:]
+        result = subprocess.run(["git", "grep", "-nE", env_reference.GREP, self.head, "--", "core"],
+                                capture_output=True, encoding="utf-8", errors="replace")
+        reads = set()
+        for line in result.stdout.splitlines():
+            reads.update(match.group("name") for _, match in env_reference.line_reads(line))
+        documented = set(env_reference.documented_pattern(env_reference.PREFIXES).findall(self.show(doc))) if doc in self.tree else set()
+        for name, (source, line) in sorted(added.items()):
+            if name not in documented:
+                self.report("env-reference", source, line, f"{name} is read here but has no row in {doc}")
+        for name in sorted(removed - reads):
+            if name in documented:
+                self.report("env-reference", doc, 0, f"{name} has a row but the code no longer reads it")
+        for name in sorted(dropped & reads - documented):
+            self.report("env-reference", doc, 0, f"{name} is still read by the code but this pull request removes its row")
 
     def pull_request(self, title, body):
         if not CONVENTIONAL.match(title):
@@ -401,6 +453,23 @@ def allowed_notes(path):
     return path in ("README.md", "CONTRIBUTING.md") or p.parts[0] == ".github" or p.parts[:2] in (("docs", "dev"), ("docs", "user"))
 
 
+def python_comments(text):
+    try:
+        tokens = list(tokenize.generate_tokens(io.StringIO(text.removeprefix("\ufeff")).readline))
+    except (tokenize.TokenError, SyntaxError):
+        return None
+    return {token.start[0] for token in tokens if token.type == tokenize.COMMENT}
+
+
+def cmake_comments(text):
+    lines = set()
+    for match in CMAKE_TOKEN.finditer(text):
+        if match.group("comment") is not None:
+            first = text.count("\n", 0, match.start()) + 1
+            lines.update(range(first, first + match.group().count("\n") + 1))
+    return lines
+
+
 def cpp_text(text, preserve_comments=False):
     def mask(match):
         if match.group("code") is not None or preserve_comments and match.group("comment") is not None:
@@ -473,6 +542,7 @@ if __name__ == "__main__":
     check.docs()
     check.workflows()
     check.commits()
+    check.env_reference()
     pr = json.load(open(args.event, encoding="utf-8")).get("pull_request") if args.event else None
     if pr:
         check.pull_request(pr["title"], pr["body"])

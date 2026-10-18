@@ -224,10 +224,96 @@ class ImportAuditTests(unittest.TestCase):
             registry.write_text(json.dumps([dict(nid="AAAAAAAAAAA", library="libSceA.prx", **fields)]), encoding="utf-8")
             self.assertEqual(import_audit.read_registry(registry), [("AAAAAAAAAAA", "libSceA.prx", expected)])
 
+    def test_test_file_aliases_cannot_override_production_stubs(self):
+        source = self.work.source
+        text = 'APS5_EXPORT("AAAAAAAAAAA", sceExample);\n' + STUB_SOURCE.format(name="sceExample")
+        write_source(source, "libSceExample", text)
+        test = source / "libSceExample" / "tests" / "Alias.cpp"
+        test.parent.mkdir()
+        test.write_text('APS5_EXPORT("BBBBBBBBBBB", sceExample);\n', encoding="utf-8")
+        stubs = import_audit.source_stubs(source)
+        self.assertEqual(stubs, {("libSceExample.prx", "AAAAAAAAAAA"): "sceExample"})
+        records, _ = import_audit.audit([("AAAAAAAAAAA", "libSceExample.prx", False)],
+                                       {"AAAAAAAAAAA": ["libSceExample.prx"]}, stubs,
+                                       {"libSceExample.prx"}, set())
+        self.assertEqual(records[0]["class"], "stub")
+
 
     def setUp(self):
         self.work = Workspace()
         self.addCleanup(self.work.close)
+
+    def test_named_imports_use_literal_exports_and_keep_unresolved_names(self):
+        work = self.work
+        (work.libs / "libc.prx").write_bytes(exporting("strcmp", "_Z3foov", "AAAAAAAAAAA"))
+        registry, report = work.root / "homebrew.registry.json", work.root / "audit.json"
+        write_registry(registry, [("strcmp", ""), ("strcmp", ""), ("_Z3foov", "libc.prx"),
+                                  ("AAAAAAAAAAA#A#B", "libc.prx"), ("missing_function", "", True)])
+        code, _, err = work.run(registry, "--json", str(report))
+        self.assertEqual((code, err), (1, ""))
+        data = json.loads(report.read_text(encoding="utf-8"))
+        records = {record["nid"]: record for record in data["imports"]}
+        self.assertEqual(data["references"], 5)
+        self.assertEqual(data["unique_by_class"], {"implemented": 3, "stub": 0, "absent": 1, "module": 0})
+        self.assertEqual(records["strcmp"]["references"], 2)
+        self.assertEqual(records["strcmp"]["providers"], ["libc.prx"])
+        self.assertTrue(records["missing_function"]["weak"])
+        self.assertIsNone(data["stops"][0]["nid"])
+
+    def test_named_imports_fall_back_to_nid_exports(self):
+        work = self.work
+        (work.libs / "libc.prx").write_bytes(exporting("j4ViWNHEgww"))
+        registry, report = work.root / "homebrew.registry.json", work.root / "audit.json"
+        write_registry(registry, [("strlen", ""), ("strlen", ""),
+                                  ("missing_function", "", True)])
+        code, _, err = work.run(registry, "--json", str(report))
+        self.assertEqual((code, err), (1, ""))
+        data = json.loads(report.read_text(encoding="utf-8"))
+        records = {record["nid"]: record for record in data["imports"]}
+        self.assertEqual(data["references"], 3)
+        self.assertEqual(records["strlen"]["references"], 2)
+        self.assertEqual(records["strlen"]["class"], "implemented")
+        self.assertEqual(records["strlen"]["providers"], ["libc.prx"])
+        self.assertEqual(records["missing_function"]["class"], "absent")
+        self.assertTrue(records["missing_function"]["weak"])
+        self.assertIsNone(data["stops"][0]["nid"])
+
+    def test_named_nid_fallback_preserves_stub_and_library_classification(self):
+        nid = nid_names.compute_nid(MESSAGE_NAME)
+        imports = [(MESSAGE_NAME, "libSceOther.prx", False)]
+        records, missing = import_audit.audit(imports, {nid: ["libSceMsgDialog.prx"]},
+                                             {("libSceMsgDialog.prx", nid): MESSAGE_NAME},
+                                             {"libSceMsgDialog.prx", "libSceOther.prx"}, set())
+        self.assertEqual(missing, {})
+        self.assertEqual(records[0]["class"], "stub")
+        self.assertEqual(records[0]["nid"], MESSAGE_NAME)
+        self.assertEqual(records[0]["name"], MESSAGE_NAME)
+        self.assertTrue(records[0]["library_mismatch"])
+
+    def test_literal_exports_take_precedence_over_nid_fallback(self):
+        imports = [("strlen", "", False)]
+        stubs = {("literal.prx", "strlen"): "strlen"}
+        exports = {"strlen": ["literal.prx"], "j4ViWNHEgww": ["libc.prx"]}
+        records, _ = import_audit.audit(imports, exports, stubs, set(exports), set())
+        self.assertEqual(records[0]["class"], "stub")
+        self.assertEqual(records[0]["providers"], ["literal.prx"])
+        module_imports = {"guest.so": (["strlen"], [])}
+        records, _ = import_audit.audit([], {"j4ViWNHEgww": ["libc.prx"]}, {},
+                                       {"libc.prx"}, set(module_imports), module_imports,
+                                       {"strlen": ["other.so"]})
+        self.assertEqual(records[0]["providers"], ["other.so"])
+        records, _ = import_audit.audit([], {"j4ViWNHEgww": ["libc.prx"]}, {},
+                                       {"libc.prx"}, set(module_imports), module_imports)
+        self.assertEqual(records[0]["class"], "implemented")
+        self.assertEqual(records[0]["providers"], ["libc.prx"])
+
+    def test_empty_and_control_character_imports_remain_invalid(self):
+        registry = self.work.root / "homebrew.registry.json"
+        for name in ("", "#A#B", "bad\x00name", "bad\nname", "bad\x7fname", "bad name"):
+            with self.subTest(name=name):
+                write_registry(registry, [(name, "")])
+                with self.assertRaisesRegex(import_audit.AuditError, "invalid import symbol"):
+                    import_audit.read_registry(registry)
 
     def test_failed_json_write_preserves_existing_report_and_leaves_no_partial_report(self):
         work = self.work
@@ -486,6 +572,19 @@ class ImportAuditTests(unittest.TestCase):
         records = {(record["nid"], record.get("module")): record for record in data["imports"]}
         self.assertEqual(records[("AAAAAAAAAAA", "provider.data")]["providers"], ["libSceA.prx"])
         self.assertEqual(records[("BBBBBBBBBBB", "consumer.prx")]["providers"], ["provider.data"])
+
+    def test_converted_module_matches_imports_of_its_base_name(self):
+        work = self.work
+        (work.libs / "libc.prx").write_bytes(exporting())
+        (work.modules / "libSceFace.prx.guest.prx").write_bytes(exporting("AAAAAAAAAAA"))
+        registry, result = work.root / "game.json", work.root / "audit.json"
+        write_registry(registry, [("AAAAAAAAAAA", "libSceFace.prx")])
+        code, _, err = work.run(registry, "--json", str(result))
+        self.assertEqual((code, err), (0, ""))
+        data = json.loads(result.read_text())
+        self.assertEqual(data["missing_libraries"], {})
+        record = next(record for record in data["imports"] if record["library"] == "libSceFace.prx")
+        self.assertEqual(record["class"], "module")
 
     def test_bad_named_modules_and_malformed_elf_are_not_ignored(self):
         work = self.work
@@ -1001,6 +1100,19 @@ class ImportAuditTests(unittest.TestCase):
         with self.assertRaisesRegex(import_audit.AuditError, "shared source cycle.*libA.*libB"):
             import_audit.source_stubs(source)
 
+    def test_multiple_aliases_of_one_function_keep_the_same_classification(self):
+        aliases = 'APS5_EXPORT("AAAAAAAAAAA", sceExample);\nAPS5_EXPORT("BBBBBBBBBBB", sceExample);\n'
+        for body, classification in ((STUB_SOURCE, "stub"), (DONE_SOURCE, "implemented")):
+            with self.subTest(classification=classification):
+                write_source(self.work.source, "libSceExample", aliases + body.format(name="sceExample"))
+                stubs = import_audit.source_stubs(self.work.source)
+                records, _ = import_audit.audit(
+                    [(nid, "libSceExample.prx", False) for nid in ("AAAAAAAAAAA", "BBBBBBBBBBB")],
+                    {nid: ["libSceExample.prx"] for nid in ("AAAAAAAAAAA", "BBBBBBBBBBB")}, stubs,
+                    {"libSceExample.prx"}, set())
+                self.assertEqual([record["class"] for record in records], [classification, classification])
+
+
     def test_formatted_export_aliases_remain_stubs(self):
         work = self.work
         nid = "AAAAAAAAAAA"
@@ -1501,7 +1613,7 @@ class ImportAuditTests(unittest.TestCase):
         with self.assertRaisesRegex(import_audit.AuditError, r"entry 0 needs string fields"):
             import_audit.read_registry(path)
         write_registry(path, [("AAAAAAAAAAA", ""), ("bad\x01nid", "")])
-        with self.assertRaisesRegex(import_audit.AuditError, r"entry 1 has an invalid NID 'bad\\x01nid'"):
+        with self.assertRaisesRegex(import_audit.AuditError, r"entry 1 has an invalid import symbol 'bad\\x01nid'"):
             import_audit.read_registry(path)
         write_registry(path, [("AAAAAAAAAAA#A#B", "libSceA.prx")], encoding="utf-8-sig")
         self.assertEqual(import_audit.read_registry(path), [("AAAAAAAAAAA", "libSceA.prx", False)])
@@ -1535,10 +1647,10 @@ class ImportAuditTests(unittest.TestCase):
         work = self.work
         (work.libs / "libSceA.prx").write_bytes(exporting("AAAAAAAAAAA"))
         registry = work.root / "game.json"
-        write_registry(registry, [("short", "libSceA.prx")])
+        write_registry(registry, [("bad name", "libSceA.prx")])
         code, out, err = work.run(registry)
         self.assertEqual((code, out), (2, ""))
-        self.assertIn("game.json: entry 0 has an invalid NID 'short'", err)
+        self.assertIn("game.json: entry 0 has an invalid import symbol 'bad name'", err)
 
     def test_unreadable_library_and_unwritable_json_exit_two(self):
         work = self.work

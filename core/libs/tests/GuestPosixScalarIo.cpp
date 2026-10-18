@@ -37,6 +37,11 @@ std::int64_t APS5_VABI sceKernelWrite(int, const void*, std::size_t);
 std::int64_t APS5_VABI sceKernelLseek(int, std::int64_t, int);
 int APS5_VABI sceKernelStat(const char*, FileStat*);
 int APS5_VABI sceKernelUnlink(const char*);
+int APS5_VABI sceKernelTruncate_nid_postfix(const char*, std::int64_t);
+int APS5_VABI sceKernelUtimes_nid_postfix(const char*, const void*);
+int APS5_VABI sceKernelMkdir(const char*, std::uint16_t);
+int APS5_VABI sceKernelRmdir(const char*);
+int APS5_VABI sceKernelRename(const char*, const char*);
 }
 
 static void Check(bool value, int line) {
@@ -159,6 +164,13 @@ int main() {
     Require(sceKernelStat(nullptr, &nullStat) == static_cast<std::int32_t>(0x8002000eu));
     Require(sceKernelStat(nullptr, nullptr) == static_cast<std::int32_t>(0x8002000eu));
     Require(sceKernelUnlink(nullptr) == static_cast<std::int32_t>(0x8002000eu));
+    Require(sceKernelTruncate_nid_postfix(nullptr, 0) == static_cast<std::int32_t>(0x8002000eu));
+    Require(sceKernelUtimes_nid_postfix(nullptr, nullptr) == static_cast<std::int32_t>(0x8002000eu));
+    Require(sceKernelMkdir(nullptr, 0777) == static_cast<std::int32_t>(0x8002000eu));
+    Require(sceKernelRmdir(nullptr) == static_cast<std::int32_t>(0x8002000eu));
+    Require(sceKernelRename(nullptr, "dest") == static_cast<std::int32_t>(0x8002000eu));
+    Require(sceKernelRename("src", nullptr) == static_cast<std::int32_t>(0x8002000eu));
+    Require(sceKernelRename(nullptr, nullptr) == static_cast<std::int32_t>(0x8002000eu));
     Require(close_nid_postfix(descriptor) == 0);
     const int readOnly = open_nid_postfix(fileName.c_str(), SCE_KERNEL_O_RDONLY, 0);
     Require(readOnly >= 0);

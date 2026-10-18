@@ -145,10 +145,8 @@ int APS5_VABI scePthreadCondattrSetclock(PthreadCondattr* attr, KernelClockid cl
 int APS5_VABI scePthreadCondInit(PthreadCond* cond, const PthreadCondattr* attr, const char*) {
     if (!cond)
         throw std::invalid_argument("Condition variable pointer is null");
-    if (attr && !*attr)
-        throw std::invalid_argument("Condition attributes are not initialized");
     auto replacement = std::make_unique<PthreadCondPrivate>();
-    if (attr)
+    if (attr && *attr)
         replacement->_clockid = (*attr)->_clockid;
     std::lock_guard lock(condInitializationMutex);
     std::atomic_ref<PthreadCond>(*cond).store(replacement.release(), std::memory_order_release);

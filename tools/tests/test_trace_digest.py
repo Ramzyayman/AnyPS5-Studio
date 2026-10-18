@@ -46,6 +46,25 @@ STACKS = "# samples=5 depth=64 truncated=1\n# module a.prx 0x1000 0x1\nntdll.dll
 
 
 class TraceDigestTests(unittest.TestCase):
+    def test_cli_reports_unreadable_inputs_without_partial_output(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            compressed = gzip.compress(b'{"traceEvents": []}')
+            files = {"invalid.json": b"{", "broken.json.gz": b"not gzip", "intervals.jsonl": b"{\n",
+                     "truncated.json.gz": compressed[:-4],
+                     "corrupt.json.gz": compressed[:10] + b"\xff" * 4 + compressed[14:]}
+            for name, data in files.items():
+                (root / name).write_bytes(data)
+            for name in ("missing.json", *files):
+                with self.subTest(name=name):
+                    result = subprocess.run([sys.executable, trace_digest.__file__, str(root / name)],
+                                            capture_output=True, text=True, encoding="utf-8", timeout=20)
+                    self.assertEqual(result.returncode, 2, result.stderr)
+                    self.assertTrue(result.stderr.startswith("FAIL: "), result.stderr)
+                    self.assertNotIn("Traceback", result.stderr)
+                    self.assertEqual(result.stdout, "")
+
+
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         root = Path(self.directory.name)
@@ -213,6 +232,43 @@ class TraceDigestTests(unittest.TestCase):
         self.assertAlmostEqual(presenter["wait_ms_per_frame"], 15.5 / 3)
         self.assertAlmostEqual(presenter["busy_ms_per_frame"], 2.5 / 3)
 
+    def test_thread_totals_only_count_time_inside_the_frame_window(self):
+        events = [
+            complete(1, "Driver.Packet", -5000, 20000),
+            complete(1, "GpuMutex.wait.draw", -2000, 4000),
+            complete(1, "Driver.Packet.after", 12000, 1000),
+            complete(2, "Driver.WorkerWait", -10000, 2000),
+            {"name": "present", "ph": "i", "ts": 0, "tid": 1, "args": {"present": 600}},
+            {"name": "present", "ph": "i", "ts": 10000, "tid": 1, "args": {"present": 601}},
+        ]
+        result = trace_digest.digest(trace_digest.Trace(events))
+        active, outside = result["threads"]
+        self.assertEqual(active["busy_ms_per_frame"], 8.0)
+        self.assertEqual(active["wait_ms_per_frame"], 2.0)
+        self.assertEqual(active["busy_pct"], 80.0)
+        self.assertEqual(active["wait_pct"], 20.0)
+        self.assertEqual(active["top"], [{"name": "Driver.Packet", "ms_per_frame": 10.0}])
+        self.assertEqual(outside["busy_ms_per_frame"], 0.0)
+        self.assertEqual(outside["wait_ms_per_frame"], 0.0)
+        self.assertEqual(outside["untraced_ms_per_frame"], 10.0)
+        self.assertEqual(outside["top"], [])
+        self.assertEqual(result["top_slices_ms_per_frame"], [
+            {"name": "Driver.Packet", "ms": 10.0},
+            {"name": "GpuMutex.wait.draw", "ms": 2.0},
+        ])
+
+    def test_thread_totals_use_the_summary_end_after_the_last_present(self):
+        trace = trace_digest.Trace([
+            complete(1, "Driver.Packet", 1000, 20000),
+            {"name": "present", "ph": "i", "ts": 0, "tid": 1, "args": {"present": 600}},
+        ])
+        result = trace_digest.digest(trace, {"window": {"ms": 10.0}})
+        thread = result["threads"][0]
+        self.assertEqual(result["frames"], 1)
+        self.assertEqual(thread["busy_ms_per_frame"], 9.0)
+        self.assertEqual(thread["busy_pct"], 90.0)
+        self.assertEqual(thread["untraced_ms_per_frame"], 1.0)
+
     def test_largest_slices_per_frame(self):
         largest = self.result()["top_slices_ms_per_frame"]
         self.assertEqual(largest[0]["name"], "Driver.Packet")
@@ -376,6 +432,15 @@ class TraceDigestTests(unittest.TestCase):
             complete(1, "Driver.Completion", 30000.3, 20000.0)]})
         self.assertEqual([(entry[3], entry[4]) for entry in trace.slices[1]],
                          [(0, False), (1, True), (0, False)])
+
+    def test_missing_summary_file_is_an_error(self):
+        missing = Path(self.directory.name) / "missing.jsonl"
+        error = io.StringIO()
+        with contextlib.redirect_stderr(error), contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaises(SystemExit) as raised:
+                trace_digest.main([str(self.trace), "--summary", str(missing)])
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("summary file not found", error.getvalue())
 
 
 def interval_line(start, end, p99, gpu_ms, **changes):

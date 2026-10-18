@@ -171,6 +171,7 @@ struct Context {
     std::uint32_t settleFamily = 0;
     std::mutex* settleQueueMutex = nullptr;
     PFN_vkGetPhysicalDeviceMemoryProperties2 memoryProperties2 = nullptr;
+    VkDeviceSize (*cacheReclaim)(VkDeviceSize bytes) = nullptr;
     RenderCache* renderCache = nullptr;
     DrawQueue* drawQueue = nullptr;
     GraphicsPipelineCache* graphicsPipelines = nullptr;
@@ -210,6 +211,7 @@ struct Context {
     bool variableDescriptorCount = false;
     std::uint32_t imageTableCapacity = 0;
     std::uint32_t samplerTableCapacity = 0;
+    bool individuallyFreeDescriptorSets = false;
     bool geometryShader = false;
     bool sampleRateShading = false;
     bool storageImageMultisample = false;
@@ -319,6 +321,7 @@ inline void EndRenderPass(const Context& context, VkCommandBuffer commands) {
 }
 
 std::uint32_t ImageTableCapacity(const Context& context);
+std::uint32_t StorageTableCapacity(const Context& context);
 std::uint32_t SamplerTableCapacity(const Context& context);
 
 }

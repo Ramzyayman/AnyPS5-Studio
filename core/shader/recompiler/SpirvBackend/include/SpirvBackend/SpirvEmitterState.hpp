@@ -83,6 +83,7 @@ struct SpirvTableAccess {
     std::uint32_t dword3 = 0;
     std::uint32_t samplerElement = 0;
     bool active = false;
+    bool uniform = false;
 };
 
 struct SpirvEmitterState {
@@ -107,6 +108,7 @@ struct SpirvEmitterState {
     bool registrationModules = false;
     bool fragmentDescriptorSet = false;
     bool float16DenormPreserve = false;
+    bool robustBufferAccess2 = false;
     std::unordered_set<const IrValue*> sharedLaneValues;
     std::uint32_t laneHalf = 0;
     std::uint32_t spirvVersion = 0x00010300u;
@@ -141,6 +143,15 @@ struct SpirvEmitterState {
     std::array<std::array<std::uint32_t, 2>, 2> bdaDwordReadFunctions {};
     std::array<std::array<std::uint32_t, 2>, 2> bdaSpanReadFunctions {};
     std::unordered_map<const IrValue*, std::pair<std::uint32_t, std::uint32_t>> bdaGroupedLoads;
+    struct BdaAnchor {
+        std::uint32_t lowRegister = 0;
+        std::uint32_t highRegister = 0;
+        std::uint32_t size = 0;
+        std::uint32_t device = 0;
+        std::uint32_t offset = 0;
+    };
+    std::vector<BdaAnchor> bdaAnchors;
+    std::uint32_t bdaAnchorFunction = 0;
     std::uint32_t bdaStopValue = 0;
     std::uint32_t bdaPcOverride = 0;
     // False for programs with workgroup barriers: faulting BDA accesses then continue (see BdaInvocationsMayStop).
@@ -162,6 +173,7 @@ struct SpirvEmitterState {
     std::uint32_t flattenedSrtVariable = 0;
     std::uint32_t ldsVariable = 0;
     std::uint32_t ldsBufferVariable = 0;
+    std::uint32_t ldsBufferU64Variable = 0;
     std::uint32_t ldsBufferBase = 0;
     std::uint32_t numWorkgroupsVariable = 0;
     std::array<std::uint32_t, 2> scratchVariable {};

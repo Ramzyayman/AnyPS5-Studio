@@ -347,6 +347,21 @@ export async function packageArchive(archive, converted, outputName, libraryFile
       if (!module.name.startsWith("app0/sce_module/")) throw new Error("Invalid converted module path");
       claim(module.name);
     }
+    const outputEntries = [
+      ...libraryEntries.map(entry => ({ name: entry.filename, directory: entry.directory })),
+      ...originalFiles.map(item => ({ name: "app0/" + item.name, directory: item.entry.directory })),
+      { name: outputName },
+      ...(converted.diagnostics ? [{ name: "windows-diagnostics-imports.txt" }] : []),
+      ...converted.modules.map(module => ({ name: module.name }))
+    ];
+    const files = new Set(outputEntries.filter(entry => !entry.directory).map(entry => entry.name.toLowerCase()));
+    for (const { name } of outputEntries) {
+      const parts = name.replace(/\/$/u, "").toLowerCase().split("/");
+      for (let index = 1; index < parts.length; index++) {
+        const parent = parts.slice(0, index).join("/");
+        if (files.has(parent)) throw new Error(`Output path collision: ${parent}`);
+      }
+    }
     const binary = { versionMadeBy: 0x31e, externalFileAttributes: (0o100755 << 16) >>> 0 };
     await writer.add(outputName, new Uint8ArrayReader(converted.executable), binary);
     if (converted.diagnostics) await writer.add("windows-diagnostics-imports.txt", new Uint8ArrayReader(new TextEncoder().encode(converted.diagnostics)));
