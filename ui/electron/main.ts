@@ -1382,30 +1382,60 @@ function fixGameHierarchyInPlace(
     }
   }
 
-  // Check if existing executable relies on guest libc.prx.guest.prx (backward compatibility)
+  // Check if existing executable or guest modules rely on guest libc.prx.guest.prx (backward compatibility)
   const targetExeName = getDefaultOutputExecutableName();
-  let existingExe = path.join(resolved, targetExeName);
-  if (!fs.existsSync(existingExe)) {
-    const altExe = path.join(resolved, targetExeName === 'app.elf' ? 'app.exe' : 'app.elf');
-    if (fs.existsSync(altExe)) {
-      existingExe = altExe;
-    }
-  }
+  const candidateExes = [
+    path.join(resolved, targetExeName),
+    path.join(resolved, targetExeName === 'app.elf' ? 'app.exe' : 'app.elf'),
+    path.join(app0Dir, targetExeName),
+    path.join(app0Dir, targetExeName === 'app.elf' ? 'app.exe' : 'app.elf'),
+  ];
 
   let needsGuestLibc = false;
-  if (mode === 'launch' && fs.existsSync(existingExe)) {
-    try {
-      const exeBuffer = fs.readFileSync(existingExe);
-      if (exeBuffer.includes(Buffer.from('libc.prx.guest.prx'))) {
-        needsGuestLibc = true;
+  if (mode === 'launch') {
+    const guestLibcUtf8 = Buffer.from('libc.prx.guest.prx', 'utf8');
+    const guestLibcUtf16 = Buffer.from('libc.prx.guest.prx', 'utf16le');
+
+    for (const exePath of candidateExes) {
+      if (fs.existsSync(exePath)) {
+        try {
+          const exeBuffer = fs.readFileSync(exePath);
+          if (exeBuffer.includes(guestLibcUtf8) || exeBuffer.includes(guestLibcUtf16)) {
+            needsGuestLibc = true;
+            break;
+          }
+        } catch {}
       }
-    } catch {}
+    }
+
+    if (!needsGuestLibc) {
+      for (const checkDir of [sceModuleDir, sceModulesDir, prxDir, app0Dir]) {
+        if (!fs.existsSync(checkDir)) continue;
+        try {
+          const entries = fs.readdirSync(checkDir);
+          for (const ent of entries) {
+            if (ent.endsWith('.guest.prx') && ent !== 'libc.prx.guest.prx') {
+              const fullModPath = path.join(checkDir, ent);
+              try {
+                const modBuf = fs.readFileSync(fullModPath);
+                if (modBuf.includes(guestLibcUtf8) || modBuf.includes(guestLibcUtf16)) {
+                  needsGuestLibc = true;
+                  break;
+                }
+              } catch {}
+            }
+          }
+          if (needsGuestLibc) break;
+        } catch {}
+      }
+    }
   }
 
   // Clean up any stale guest system library artifacts that conflict with AnyPS5 native translations
   if (!needsGuestLibc) {
     for (const guestSysPrx of ['libc.prx.guest.prx', 'libkernel.prx.guest.prx', 'libSceLibcInternal.prx.guest.prx']) {
-      for (const searchDir of [resolved, app0Dir, sceModuleDir, prxDir]) {
+      for (const searchDir of [resolved, app0Dir, sceModuleDir, sceModulesDir, prxDir, targetModuleDir]) {
+        if (!fs.existsSync(searchDir)) continue;
         const target = path.join(searchDir, guestSysPrx);
         if (fs.existsSync(target)) {
           try {
@@ -1419,14 +1449,25 @@ function fixGameHierarchyInPlace(
       }
     }
   } else {
-    for (const searchDir of [resolved, app0Dir, sceModuleDir, prxDir]) {
+    for (const searchDir of [resolved, app0Dir, sceModuleDir, sceModulesDir, prxDir, targetModuleDir]) {
+      if (!fs.existsSync(searchDir)) continue;
       const active = path.join(searchDir, 'libc.prx.guest.prx');
-      const backup = path.join(searchDir, 'module_backups', 'libc.prx.guest.prx');
-      if (!fs.existsSync(active) && fs.existsSync(backup)) {
-        try {
-          fs.copyFileSync(backup, active);
-          sendLog(`[AnyPS5] Restored backward-compatible guest libc stub for existing relinked title.`, 'info');
-        } catch {}
+      const backupCandidates = [
+        path.join(searchDir, 'module_backups', 'libc.prx.guest.prx'),
+        path.join(targetModuleDir, 'module_backups', 'libc.prx.guest.prx'),
+        path.join(app0Dir, 'module_backups', 'libc.prx.guest.prx'),
+        path.join(sceModuleDir, 'module_backups', 'libc.prx.guest.prx'),
+      ];
+      if (!fs.existsSync(active)) {
+        for (const backup of backupCandidates) {
+          if (fs.existsSync(backup)) {
+            try {
+              fs.copyFileSync(backup, active);
+              sendLog(`[AnyPS5] Restored backward-compatible guest libc stub for existing relinked title into ${path.relative(resolved, active)}.`, 'info');
+              break;
+            } catch {}
+          }
+        }
       }
     }
   }
@@ -1664,6 +1705,14 @@ function fixGameHierarchyInPlace(
     const altExe = path.join(resolved, defaultExeName === 'app.elf' ? 'app.exe' : 'app.elf');
     if (fs.existsSync(altExe)) {
       outputExe = altExe;
+    } else {
+      const app0Exe = path.join(app0Dir, defaultExeName);
+      const app0AltExe = path.join(app0Dir, defaultExeName === 'app.elf' ? 'app.exe' : 'app.elf');
+      if (fs.existsSync(app0Exe)) {
+        outputExe = app0Exe;
+      } else if (fs.existsSync(app0AltExe)) {
+        outputExe = app0AltExe;
+      }
     }
   }
 
@@ -1672,11 +1721,15 @@ function fixGameHierarchyInPlace(
     try {
       if (fs.existsSync(outputExe)) {
         const exeBuffer = fs.readFileSync(outputExe);
-        if (exeBuffer.includes(Buffer.from('libc.prx.guest.prx'))) {
-          sendLog(`[AnyPS5 Diagnostics] Stale executable detected: "${path.basename(outputExe)}" contains embedded imports to guest libc.prx.guest.prx. Re-relinking this title in Relinker Studio is required to bind AnyPS5's native C translation library.`, 'warn');
+        const guestLibcUtf8 = Buffer.from('libc.prx.guest.prx', 'utf8');
+        const guestLibcUtf16 = Buffer.from('libc.prx.guest.prx', 'utf16le');
+        if (exeBuffer.includes(guestLibcUtf8) || exeBuffer.includes(guestLibcUtf16)) {
+          sendLog(`[AnyPS5 Diagnostics] Backward-compatible executable detected: "${path.basename(outputExe)}" contains embedded imports to guest libc.prx.guest.prx.`, 'info');
         }
 
-        if (exeBuffer.includes(Buffer.from('fakelib'))) {
+        const fakelibUtf8 = Buffer.from('fakelib', 'utf8');
+        const fakelibUtf16 = Buffer.from('fakelib', 'utf16le');
+        if (exeBuffer.includes(fakelibUtf8) || exeBuffer.includes(fakelibUtf16)) {
           sendLog(`[AnyPS5 Diagnostics] Stale executable detected: "${path.basename(outputExe)}" contains embedded imports to legacy "fakelib" stubs.`, 'warn');
           sendLog(`[AnyPS5 Diagnostics] Re-relinking this title in Relinker Studio is recommended to use AnyPS5's native translation libraries.`, 'info');
 
@@ -1979,6 +2032,8 @@ ipcMain.handle('anyps5:launch-game', async (_, game) => {
     path.join(game.path, defaultExeName),
     ...(safeGameExe ? [path.join(game.path, safeGameExe)] : []),
     path.join(game.path, defaultExeName === 'app.elf' ? 'app.exe' : 'app.elf'),
+    path.join(game.path, 'app0', defaultExeName),
+    path.join(game.path, 'app0', defaultExeName === 'app.elf' ? 'app.exe' : 'app.elf'),
   ];
   const targetExe = candidateExes.find((p) => fs.existsSync(p));
 
