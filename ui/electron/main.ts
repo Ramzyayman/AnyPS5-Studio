@@ -775,7 +775,8 @@ function sanitizeModuleDirectory(
   dirPath: string,
   inputElfPath: string,
   sendLog: (msg: string, level?: string) => void,
-  knownSystemLibs?: Set<string>
+  knownSystemLibs?: Set<string>,
+  preserveGuestLibc: boolean = false
 ) {
   if (!fs.existsSync(dirPath)) return;
   try {
@@ -849,8 +850,10 @@ function sanitizeModuleDirectory(
         'libkernel_sys',
       ]);
       if (conflictingDriverStubs.has(stem)) {
-        shouldIsolate = true;
-        isolateReason = `Conflicting system library stub (provided natively by AnyPS5 in libs/${stem}.prx)`;
+        if (!preserveGuestLibc || lower !== 'libc.prx.guest.prx') {
+          shouldIsolate = true;
+          isolateReason = `Conflicting system library stub (provided natively by AnyPS5 in libs/${stem}.prx)`;
+        }
       }
     }
 
@@ -1379,17 +1382,50 @@ function fixGameHierarchyInPlace(
     }
   }
 
+  // Check if existing executable relies on guest libc.prx.guest.prx (backward compatibility)
+  const targetExeName = getDefaultOutputExecutableName();
+  let existingExe = path.join(resolved, targetExeName);
+  if (!fs.existsSync(existingExe)) {
+    const altExe = path.join(resolved, targetExeName === 'app.elf' ? 'app.exe' : 'app.elf');
+    if (fs.existsSync(altExe)) {
+      existingExe = altExe;
+    }
+  }
+
+  let needsGuestLibc = false;
+  if (mode === 'launch' && fs.existsSync(existingExe)) {
+    try {
+      const exeBuffer = fs.readFileSync(existingExe);
+      if (exeBuffer.includes(Buffer.from('libc.prx.guest.prx'))) {
+        needsGuestLibc = true;
+      }
+    } catch {}
+  }
+
   // Clean up any stale guest system library artifacts that conflict with AnyPS5 native translations
-  for (const guestSysPrx of ['libc.prx.guest.prx', 'libkernel.prx.guest.prx', 'libSceLibcInternal.prx.guest.prx']) {
+  if (!needsGuestLibc) {
+    for (const guestSysPrx of ['libc.prx.guest.prx', 'libkernel.prx.guest.prx', 'libSceLibcInternal.prx.guest.prx']) {
+      for (const searchDir of [resolved, app0Dir, sceModuleDir, prxDir]) {
+        const target = path.join(searchDir, guestSysPrx);
+        if (fs.existsSync(target)) {
+          try {
+            const backup = path.join(searchDir, 'module_backups', guestSysPrx);
+            if (!fs.existsSync(path.dirname(backup))) fs.mkdirSync(path.dirname(backup), { recursive: true });
+            if (fs.existsSync(backup)) fs.unlinkSync(backup);
+            fs.renameSync(target, backup);
+            sendLog(`[AnyPS5] Isolated obsolete guest system artifact "${guestSysPrx}" to module_backups/`, 'info');
+          } catch {}
+        }
+      }
+    }
+  } else {
     for (const searchDir of [resolved, app0Dir, sceModuleDir, prxDir]) {
-      const target = path.join(searchDir, guestSysPrx);
-      if (fs.existsSync(target)) {
+      const active = path.join(searchDir, 'libc.prx.guest.prx');
+      const backup = path.join(searchDir, 'module_backups', 'libc.prx.guest.prx');
+      if (!fs.existsSync(active) && fs.existsSync(backup)) {
         try {
-          const backup = path.join(searchDir, 'module_backups', guestSysPrx);
-          if (!fs.existsSync(path.dirname(backup))) fs.mkdirSync(path.dirname(backup), { recursive: true });
-          if (fs.existsSync(backup)) fs.unlinkSync(backup);
-          fs.renameSync(target, backup);
-          sendLog(`[AnyPS5] Isolated obsolete guest system artifact "${guestSysPrx}" to module_backups/`, 'info');
+          fs.copyFileSync(backup, active);
+          sendLog(`[AnyPS5] Restored backward-compatible guest libc stub for existing relinked title.`, 'info');
         } catch {}
       }
     }
@@ -1468,7 +1504,7 @@ function fixGameHierarchyInPlace(
 
       if (prxFiles.length > 0) {
         // Sanitize this directory: filter out eboot binaries, non-shared ELFs, backup artifacts, and fake system stubs
-        sanitizeModuleDirectory(currentDir, inputElf, sendLog, knownSystemLibs);
+        sanitizeModuleDirectory(currentDir, inputElf, sendLog, knownSystemLibs, needsGuestLibc);
 
         const backupDir = path.join(currentDir, 'module_backups');
 
