@@ -4,6 +4,7 @@ import { spawn, spawnSync, ChildProcess } from 'child_process';
 import os from 'os';
 import fs from 'fs';
 import { autoUpdater } from 'electron-updater';
+import { unwrapSelf } from './self_unwrapper';
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -1309,14 +1310,25 @@ function fixGameHierarchyInPlace(
       fs.closeSync(fd);
       const magic = buffer.readUInt32LE(0);
       if (magic === 0x1D3D154F || magic === 0xEEF51454) {
-        sendLog(`[AnyPS5] Detected encrypted/signed SELF container in eboot.bin. Unwrapping via tools/unwrap_self.py...`, 'info');
-        const unwrapScript = getResolvedUnwrapScript();
-        const unwrapRes = spawnSync(getPythonCommand(), [unwrapScript, ebootBin, inputElf], { cwd: resolved });
-        if (unwrapRes.status === 0 && fs.existsSync(inputElf)) {
-          fs.copyFileSync(inputElf, fallbackElf);
-          sendLog(`[AnyPS5] Successfully unwrapped SELF container into eboot.elf.`, 'success');
-        } else {
-          throw new Error(`Failed to unwrap SELF eboot.bin: ${unwrapRes.stderr?.toString()}`);
+        sendLog(`[AnyPS5] Detected encrypted/signed SELF container in eboot.bin. Unwrapping container...`, 'info');
+        try {
+          unwrapSelf(ebootBin, inputElf);
+          if (fs.existsSync(inputElf)) {
+            fs.copyFileSync(inputElf, fallbackElf);
+            sendLog(`[AnyPS5] Successfully unwrapped SELF container into eboot.elf.`, 'success');
+          } else {
+            throw new Error('Unwrapped eboot.elf not generated');
+          }
+        } catch (nativeErr: any) {
+          sendLog(`[AnyPS5] Native unwrapper reported: ${nativeErr.message}. Attempting fallback via tools/unwrap_self.py...`, 'warn');
+          const unwrapScript = getResolvedUnwrapScript();
+          const unwrapRes = spawnSync(getPythonCommand(), [unwrapScript, ebootBin, inputElf], { cwd: resolved });
+          if (unwrapRes.status === 0 && fs.existsSync(inputElf)) {
+            fs.copyFileSync(inputElf, fallbackElf);
+            sendLog(`[AnyPS5] Successfully unwrapped SELF container into eboot.elf via fallback.`, 'success');
+          } else {
+            throw new Error(`Failed to unwrap SELF eboot.bin: ${nativeErr.message || unwrapRes.stderr?.toString()}`);
+          }
         }
       } else {
         fs.copyFileSync(ebootBin, inputElf);
@@ -1556,8 +1568,19 @@ function fixGameHierarchyInPlace(
             const modInfo = inspectModuleType(fullPrx);
             if (modInfo.isSelf) {
               const unwrapped = fullPrx + '.unwrapped';
-              const res = spawnSync(getPythonCommand(), [unwrapScript, fullPrx, unwrapped]);
-              if (res.status === 0 && fs.existsSync(unwrapped)) {
+              let unwrapSuccess = false;
+              try {
+                unwrapSelf(fullPrx, unwrapped);
+                if (fs.existsSync(unwrapped)) {
+                  unwrapSuccess = true;
+                }
+              } catch (nativeErr) {
+                const res = spawnSync(getPythonCommand(), [unwrapScript, fullPrx, unwrapped]);
+                if (res.status === 0 && fs.existsSync(unwrapped)) {
+                  unwrapSuccess = true;
+                }
+              }
+              if (unwrapSuccess) {
                 if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true });
                 fs.copyFileSync(fullPrx, path.join(backupDir, prx + '.self_orig'));
                 fs.copyFileSync(unwrapped, fullPrx);
