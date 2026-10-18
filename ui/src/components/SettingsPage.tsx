@@ -487,7 +487,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
                     </>
                   )}
                   {updateStatus.status === 'error' && (
-                    <span className="text-rose-400 text-xs">
+                    <span className="text-rose-400 text-xs max-w-lg break-words">
                       {updateStatus.error || 'Update check failed.'}
                     </span>
                   )}

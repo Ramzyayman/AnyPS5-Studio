@@ -2482,10 +2482,14 @@ ipcMain.handle('anyps5:check-for-updates', async () => {
       updateInfo: result?.updateInfo,
     };
   } catch (err: any) {
+    let msg = err?.message || String(err);
+    if (msg.includes('Cannot find latest.yml') || msg.includes('Cannot find latest-linux.yml') || msg.includes('404')) {
+      msg = 'New release detected, but installer assets are still uploading to GitHub Releases. Please wait 1-2 minutes and try again.';
+    }
     return {
       status: 'error',
       currentVersion: app.getVersion(),
-      error: err?.message || String(err),
+      error: msg,
     };
   }
 });
