@@ -57,6 +57,7 @@ export const AddGameModal: React.FC<AddGameModalProps> = ({ isOpen, onClose, onA
 
     audioService.playConfirm();
 
+    const isLinuxHost = typeof navigator !== 'undefined' && navigator.userAgent.includes('Linux');
     const newGame: GameItem = {
       id: 'game-' + Date.now(),
       title: title.trim(),
@@ -65,8 +66,8 @@ export const AddGameModal: React.FC<AddGameModalProps> = ({ isOpen, onClose, onA
       category: 'game',
       status: 'ready_to_relink',
       path: folderPath.trim(),
-      executableName: 'eboot.bin',
-      targetPlatform: 'windows',
+      executableName: isLinuxHost ? 'app.elf' : 'eboot.bin',
+      targetPlatform: isLinuxHost ? 'linux' : 'windows',
       iconUrl: iconUrl || 'https://images.unsplash.com/photo-1550745165-9bc0b252726f?auto=format&fit=crop&w=400&q=80',
       backdropUrl: backdropUrl || 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?auto=format&fit=crop&w=1920&q=80',
       sizeBytes: sizeBytes || 0,

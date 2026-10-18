@@ -1695,18 +1695,26 @@ ipcMain.handle('anyps5:launch-game', async (_, game) => {
   }
 
   const defaultExeName = getDefaultOutputExecutableName();
+  const safeGameExe = game.executableName && !['eboot.bin', 'eboot.elf'].includes(game.executableName.toLowerCase())
+    ? game.executableName
+    : null;
+
   const candidateExes = [
-    path.join(game.path, game.executableName || defaultExeName),
     path.join(game.path, defaultExeName),
+    ...(safeGameExe ? [path.join(game.path, safeGameExe)] : []),
     path.join(game.path, defaultExeName === 'app.elf' ? 'app.exe' : 'app.elf'),
   ];
   const targetExe = candidateExes.find((p) => fs.existsSync(p));
 
   if (!targetExe) {
-    const expectedName = game.executableName || defaultExeName;
+    const expectedName = safeGameExe || defaultExeName;
     return {
       error: `Ported executable "${expectedName}" not found in ${game.path}. Please open Relinker Studio and click Relink first!`,
     };
+  }
+
+  if (process.platform === 'linux' && targetExe.endsWith('.exe') && !fs.existsSync(path.join(game.path, 'app.elf'))) {
+    sendLog(`[AnyPS5 Warning] Launching Windows PE executable (.exe) on Linux host without a native ELF (app.elf). If the game fails, please relink this title in Relinker Studio with Target: Linux.`, 'warn');
   }
 
   // Ensure executable permissions on POSIX
@@ -1848,6 +1856,12 @@ ipcMain.handle('anyps5:launch-game', async (_, game) => {
         } else {
           sendLog(`[AnyPS5 Diagnostics] Crash detected: Process Abort / Fail-Fast (0xC0000409). Check execution log for abort() or assertion failure.`, 'error');
         }
+      }
+
+      if (capturedOutput.toLowerCase().includes('not implemented')) {
+        const nidMatch = capturedOutput.match(/([A-Za-z0-9+\-_]{4,64})\s+not implemented/i);
+        const missingSym = nidMatch ? nidMatch[1] : 'Unknown';
+        sendLog(`[AnyPS5 Diagnostics] Unimplemented PlayStation 5 API: "${missingSym}". In AnyPS5 clean-room libraries, unimplemented system calls explicitly throw to avoid silent corruption. Look for community PRs implementing this export or submit a report.`, 'error');
       }
 
       mainWindow?.webContents.send('anyps5:game-exit', {

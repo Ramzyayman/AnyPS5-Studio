@@ -272,7 +272,16 @@ export const GameLauncherModal: React.FC<GameLauncherModalProps> = ({
         const failMatch = msg.match(/(?:Exception|what\(\)|Abort|Unimplemented|Missing):\s*([^\r\n]+)/i);
         if (failMatch && failMatch[1]) {
           const reason = failMatch[1].trim();
-          if (reason) setDetectedAbortReason(reason);
+          if (reason) {
+            setDetectedAbortReason(reason);
+            if (reason.toLowerCase().includes('not implemented')) {
+              setErrorMessage({
+                summary: 'Unimplemented PlayStation 5 API',
+                remedy: `The title attempted to call "${reason}", which has not yet been implemented in AnyPS5 system libraries. Check Community PRs below for potential fixes.`,
+                isRelinkHint: false,
+              });
+            }
+          }
         }
       }
 
@@ -429,7 +438,11 @@ export const GameLauncherModal: React.FC<GameLauncherModalProps> = ({
               <div className="flex items-center justify-center sm:justify-start space-x-2.5 mt-1 text-xs text-neutral-400 font-mono">
                 <span>{game.titleId}</span>
                 <span>•</span>
-                <span>Native 64-bit Windows</span>
+                <span>
+                  {game.targetPlatform === 'linux' || (typeof navigator !== 'undefined' && navigator.userAgent.includes('Linux'))
+                    ? 'Native 64-bit Linux (ELF)'
+                    : 'Native 64-bit Windows'}
+                </span>
               </div>
             </div>
 
@@ -506,7 +519,9 @@ export const GameLauncherModal: React.FC<GameLauncherModalProps> = ({
                 <div className="p-3 rounded-xl bg-blue-500/10 border border-blue-500/25 flex items-center justify-between text-xs animate-fade-in">
                   <div className="flex items-center space-x-2">
                     <GitPullRequest className="w-3.5 h-3.5 text-[#00a2ff] shrink-0" />
-                    <span className="text-white/60">Abort Exception:</span>
+                    <span className="text-white/60">
+                      {detectedAbortReason.toLowerCase().includes('not implemented') ? 'Unimplemented PS5 API:' : 'Abort Exception:'}
+                    </span>
                     <span className="font-mono text-blue-300 font-semibold">{detectedAbortReason}</span>
                   </div>
                   {errorMessage?.isRelinkHint && onNavigateToRelinker ? (
