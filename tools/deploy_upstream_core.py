@@ -20,6 +20,20 @@ def deploy(target_platform):
     artifact_name = "anyps5-upstream-core-linux-x64" if is_linux else "anyps5-upstream-core-windows-x64"
     relinker_bin_name = "relinker" if is_linux else "relinker.exe"
 
+    res_in_prog = run_cmd("gh run list --workflow build-upstream-core.yml --json databaseId,status", check=False)
+    if res_in_prog.returncode == 0:
+        try:
+            runs_data = json.loads(res_in_prog.stdout)
+            for item in runs_data:
+                if item.get("status") in ("in_progress", "queued"):
+                    in_prog_id = item.get("databaseId")
+                    if in_prog_id:
+                        print(f"Waiting for in-progress core build run #{in_prog_id} to finish...")
+                        run_cmd(f"gh run watch {in_prog_id} --interval 10 --timeout 600", check=False)
+                        break
+        except Exception as prog_err:
+            print(f"Warning: Failed to inspect in-progress runs: {prog_err}")
+
     print(f"Resolving latest '{artifact_name}' artifact from GitHub Actions...")
     temp_dir = ROOT / f"dist-upstream-download-{target_platform}"
     if temp_dir.exists():
