@@ -33,7 +33,7 @@ declare global {
       getSettings?: () => Promise<AppSettings>;
       saveSettings?: (settings: Partial<AppSettings>) => Promise<boolean>;
       getAvailableGpus?: () => Promise<DetectedGpu[]>;
-      checkForUpdates?: () => Promise<{ status: string; currentVersion: string; error?: string }>;
+      checkForUpdates?: () => Promise<{ status: string; currentVersion: string; error?: string; updateInfo?: any }>;
       quitAndInstallUpdate?: () => void;
       getAppVersion?: () => Promise<string>;
       openExternal?: (url: string) => Promise<boolean>;
@@ -64,7 +64,7 @@ declare global {
         callback: (data: { level: string; message: string; timestamp?: string }) => void
       ) => () => void;
       onGameExit?: (
-        callback: (data: { code: number | null; exitCodeHex: string; isCrash: boolean }) => void
+        callback: (data: { code: number | null; signal?: string | null; exitCodeHex: string; isCrash: boolean }) => void
       ) => () => void;
       minimizeWindow?: () => Promise<void>;
       maximizeWindow?: () => Promise<void>;
@@ -149,7 +149,7 @@ class ApiBridge {
     return {
       relinkerPath: '',
       prxPath: '',
-      defaultTarget: 'windows',
+      defaultTarget: (typeof navigator !== 'undefined' && navigator.userAgent.includes('Linux')) ? 'linux' : 'windows',
       cpuFix: 'intel',
       soundEnabled: true,
       hapticsEnabled: true,
@@ -234,7 +234,7 @@ class ApiBridge {
     return () => {};
   }
 
-  public onGameExit(callback: (data: { code: number | null; exitCodeHex: string; isCrash: boolean }) => void): () => void {
+  public onGameExit(callback: (data: { code: number | null; signal?: string | null; exitCodeHex: string; isCrash: boolean }) => void): () => void {
     if (window.anyps5?.onGameExit) {
       return window.anyps5.onGameExit(callback);
     }
@@ -273,7 +273,7 @@ class ApiBridge {
     return () => {};
   }
 
-  public async checkForUpdates(): Promise<{ status: string; currentVersion: string; error?: string }> {
+  public async checkForUpdates(): Promise<{ status: string; currentVersion: string; error?: string; updateInfo?: any }> {
     if (window.anyps5?.checkForUpdates) {
       return await window.anyps5.checkForUpdates();
     }
@@ -491,9 +491,9 @@ class ApiBridge {
       { id: 3, title: 'Scanning Bundled Modules', description: 'Parsing modules in sce_module/ for runtime PRX dependencies' },
       { id: 4, title: 'AMD to Intel Codegen Translation', description: options.cpuTranslation === 'intel' ? 'Rewriting AMD-specific Zen2 instructions' : 'Instruction lowering skipped (AMD Native)' },
       { id: 5, title: 'Unused Import Filter & PLT Optimization', description: `Analyzing call graph with unused-filter=${options.unusedFilter}` },
-      { id: 6, title: 'Relinking PE Executable', description: 'Generating Windows PE headers, import tables, and entry RVA' },
+      { id: 6, title: options.target === 'linux' ? 'Relinking Native ELF Executable' : 'Relinking PE Executable', description: options.target === 'linux' ? 'Generating Linux ELF headers, dynamic tags, and entry RVA' : 'Generating Windows PE headers, import tables, and entry RVA' },
       { id: 7, title: 'Copying Clean-room PRX Libraries', description: 'Deploying libkernel.prx, libSceAgcDriver.prx, libScePad.prx' },
-      { id: 8, title: 'Finalizing Native Package', description: 'Writing app.exe and registry metadata' },
+      { id: 8, title: 'Finalizing Native Package', description: options.target === 'linux' ? 'Writing app.elf and runtime configuration' : 'Writing app.exe and registry metadata' },
     ];
 
     onLog({

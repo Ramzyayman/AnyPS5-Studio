@@ -94,16 +94,75 @@ Inspect imported function NIDs, discover missing middleware stubs, and manage in
 ### Installation
 
 #### Windows
-1. Download `AnyPS5-Studio-Setup-x.x.x.exe` from the [Releases](https://github.com/Ramzyayman/AnyPS5-Studio/releases) page.
-2. Run the installer to set up AnyPS5 Studio on your PC. The installer bundles the relinker engine, clean-room system libraries (`libs/`), and runtime DLLs out of the box.
+1. Download `AnyPS5-Studio-Setup-1.1.3.exe` from the [Releases](https://github.com/Ramzyayman/AnyPS5-Studio/releases) page.
+2. Run the installer to install AnyPS5 Studio. The installer automatically provisions the static relinker engine (`relinker.exe`), clean-room PlayStation 5 system libraries (`libs/`), and graphics translation DLLs.
 
 #### Linux
-1. Download `AnyPS5-Studio-x.x.x.AppImage` from the [Releases](https://github.com/Ramzyayman/AnyPS5-Studio/releases) page.
-2. Make the file executable:
+
+AnyPS5 Studio is distributed as a standalone 64-bit AppImage (`AnyPS5-Studio-1.1.3.AppImage`). It bundles the native static relinker, system PRX libraries, and Vulkan runtime layers.
+
+##### 1. Prerequisite: Install FUSE 2 Library
+AppImage packages use FUSE (Filesystem in Userspace) to mount and execute. Modern Linux distributions (Ubuntu 22.04 LTS, Ubuntu 24.04 LTS, Debian 12+, Fedora, Arch Linux) default to FUSE 3 and do not include the legacy FUSE 2 library by default.
+
+Without this package, launching the AppImage will produce the following error:
+```
+dlopen(): error loading libfuse.so.2: cannot open shared object file: No such file or directory
+```
+
+Install FUSE 2 for your distribution:
+
+- **Ubuntu 22.04 / 24.04, Linux Mint, Pop!_OS, Debian 12+**:
+  ```bash
+  sudo apt update
+  sudo apt install -y libfuse2
+  ```
+  *(Note: On Ubuntu 24.04 and newer Debian distributions, the package may also be installed as `libfuse2t64`)*
+
+- **Fedora, RHEL, CentOS**:
+  ```bash
+  sudo dnf install -y fuse-libs
+  ```
+
+- **Arch Linux, Manjaro, EndeavourOS, CachyOS**:
+  ```bash
+  sudo pacman -S --needed fuse2
+  ```
+
+- **openSUSE (Tumbleweed / Leap)**:
+  ```bash
+  sudo zypper install -y libfuse2
+  ```
+
+##### 2. Download and Mark Executable
+1. Download the latest `AnyPS5-Studio-1.1.3.AppImage` from [GitHub Releases](https://github.com/Ramzyayman/AnyPS5-Studio/releases).
+2. Open a terminal in the folder containing the downloaded file (e.g. `cd ~/Downloads`).
+3. Make the AppImage executable:
    ```bash
-   chmod +x AnyPS5-Studio-*.AppImage
-   ./AnyPS5-Studio-*.AppImage
+   chmod +x AnyPS5-Studio-1.1.3.AppImage
    ```
+
+##### 3. Launch the Studio
+Run the AppImage from your terminal:
+```bash
+./AnyPS5-Studio-1.1.3.AppImage
+```
+Or double-click the file in your desktop file manager (GNOME Files, Dolphin, Thunar).
+
+##### 4. Optional Desktop Integration
+For seamless desktop menu integration with your application launcher:
+- You can install [AppImageLauncher](https://github.com/TheAssassin/AppImageLauncher) to integrate downloaded AppImages with a single click.
+- Or place the AppImage in your user binary path:
+  ```bash
+  mkdir -p ~/.local/bin
+  mv AnyPS5-Studio-1.1.3.AppImage ~/.local/bin/anyps5-studio
+  ```
+
+##### 5. Fallback for Restricted Environments (Docker, WSL2, Sandboxes)
+If you are running in an environment where FUSE mounting is disallowed or restricted, you can run AnyPS5 Studio directly by extracting the AppImage contents:
+```bash
+./AnyPS5-Studio-1.1.3.AppImage --appimage-extract
+./squashfs-root/anyps5-ui
+```
 
 ### Usage
 1. Launch **AnyPS5 Studio**.

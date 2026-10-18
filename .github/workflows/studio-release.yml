@@ -14,18 +14,29 @@ concurrency:
 
 jobs:
   build-and-publish:
-    name: Build & Publish AnyPS5 Studio
-    runs-on: windows-latest
-    timeout-minutes: 25
+    name: Build & Publish AnyPS5 Studio (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows
+            artifact-name: AnyPS5-Studio-Setup
+          - os: ubuntu-latest
+            platform: linux
+            artifact-name: AnyPS5-Studio-AppImage
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: 'npm'
@@ -36,29 +47,41 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -euo pipefail
           mkdir -p build libs
-          echo "Deploying latest core binaries and PRXs..."
-          python tools/deploy_upstream_core.py || {
-            echo "Fallback to official v0.1.2 release binaries..."
-            curl.exe -sSfL -o build/relinker.exe https://github.com/boykopovar/AnyPS5/releases/download/v0.1.2/relinker-v0.1.2.exe
-            curl.exe -sSfL -o prx-windows.zip https://github.com/boykopovar/AnyPS5/releases/download/v0.1.2/prx-windows-v0.1.2.zip
-            powershell.exe -NoProfile -Command "Expand-Archive -Path prx-windows.zip -DestinationPath . -Force"
-            rm -f prx-windows.zip
-            if [ -d "libs/libs" ]; then
-              cp -rn libs/libs/* libs/ 2>/dev/null || true
-              rm -rf libs/libs
-            fi
-          }
+          echo "Deploying latest core binaries and PRXs for ${{ matrix.platform }}..."
+          python tools/deploy_upstream_core.py --platform ${{ matrix.platform }}
           if [ -d "core/libs/overrides" ]; then
             echo "Applying repository PRX overrides..."
             cp -fv core/libs/overrides/* libs/ || true
           fi
+          if [ "${{ matrix.platform }}" = "linux" ]; then
+            chmod +x build/relinker
+            chmod +x libs/*.prx || true
+            test -x build/relinker || (echo "Error: build/relinker is not executable" && exit 1)
+          else
+            test -f build/relinker.exe || (echo "Error: build/relinker.exe not found" && exit 1)
+          fi
+          prx_count=$(ls -1 libs/*.prx | wc -l)
+          echo "Verified $prx_count PRX libraries deployed."
+          if [ "$prx_count" -lt 50 ]; then
+            echo "Error: Expected at least 50 PRX libraries, found $prx_count"
+            exit 1
+          fi
           ls -la build/
-          ls -la libs/ | head -n 10
+          ls -la libs/
 
       - name: Install dependencies
         working-directory: ui
         run: npm ci
+
+      - name: Sync package version with release tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          TAG_VER="${GITHUB_REF_NAME#v}"
+          echo "Setting ui package.json version to $TAG_VER"
+          npm --prefix ui version "$TAG_VER" --no-git-tag-version --allow-same-version
 
       - name: Compile and package Studio installer
         working-directory: ui
@@ -79,25 +102,39 @@ jobs:
             extra_args="--prerelease"
           fi
           gh release create "$tag" \
-            ui/dist-installer/AnyPS5-Studio-Setup-*.exe \
-            ui/dist-installer/AnyPS5-Studio-Setup-*.exe.blockmap \
-            ui/dist-installer/latest.yml \
             --title "AnyPS5 Studio $tag" \
             --generate-notes \
             $extra_args \
-            --verify-tag || \
-          gh release upload "$tag" \
-            ui/dist-installer/AnyPS5-Studio-Setup-*.exe \
-            ui/dist-installer/AnyPS5-Studio-Setup-*.exe.blockmap \
-            ui/dist-installer/latest.yml \
-            --clobber
+            --verify-tag || true
+
+          if [ "${{ matrix.platform }}" = "windows" ]; then
+            cp -fv ui/dist-installer/latest.yml ui/dist-installer/preview.yml || true
+            gh release upload "$tag" \
+              ui/dist-installer/AnyPS5-Studio-Setup-*.exe \
+              ui/dist-installer/AnyPS5-Studio-Setup-*.exe.blockmap \
+              ui/dist-installer/latest.yml \
+              ui/dist-installer/preview.yml \
+              --clobber
+          else
+            gh release upload "$tag" \
+              ui/dist-installer/AnyPS5-Studio-*.AppImage \
+              --clobber
+            if [ -f ui/dist-installer/latest-linux.yml ]; then
+              cp -fv ui/dist-installer/latest-linux.yml ui/dist-installer/preview-linux.yml || true
+              gh release upload "$tag" \
+                ui/dist-installer/latest-linux.yml \
+                ui/dist-installer/preview-linux.yml \
+                --clobber
+            fi
+          fi
 
       - name: Upload installer workflow artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: AnyPS5-Studio-Setup
+          name: ${{ matrix.artifact-name }}
           path: |
             ui/dist-installer/*.exe
+            ui/dist-installer/*.AppImage
             ui/dist-installer/*.blockmap
-            ui/dist-installer/latest.yml
+            ui/dist-installer/*.yml

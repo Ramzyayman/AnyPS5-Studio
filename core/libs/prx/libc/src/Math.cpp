@@ -615,4 +615,12 @@ union SonyDconst {
 
 static_assert(std::endian::native == std::endian::little);
 SonyDconst _Inf_nid_postfix {{0, 0, 0, 0x7ff0, 0, 0, 0, 0}};
+
+int APS5_VABI ilogbf_nid_postfix(float x) {
+    return std::ilogbf(x);
+}
+
+int APS5_VABI _Dsign_nid_postfix(double x) {
+    return std::signbit(x) ? 1 : 0;
+}
 }

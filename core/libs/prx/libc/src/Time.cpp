@@ -645,4 +645,14 @@ int APS5_VABI asctime_s_nid_postfix(char* buffer, std::size_t size, const GuestT
     return SonyAsctimeS(buffer, size, time);
 }
 
+const void* APS5_VABI _Getptimes_nid_postfix() {
+    static const char* const times[] = {
+        ":AM:am:PM:pm",
+        ":Sunday:Sun:Monday:Mon:Tuesday:Tue:Wednesday:Wed:Thursday:Thu:Friday:Fri:Saturday:Sat",
+        ":January:Jan:February:Feb:March:Mar:April:Apr:May:May:June:Jun:July:Jul:August:Aug:September:Sep:October:Oct:November:Nov:December:Dec",
+        ":UTC:UTC"
+    };
+    return times;
+}
+
 }

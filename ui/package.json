@@ -1,6 +1,6 @@
 {
   "name": "anyps5-ui",
-  "version": "1.1.2",
+  "version": "1.1.3",
   "type": "module",
   "description": "PlayStation 5 styled Launcher and Relinker Studio for AnyPS5",
   "author": "RamsMadeUI",
@@ -33,8 +33,12 @@
     ],
     "extraResources": [
       {
-        "from": "../build/relinker.exe",
-        "to": "build/relinker.exe"
+        "from": "../build",
+        "to": "build",
+        "filter": [
+          "relinker",
+          "relinker.exe"
+        ]
       },
       {
         "from": "../libs",
@@ -45,6 +49,19 @@
         "to": "tools"
       }
     ],
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "public/icon.png",
+      "category": "Game",
+      "artifactName": "AnyPS5-Studio-${version}.${ext}"
+    },
     "win": {
       "target": [
         {

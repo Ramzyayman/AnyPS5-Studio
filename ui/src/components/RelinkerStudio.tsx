@@ -30,14 +30,14 @@ interface HumanStep {
   description: string;
 }
 
-const HUMAN_STEPS: Record<number, HumanStep> = {
+const getHumanSteps = (target: string): Record<number, HumanStep> => ({
   1: { stepNumber: 1, title: 'Checking game files', description: 'Verifying decrypted game files, folder layout, and eboot' },
   2: { stepNumber: 2, title: 'Checking compatibility', description: 'Matching PlayStation 5 system calls with PC runtime libraries' },
   3: { stepNumber: 3, title: 'Preparing runtime libraries', description: 'Configuring clean-room system libraries for graphics and input' },
   4: { stepNumber: 4, title: 'Translating CPU instructions', description: 'Adapting console CPU instructions for your processor' },
-  5: { stepNumber: 5, title: 'Building Windows executable', description: 'Generating native 64-bit Windows application (app.exe)' },
+  5: { stepNumber: 5, title: target === 'linux' ? 'Building Linux executable' : 'Building Windows executable', description: target === 'linux' ? 'Generating native 64-bit Linux executable (app.elf)' : 'Generating native 64-bit Windows application (app.exe)' },
   6: { stepNumber: 6, title: 'Finalizing native package', description: 'Extracting artwork and preparing instant Plug & Play launcher' },
-};
+});
 
 export const RelinkerStudio: React.FC<RelinkerStudioProps> = ({
   games,
@@ -64,6 +64,8 @@ export const RelinkerStudio: React.FC<RelinkerStudioProps> = ({
   // System Telemetry State
   const [telemetry, setTelemetry] = useState<SystemTelemetry | null>(null);
 
+  const isLinuxHost = (typeof navigator !== 'undefined' && navigator.userAgent.includes('Linux'));
+
   // Technical 8-Stage Pipeline (for backend and Advanced mode)
   const [technicalStages, setTechnicalStages] = useState<ConversionStage[]>([
     { id: 1, title: 'Validating Decrypted ELF', description: 'Inspecting ELF headers & PT_LOAD segments', status: 'pending' },
@@ -71,9 +73,9 @@ export const RelinkerStudio: React.FC<RelinkerStudioProps> = ({
     { id: 3, title: 'Scanning Bundled Modules', description: 'Parsing modules in sce_module/ for runtime dependencies', status: 'pending' },
     { id: 4, title: 'AMD to Intel Codegen Translation', description: 'Rewriting AMD-specific Zen2 instructions', status: 'pending' },
     { id: 5, title: 'Unused Import Filter & PLT', description: 'Analyzing control-flow and compacting PLT', status: 'pending' },
-    { id: 6, title: 'Relinking PE Executable', description: 'Generating Windows PE headers and entry RVA', status: 'pending' },
+    { id: 6, title: isLinuxHost ? 'Relinking Native ELF Executable' : 'Relinking PE Executable', description: isLinuxHost ? 'Generating Linux ELF headers and dynamic segments' : 'Generating Windows PE headers and entry RVA', status: 'pending' },
     { id: 7, title: 'Copying Clean-room PRX Libraries', description: 'Deploying system libraries (libkernel, libSceAgcDriver)', status: 'pending' },
-    { id: 8, title: 'Finalizing Native Package', description: 'Writing app.exe and registry metadata', status: 'pending' },
+    { id: 8, title: 'Finalizing Native Package', description: isLinuxHost ? 'Writing app.elf and runtime configuration' : 'Writing app.exe and registry metadata', status: 'pending' },
   ]);
 
   // Terminal & Progress Logs
@@ -89,7 +91,7 @@ export const RelinkerStudio: React.FC<RelinkerStudioProps> = ({
 
   // Relinker Configuration Options
   const [options, setOptions] = useState<RelinkerOptions>({
-    target: 'windows',
+    target: isLinuxHost ? 'linux' : 'windows',
     subsystem: 'gui',
     cpuTranslation: 'intel',
     unusedFilter: 0,
@@ -117,11 +119,14 @@ export const RelinkerStudio: React.FC<RelinkerStudioProps> = ({
       const data = await apiBridge.getTelemetry();
       setTelemetry(data);
 
+      const isLinux = data?.osName?.toLowerCase().includes('linux') || (typeof navigator !== 'undefined' && navigator.userAgent.includes('Linux'));
+      const defaultTarget = isLinux ? 'linux' : 'windows';
+
       if (data.recommendedCpuTranslation) {
         setOptions(prev => ({
           ...prev,
           cpuTranslation: data.recommendedCpuTranslation || 'intel',
-          target: 'windows',
+          target: defaultTarget,
           subsystem: 'gui',
           unusedFilter: 0,
         }));
@@ -160,6 +165,8 @@ export const RelinkerStudio: React.FC<RelinkerStudioProps> = ({
     }
   }, [logs, showLiveLogs, showErrorLogs, mode]);
 
+  const humanSteps = useMemo(() => getHumanSteps(options.target), [options.target]);
+
   // Active step mapping during execution
   const activeStepInfo: HumanStep = useMemo(() => {
     const s1 = technicalStages.find(s => s.id === 1);
@@ -171,22 +178,22 @@ export const RelinkerStudio: React.FC<RelinkerStudioProps> = ({
     const s7 = technicalStages.find(s => s.id === 7);
     const s8 = technicalStages.find(s => s.id === 8);
 
-    if (s8?.status === 'active' || s8?.status === 'completed') return HUMAN_STEPS[6];
-    if (s6?.status === 'active' || s5?.status === 'active') return HUMAN_STEPS[5];
-    if (s4?.status === 'active') return HUMAN_STEPS[4];
-    if (s7?.status === 'active' || s3?.status === 'active') return HUMAN_STEPS[3];
-    if (s2?.status === 'active') return HUMAN_STEPS[2];
-    if (s1?.status === 'active') return HUMAN_STEPS[1];
+    if (s8?.status === 'active' || s8?.status === 'completed') return humanSteps[6];
+    if (s6?.status === 'active' || s5?.status === 'active') return humanSteps[5];
+    if (s4?.status === 'active') return humanSteps[4];
+    if (s7?.status === 'active' || s3?.status === 'active') return humanSteps[3];
+    if (s2?.status === 'active') return humanSteps[2];
+    if (s1?.status === 'active') return humanSteps[1];
 
     const completedCount = technicalStages.filter(s => s.status === 'completed').length;
-    if (completedCount >= 7) return HUMAN_STEPS[6];
-    if (completedCount >= 5) return HUMAN_STEPS[5];
-    if (completedCount >= 4) return HUMAN_STEPS[4];
-    if (completedCount >= 2) return HUMAN_STEPS[3];
-    if (completedCount >= 1) return HUMAN_STEPS[2];
+    if (completedCount >= 7) return humanSteps[6];
+    if (completedCount >= 5) return humanSteps[5];
+    if (completedCount >= 4) return humanSteps[4];
+    if (completedCount >= 2) return humanSteps[3];
+    if (completedCount >= 1) return humanSteps[2];
 
-    return HUMAN_STEPS[1];
-  }, [technicalStages]);
+    return humanSteps[1];
+  }, [technicalStages, humanSteps]);
 
   // Overall Progress Percentage (0-100%)
   const overallProgress = useMemo(() => {
@@ -452,12 +459,16 @@ export const RelinkerStudio: React.FC<RelinkerStudioProps> = ({
                       <div className="space-y-2">
                         <div className="flex justify-between border-b border-white/5 pb-1">
                           <span className="text-neutral-500">Output Format:</span>
-                          <span className="text-neutral-200">Windows Executable (.exe)</span>
+                          <span className="text-neutral-200">
+                            {options.target === 'linux' ? 'Linux Executable (.elf)' : options.target === 'macos' ? 'macOS Mach-O' : 'Windows Executable (.exe)'}
+                          </span>
                         </div>
-                        <div className="flex justify-between border-b border-white/5 pb-1">
-                          <span className="text-neutral-500">Window Subsystem:</span>
-                          <span className="text-neutral-200">Clean Window (GUI)</span>
-                        </div>
+                        {options.target === 'windows' && (
+                          <div className="flex justify-between border-b border-white/5 pb-1">
+                            <span className="text-neutral-500">Window Subsystem:</span>
+                            <span className="text-neutral-200">Clean Window (GUI)</span>
+                          </div>
+                        )}
                         <div className="flex justify-between border-b border-white/5 pb-1">
                           <span className="text-neutral-500">CPU Translation:</span>
                           <span className="text-neutral-200">
@@ -626,7 +637,9 @@ export const RelinkerStudio: React.FC<RelinkerStudioProps> = ({
                     {selectedGame.title} is Ready to Play
                   </h2>
                   <p className="text-xs text-neutral-300 mt-1">
-                    Converted to a native 64-bit Windows executable with DirectX 12 & Vulkan driver support.
+                    {options.target === 'linux'
+                      ? 'Converted to a native 64-bit Linux executable with Vulkan driver support.'
+                      : 'Converted to a native 64-bit Windows executable with DirectX 12 & Vulkan driver support.'}
                   </p>
                 </div>
 
@@ -635,7 +648,7 @@ export const RelinkerStudio: React.FC<RelinkerStudioProps> = ({
                     Native Output Location
                   </span>
                   <div className="p-3 rounded-xl bg-white/[0.03] border border-white/10 font-mono text-xs text-emerald-300 select-all break-all">
-                    {selectedGame.path}\app.exe
+                    {selectedGame.path}{options.target === 'linux' ? '/app.elf' : '\\app.exe'}
                   </div>
                 </div>
 
@@ -835,43 +848,45 @@ export const RelinkerStudio: React.FC<RelinkerStudioProps> = ({
                 </div>
               </div>
 
-              {/* Subsystem */}
-              <div>
-                <label className="block text-xs font-medium text-neutral-300 mb-1">
-                  Windows Subsystem
-                  <span className="text-[10px] text-neutral-500 font-mono ml-2">(--windows-gui)</span>
-                </label>
-                <div className="grid grid-cols-2 gap-1.5 bg-black/40 p-1 rounded-xl border border-white/10">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      audioService.playNavTick();
-                      setOptions(o => ({ ...o, subsystem: 'gui' }));
-                    }}
-                    className={`py-1.5 px-3 rounded-lg text-xs font-medium transition-colors ${
-                      options.subsystem === 'gui'
-                        ? 'bg-white text-black shadow font-semibold'
-                        : 'text-neutral-400 hover:text-white'
-                    }`}
-                  >
-                    Clean Window (GUI)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      audioService.playNavTick();
-                      setOptions(o => ({ ...o, subsystem: 'console' }));
-                    }}
-                    className={`py-1.5 px-3 rounded-lg text-xs font-medium transition-colors ${
-                      options.subsystem === 'console'
-                        ? 'bg-white text-black shadow font-semibold'
-                        : 'text-neutral-400 hover:text-white'
-                    }`}
-                  >
-                    Console Subsystem
-                  </button>
+              {/* Subsystem (Windows only) */}
+              {options.target === 'windows' && (
+                <div>
+                  <label className="block text-xs font-medium text-neutral-300 mb-1">
+                    Windows Subsystem
+                    <span className="text-[10px] text-neutral-500 font-mono ml-2">(--windows-gui)</span>
+                  </label>
+                  <div className="grid grid-cols-2 gap-1.5 bg-black/40 p-1 rounded-xl border border-white/10">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        audioService.playNavTick();
+                        setOptions(o => ({ ...o, subsystem: 'gui' }));
+                      }}
+                      className={`py-1.5 px-3 rounded-lg text-xs font-medium transition-colors ${
+                        options.subsystem === 'gui'
+                          ? 'bg-white text-black shadow font-semibold'
+                          : 'text-neutral-400 hover:text-white'
+                      }`}
+                    >
+                      Clean Window (GUI)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        audioService.playNavTick();
+                        setOptions(o => ({ ...o, subsystem: 'console' }));
+                      }}
+                      className={`py-1.5 px-3 rounded-lg text-xs font-medium transition-colors ${
+                        options.subsystem === 'console'
+                          ? 'bg-white text-black shadow font-semibold'
+                          : 'text-neutral-400 hover:text-white'
+                      }`}
+                    >
+                      Console Subsystem
+                    </button>
+                  </div>
                 </div>
-              </div>
+              )}
 
               {/* CPU Codegen Translation */}
               <div>
@@ -929,25 +944,33 @@ export const RelinkerStudio: React.FC<RelinkerStudioProps> = ({
 
               {/* Diagnostics & Call Tracing */}
               <div className="pt-2 border-t border-white/5 space-y-2 text-xs text-neutral-300">
-                <label className="flex items-center space-x-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={options.windowsDiagnostics}
-                    onChange={(e) => setOptions(o => ({ ...o, windowsDiagnostics: e.target.checked }))}
-                    className="rounded bg-black border-white/20 text-white focus:ring-0"
-                  />
-                  <span>Startup diagnostics (--windows-diagnostics)</span>
-                </label>
+                {options.target === 'windows' ? (
+                  <>
+                    <label className="flex items-center space-x-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={options.windowsDiagnostics}
+                        onChange={(e) => setOptions(o => ({ ...o, windowsDiagnostics: e.target.checked }))}
+                        className="rounded bg-black border-white/20 text-white focus:ring-0"
+                      />
+                      <span>Startup diagnostics (--windows-diagnostics)</span>
+                    </label>
 
-                <label className="flex items-center space-x-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={options.traceImports}
-                    onChange={(e) => setOptions(o => ({ ...o, traceImports: e.target.checked }))}
-                    className="rounded bg-black border-white/20 text-white focus:ring-0"
-                  />
-                  <span>Call tracing (--trace-imports)</span>
-                </label>
+                    <label className="flex items-center space-x-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={options.traceImports}
+                        onChange={(e) => setOptions(o => ({ ...o, traceImports: e.target.checked }))}
+                        className="rounded bg-black border-white/20 text-white focus:ring-0"
+                      />
+                      <span>Call tracing (--trace-imports)</span>
+                    </label>
+                  </>
+                ) : (
+                  <div className="text-[11px] text-neutral-500 font-mono italic">
+                    Linux Target: Native ELF dynamic linking with $ORIGIN/libs RPATH
+                  </div>
+                )}
               </div>
 
             </div>

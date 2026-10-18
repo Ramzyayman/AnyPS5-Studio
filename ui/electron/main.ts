@@ -111,8 +111,7 @@ if (!gotTheLock) {
     try {
       autoUpdater.autoDownload = true;
       autoUpdater.autoInstallOnAppQuit = true;
-      // Stable users only receive full releases; preview builds are excluded from the auto-update feed
-      autoUpdater.allowPrerelease = false;
+      autoUpdater.allowPrerelease = true;
 
       const sendUpdateStatus = (status: {
         status: 'idle' | 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'error';
@@ -184,7 +183,7 @@ function getFolderSize(targetPath: string): number {
     const stat = fs.statSync(targetPath);
     if (!stat.isDirectory()) {
       const base = path.basename(targetPath).toLowerCase();
-      if (base === 'eboot.bin' || base === 'eboot.elf' || base === 'app.exe') {
+      if (base === 'eboot.bin' || base === 'eboot.elf' || base === 'app.exe' || base === 'app.elf') {
         return getFolderSize(path.dirname(targetPath));
       }
       return stat.size;
@@ -223,6 +222,41 @@ ipcMain.handle('anyps5:get-games', async () => {
             if (actualSize > 0 && g.sizeBytes !== actualSize) {
               g.sizeBytes = actualSize;
               changed = true;
+            }
+
+            const isLinux = process.platform === 'linux';
+            const hasAppElf = fs.existsSync(path.join(g.path, 'app.elf'));
+            const hasAppExe = fs.existsSync(path.join(g.path, 'app.exe'));
+            if (isLinux) {
+              if (hasAppElf) {
+                if (g.status !== 'ported' || g.executableName !== 'app.elf' || g.targetPlatform !== 'linux') {
+                  g.status = 'ported';
+                  g.executableName = 'app.elf';
+                  g.targetPlatform = 'linux';
+                  changed = true;
+                }
+              } else if (hasAppExe) {
+                if (g.status !== 'ready_to_relink' || g.executableName !== 'app.elf') {
+                  g.status = 'ready_to_relink';
+                  g.executableName = 'app.elf';
+                  changed = true;
+                }
+              }
+            } else if (process.platform === 'win32') {
+              if (hasAppExe) {
+                if (g.status !== 'ported' || g.executableName !== 'app.exe' || g.targetPlatform !== 'windows') {
+                  g.status = 'ported';
+                  g.executableName = 'app.exe';
+                  g.targetPlatform = 'windows';
+                  changed = true;
+                }
+              } else if (hasAppElf) {
+                if (g.status !== 'ready_to_relink' || g.executableName !== 'app.exe') {
+                  g.status = 'ready_to_relink';
+                  g.executableName = 'app.exe';
+                  changed = true;
+                }
+              }
             }
           }
         }
@@ -464,24 +498,66 @@ function detectAvailableGpus(): DetectedGpu[] {
     });
   } else if (platform === 'linux') {
     try {
-      const out = spawnSync('lspci', [], { encoding: 'utf8', timeout: 3000 });
-      if (out.stdout) {
-        const vgaLines = out.stdout.split('\n').filter(l => l.includes('VGA compatible controller') || l.includes('3D controller'));
-        for (const line of vgaLines) {
-          const parts = line.split(': ');
-          const gpuDesc = (parts[1] || line).trim();
-          const lower = gpuDesc.toLowerCase();
-          const isNvidia = lower.includes('nvidia');
-          const isAmd = lower.includes('amd') || lower.includes('radeon');
-          gpus.push({
-            name: gpuDesc,
-            vendor: isNvidia ? 'nvidia' : (isAmd ? 'amd' : 'intel'),
-            isDiscrete: isNvidia || isAmd,
-            isVirtual: false,
-          });
+      const vkOut = spawnSync('vulkaninfo', ['--summary'], { encoding: 'utf8', timeout: 3000 });
+      if (vkOut.stdout) {
+        const lines = vkOut.stdout.split('\n');
+        let currentDevice = '';
+        let currentType = '';
+        let currentVendor = '';
+        for (const rawLine of lines) {
+          const line = rawLine.trim();
+          if (line.startsWith('deviceName')) {
+            const parts = line.split('=');
+            if (parts[1]) currentDevice = parts[1].trim();
+          } else if (line.startsWith('deviceType')) {
+            const parts = line.split('=');
+            if (parts[1]) currentType = parts[1].trim();
+          } else if (line.startsWith('vendorID')) {
+            const parts = line.split('=');
+            if (parts[1]) currentVendor = parts[1].trim();
+          }
+          if (currentDevice && (currentType || currentVendor)) {
+            const lower = currentDevice.toLowerCase();
+            const isNvidia = lower.includes('nvidia') || currentVendor.includes('0x10de');
+            const isAmd = lower.includes('amd') || lower.includes('radeon') || currentVendor.includes('0x1002');
+            const isVirtual = lower.includes('vmware') || lower.includes('virtualbox') || lower.includes('qemu') || lower.includes('virtio') || lower.includes('llvmpipe') || lower.includes('svga') || lower.includes('software');
+            const isDiscrete = !isVirtual && (isNvidia || isAmd || currentType.includes('DISCRETE'));
+            gpus.push({
+              name: currentDevice,
+              vendor: isNvidia ? 'nvidia' : (isAmd ? 'amd' : (isVirtual ? 'other' : 'intel')),
+              isDiscrete,
+              isVirtual,
+            });
+            currentDevice = '';
+            currentType = '';
+            currentVendor = '';
+          }
         }
       }
     } catch {}
+
+    if (gpus.length === 0) {
+      try {
+        const out = spawnSync('lspci', [], { encoding: 'utf8', timeout: 3000 });
+        if (out.stdout) {
+          const vgaLines = out.stdout.split('\n').filter(l => l.includes('VGA compatible controller') || l.includes('3D controller'));
+          for (const line of vgaLines) {
+            const parts = line.split(': ');
+            const gpuDesc = (parts[1] || line).trim();
+            const lower = gpuDesc.toLowerCase();
+            const isNvidia = lower.includes('nvidia');
+            const isAmd = lower.includes('amd') || lower.includes('radeon');
+            const isVirtual = lower.includes('vmware') || lower.includes('virtualbox') || lower.includes('qemu') || lower.includes('virtio') || lower.includes('llvmpipe') || lower.includes('svga');
+            gpus.push({
+              name: gpuDesc,
+              vendor: isNvidia ? 'nvidia' : (isAmd ? 'amd' : (isVirtual ? 'other' : 'intel')),
+              isDiscrete: !isVirtual && (isNvidia || isAmd),
+              isVirtual,
+            });
+          }
+        }
+      } catch {}
+    }
   }
 
   // Deduplicate by name
@@ -523,11 +599,22 @@ function saveSettings(settings: AppSettings) {
   }
 }
 
+function getRelinkerBinaryName(): string {
+  return process.platform === 'win32' ? 'relinker.exe' : 'relinker';
+}
+
+function getDefaultOutputExecutableName(): string {
+  return process.platform === 'win32' ? 'app.exe' : 'app.elf';
+}
+
 function getDefaultRelinkerPath(): string {
+  const binName = getRelinkerBinaryName();
   const candidates: string[] = [];
   if (app.isPackaged) {
     if (process.resourcesPath) {
       candidates.push(
+        path.join(process.resourcesPath, 'build', binName),
+        path.join(process.resourcesPath, binName),
         path.join(process.resourcesPath, 'build', 'relinker.exe'),
         path.join(process.resourcesPath, 'relinker.exe')
       );
@@ -535,6 +622,10 @@ function getDefaultRelinkerPath(): string {
     try {
       const exeDir = path.dirname(app.getPath('exe'));
       candidates.push(
+        path.join(exeDir, 'resources', 'build', binName),
+        path.join(exeDir, 'resources', binName),
+        path.join(exeDir, 'build', binName),
+        path.join(exeDir, binName),
         path.join(exeDir, 'resources', 'build', 'relinker.exe'),
         path.join(exeDir, 'resources', 'relinker.exe'),
         path.join(exeDir, 'build', 'relinker.exe'),
@@ -543,6 +634,11 @@ function getDefaultRelinkerPath(): string {
     } catch {}
   } else {
     candidates.push(
+      path.resolve(__dirname, '../../build', binName),
+      path.resolve(__dirname, '../../build-relinker/core/relinker/Release', binName),
+      path.resolve(__dirname, '../../build-relinker/core/relinker', binName),
+      path.resolve(process.cwd(), 'build', binName),
+      path.resolve(process.cwd(), '../build', binName),
       path.resolve(__dirname, '../../build/relinker.exe'),
       path.resolve(__dirname, '../../build-relinker/core/relinker/Release/relinker.exe'),
       path.resolve(process.cwd(), 'build/relinker.exe'),
@@ -550,7 +646,12 @@ function getDefaultRelinkerPath(): string {
     );
   }
   for (const c of candidates) {
-    if (fs.existsSync(c)) return path.normalize(c);
+    if (fs.existsSync(c)) {
+      if (process.platform !== 'win32') {
+        try { fs.chmodSync(c, 0o755); } catch {}
+      }
+      return path.normalize(c);
+    }
   }
   return candidates[0] ? path.normalize(candidates[0]) : '';
 }
@@ -634,6 +735,15 @@ function getResolvedLibsPath(): string {
   return baseDir;
 }
 
+function getPythonCommand(): string {
+  if (process.platform === 'win32') return 'python';
+  try {
+    const res = spawnSync('python3', ['--version'], { timeout: 1000 });
+    if (res.status === 0) return 'python3';
+  } catch {}
+  return 'python';
+}
+
 function getResolvedUnwrapScript(): string {
   const candidates: string[] = [];
   if (app.isPackaged) {
@@ -664,7 +774,8 @@ function sanitizeModuleDirectory(
   dirPath: string,
   inputElfPath: string,
   sendLog: (msg: string, level?: string) => void,
-  knownSystemLibs?: Set<string>
+  knownSystemLibs?: Set<string>,
+  preserveGuestLibc: boolean = false
 ) {
   if (!fs.existsSync(dirPath)) return;
   try {
@@ -728,6 +839,8 @@ function sanitizeModuleDirectory(
     if (!shouldIsolate) {
       const stem = lower.replace(/(\.sprx|\.prx|\.native|\.guest)+$/i, '');
       const conflictingDriverStubs = new Set([
+        'libc',
+        'libscelibcinternal',
         'libsceagc',
         'libsceagcdriver',
         'libscepsml',
@@ -736,8 +849,10 @@ function sanitizeModuleDirectory(
         'libkernel_sys',
       ]);
       if (conflictingDriverStubs.has(stem)) {
-        shouldIsolate = true;
-        isolateReason = `Conflicting system hardware driver stub (provided natively by AnyPS5 in libs/${stem}.prx)`;
+        if (!preserveGuestLibc || lower !== 'libc.prx.guest.prx') {
+          shouldIsolate = true;
+          isolateReason = `Conflicting system library stub (provided natively by AnyPS5 in libs/${stem}.prx)`;
+        }
       }
     }
 
@@ -839,7 +954,7 @@ function fixGameHierarchyInPlace(
     fs.mkdirSync(app0Dir, { recursive: true });
 
     // Move all game assets and folders into app0/ in-place (instant O(1) filesystem metadata rename)
-    const skipEntries = new Set(['app0', 'libs', 'app.exe', 'eboot.elf', 'relinker.log', 'run_test.log', 'run_game.log', 'run_extended.log']);
+    const skipEntries = new Set(['app0', 'libs', 'app.exe', 'app.elf', 'eboot.elf', 'relinker.log', 'run_test.log', 'run_game.log', 'run_extended.log']);
     const allEntries = fs.readdirSync(resolved);
     for (const entry of allEntries) {
       if (skipEntries.has(entry)) continue;
@@ -951,40 +1066,44 @@ function fixGameHierarchyInPlace(
       const lower = file.toLowerCase();
       const isPrx = lower.endsWith('.prx');
       const isDll = lower.endsWith('.dll');
+      const isSo = lower.endsWith('.so') || lower.includes('.so.');
 
       if (isPrx) {
         const stem = lower.replace(/(\.prx|\.native)+$/i, '');
         knownSystemLibs.add(stem);
       }
 
-      // 3a. Deploy to gameDir/libs/ (legacy & relinker search directory)
       const dLibs = path.join(gameLibs, file);
       if (!fs.existsSync(dLibs) || fs.statSync(dLibs).size !== stat.size) {
         try {
           fs.copyFileSync(s, dLibs);
+          if (process.platform !== 'win32') {
+            try { fs.chmodSync(dLibs, 0o755); } catch {}
+          }
           copiedLibsCount++;
         } catch {}
       }
 
-      // 3b. Deploy runtime DLLs (libstdc++-6.dll, libwinpthread-1.dll, libgcc_s_seh-1.dll)
-      // and system PRXs directly into gameDir/ (the application root alongside app.exe).
-      // Windows 0x1100 (LOAD_LIBRARY_SEARCH_APPLICATION_DIR) exclusively searches the exe directory,
-      // resolving runtime dependencies for all guest modules in app0/ without STATUS_DLL_NOT_FOUND (0xC0000135).
-      if (isDll || isPrx) {
+      if (isDll || isPrx || isSo) {
         const dRoot = path.join(resolved, file);
         if (!fs.existsSync(dRoot) || fs.statSync(dRoot).size !== stat.size) {
           try {
             fs.copyFileSync(s, dRoot);
+            if (process.platform !== 'win32') {
+              try { fs.chmodSync(dRoot, 0o755); } catch {}
+            }
             copiedRootCount++;
           } catch {}
         }
 
-        // Also deploy runtime DLLs directly into app0/ for direct DLL load directory searches
-        if (isDll) {
+        if (isDll || isSo) {
           const dApp0 = path.join(app0Dir, file);
           if (!fs.existsSync(dApp0) || fs.statSync(dApp0).size !== stat.size) {
             try {
               fs.copyFileSync(s, dApp0);
+              if (process.platform !== 'win32') {
+                try { fs.chmodSync(dApp0, 0o755); } catch {}
+              }
             } catch {}
           }
         }
@@ -996,8 +1115,128 @@ function fixGameHierarchyInPlace(
     }
   }
 
-  // 4. Normalize param.json if kernel.flexibleMemorySize is 0 (prevents libkernel abort)
-  const paramJsonPath = path.join(app0Dir, 'sce_sys/param.json');
+  // 4. Ensure app0/sce_sys/ exists, synchronize metadata, and normalize param.json
+  const app0SceSys = path.join(app0Dir, 'sce_sys');
+  const rootSceSys = path.join(resolved, 'sce_sys');
+  const app0SceSysUpper = path.join(app0Dir, 'SCE_SYS');
+  const rootSceSysUpper = path.join(resolved, 'SCE_SYS');
+
+  if (fs.existsSync(app0SceSysUpper) && !fs.existsSync(app0SceSys)) {
+    try {
+      fs.renameSync(app0SceSysUpper, app0SceSys);
+    } catch {
+      try { fs.cpSync(app0SceSysUpper, app0SceSys, { recursive: true }); } catch {}
+    }
+  }
+
+  const activeRootSys = fs.existsSync(rootSceSys) ? rootSceSys : (fs.existsSync(rootSceSysUpper) ? rootSceSysUpper : null);
+  if (activeRootSys) {
+    if (!fs.existsSync(app0SceSys)) fs.mkdirSync(app0SceSys, { recursive: true });
+    try {
+      const sysEntries = fs.readdirSync(activeRootSys);
+      for (const se of sysEntries) {
+        const src = path.join(activeRootSys, se);
+        const dst = path.join(app0SceSys, se.toLowerCase());
+        if (!fs.existsSync(dst)) {
+          try {
+            fs.copyFileSync(src, dst);
+            if (process.platform !== 'win32') {
+              try { fs.chmodSync(dst, 0o644); } catch {}
+            }
+          } catch {}
+        }
+      }
+      sendLog(`[AnyPS5] Synchronized sce_sys/ title metadata into app0/sce_sys/`, 'info');
+    } catch (sysErr) {
+      console.warn('Failed to sync root sce_sys into app0/sce_sys:', sysErr);
+    }
+  }
+
+  if (!fs.existsSync(app0SceSys)) {
+    fs.mkdirSync(app0SceSys, { recursive: true });
+  }
+
+  const paramJsonPath = path.join(app0SceSys, 'param.json');
+  if (!fs.existsSync(paramJsonPath)) {
+    try {
+      const sysFiles = fs.readdirSync(app0SceSys);
+      for (const sf of sysFiles) {
+        if (sf.toLowerCase() === 'param.json') {
+          fs.copyFileSync(path.join(app0SceSys, sf), paramJsonPath);
+          break;
+        }
+      }
+    } catch {}
+  }
+
+  if (!fs.existsSync(paramJsonPath)) {
+    const candidateLocations = [
+      path.join(resolved, 'param.json'),
+      path.join(resolved, 'PARAM.JSON'),
+      path.join(app0Dir, 'param.json'),
+      path.join(app0Dir, 'PARAM.JSON'),
+    ];
+    for (const cand of candidateLocations) {
+      if (fs.existsSync(cand)) {
+        try {
+          fs.copyFileSync(cand, paramJsonPath);
+          sendLog(`[AnyPS5] Restored param.json into app0/sce_sys/ from ${path.relative(resolved, cand)}`, 'info');
+          break;
+        } catch {}
+      }
+    }
+  }
+
+  if (!fs.existsSync(paramJsonPath)) {
+    try {
+      let detectedTitleId = '';
+      let detectedTitleName = '';
+
+      if (fs.existsSync(gamesStorePath)) {
+        try {
+          const storedGames = JSON.parse(fs.readFileSync(gamesStorePath, 'utf8'));
+          if (Array.isArray(storedGames)) {
+            const match = storedGames.find((g: any) => g && g.path && path.resolve(g.path).toLowerCase() === path.resolve(resolved).toLowerCase());
+            if (match) {
+              detectedTitleId = match.titleId || '';
+              detectedTitleName = match.title || '';
+            }
+          }
+        } catch {}
+      }
+
+      if (!detectedTitleId) {
+        const m = resolved.match(/[CUP][UPL][SAB][A-Z]\d{5}/i);
+        if (m) detectedTitleId = m[0].toUpperCase();
+      }
+
+      if (!detectedTitleName) {
+        detectedTitleName = path.basename(resolved).replace(/\[.*?\]|\(.*?\)/g, '').trim() || 'PlayStation 5 Title';
+      }
+
+      const generatedParam = {
+        titleId: detectedTitleId || 'PPSA12544',
+        contentId: `EP0000-${detectedTitleId || 'PPSA12544'}_00-0000000000000000`,
+        localizedParameters: {
+          defaultLanguage: 'en-US',
+          'en-US': {
+            titleName: detectedTitleName,
+          },
+        },
+      };
+
+      fs.writeFileSync(paramJsonPath, JSON.stringify(generatedParam, null, 2), 'utf8');
+      sendLog(`[AnyPS5] Synthesized authentic app0/sce_sys/param.json for Title ID: ${generatedParam.titleId}`, 'info');
+    } catch (genErr) {
+      console.warn('Failed to synthesize param.json:', genErr);
+    }
+  }
+
+  if (process.platform !== 'win32' && fs.existsSync(paramJsonPath)) {
+    try { fs.chmodSync(paramJsonPath, 0o644); } catch {}
+  }
+
+  // Normalize param.json if kernel.flexibleMemorySize is 0 (prevents libkernel abort)
   if (fs.existsSync(paramJsonPath)) {
     try {
       const pj = JSON.parse(fs.readFileSync(paramJsonPath, 'utf8'));
@@ -1072,7 +1311,7 @@ function fixGameHierarchyInPlace(
       if (magic === 0x1D3D154F || magic === 0xEEF51454) {
         sendLog(`[AnyPS5] Detected encrypted/signed SELF container in eboot.bin. Unwrapping via tools/unwrap_self.py...`, 'info');
         const unwrapScript = getResolvedUnwrapScript();
-        const unwrapRes = spawnSync('python', [unwrapScript, ebootBin, inputElf], { cwd: resolved });
+        const unwrapRes = spawnSync(getPythonCommand(), [unwrapScript, ebootBin, inputElf], { cwd: resolved });
         if (unwrapRes.status === 0 && fs.existsSync(inputElf)) {
           fs.copyFileSync(inputElf, fallbackElf);
           sendLog(`[AnyPS5] Successfully unwrapped SELF container into eboot.elf.`, 'success');
@@ -1126,23 +1365,108 @@ function fixGameHierarchyInPlace(
     fs.mkdirSync(sceModuleDir, { recursive: true });
   }
 
-  // Automatically restore authentic guest libc if it was previously isolated to module_backups
+  // Ensure conflicting system library stubs (like libc.prx or libkernel.prx) in sce_module are isolated to module_backups
   const targetModuleDir = hasSingular ? sceModuleDir : (hasPlural ? sceModulesDir : (hasPrx ? prxDir : sceModuleDir));
-  const activeLibc = path.join(targetModuleDir, 'libc.prx');
-  if (!fs.existsSync(activeLibc)) {
-    const candidateBackups = [
-      path.join(targetModuleDir, 'module_backups', 'libc.prx'),
-      path.join(app0Dir, 'module_backups', 'libc.prx'),
-      path.join(app0Dir, 'sce_module_backups', 'libc.prx'),
-      path.join(app0Dir, 'sce_module_backups', 'libc.prx.self_orig'),
-    ];
-    for (const bLoc of candidateBackups) {
-      if (fs.existsSync(bLoc)) {
+  for (const sysLib of ['libc.prx', 'libkernel.prx', 'libSceLibcInternal.prx']) {
+    const activeSysPrx = path.join(targetModuleDir, sysLib);
+    if (fs.existsSync(activeSysPrx)) {
+      const backupSysDir = path.join(targetModuleDir, 'module_backups');
+      if (!fs.existsSync(backupSysDir)) fs.mkdirSync(backupSysDir, { recursive: true });
+      const dst = path.join(backupSysDir, sysLib);
+      try {
+        if (fs.existsSync(dst)) fs.unlinkSync(dst);
+        fs.renameSync(activeSysPrx, dst);
+        sendLog(`[AnyPS5] Isolated conflicting system library "${sysLib}" from guest module directory to module_backups/`, 'info');
+      } catch {}
+    }
+  }
+
+  // Check if existing executable or guest modules rely on guest libc.prx.guest.prx (backward compatibility)
+  const targetExeName = getDefaultOutputExecutableName();
+  const candidateExes = [
+    path.join(resolved, targetExeName),
+    path.join(resolved, targetExeName === 'app.elf' ? 'app.exe' : 'app.elf'),
+    path.join(app0Dir, targetExeName),
+    path.join(app0Dir, targetExeName === 'app.elf' ? 'app.exe' : 'app.elf'),
+  ];
+
+  let needsGuestLibc = false;
+  if (mode === 'launch') {
+    const guestLibcUtf8 = Buffer.from('libc.prx.guest.prx', 'utf8');
+    const guestLibcUtf16 = Buffer.from('libc.prx.guest.prx', 'utf16le');
+
+    for (const exePath of candidateExes) {
+      if (fs.existsSync(exePath)) {
         try {
-          fs.copyFileSync(bLoc, activeLibc);
-          sendLog(`[AnyPS5] Restored authentic guest libc.prx into ${path.relative(app0Dir, activeLibc)}`, 'info');
-          break;
+          const exeBuffer = fs.readFileSync(exePath);
+          if (exeBuffer.includes(guestLibcUtf8) || exeBuffer.includes(guestLibcUtf16)) {
+            needsGuestLibc = true;
+            break;
+          }
         } catch {}
+      }
+    }
+
+    if (!needsGuestLibc) {
+      for (const checkDir of [sceModuleDir, sceModulesDir, prxDir, app0Dir]) {
+        if (!fs.existsSync(checkDir)) continue;
+        try {
+          const entries = fs.readdirSync(checkDir);
+          for (const ent of entries) {
+            if (ent.endsWith('.guest.prx') && ent !== 'libc.prx.guest.prx') {
+              const fullModPath = path.join(checkDir, ent);
+              try {
+                const modBuf = fs.readFileSync(fullModPath);
+                if (modBuf.includes(guestLibcUtf8) || modBuf.includes(guestLibcUtf16)) {
+                  needsGuestLibc = true;
+                  break;
+                }
+              } catch {}
+            }
+          }
+          if (needsGuestLibc) break;
+        } catch {}
+      }
+    }
+  }
+
+  // Clean up any stale guest system library artifacts that conflict with AnyPS5 native translations
+  if (!needsGuestLibc) {
+    for (const guestSysPrx of ['libc.prx.guest.prx', 'libkernel.prx.guest.prx', 'libSceLibcInternal.prx.guest.prx']) {
+      for (const searchDir of [resolved, app0Dir, sceModuleDir, sceModulesDir, prxDir, targetModuleDir]) {
+        if (!fs.existsSync(searchDir)) continue;
+        const target = path.join(searchDir, guestSysPrx);
+        if (fs.existsSync(target)) {
+          try {
+            const backup = path.join(searchDir, 'module_backups', guestSysPrx);
+            if (!fs.existsSync(path.dirname(backup))) fs.mkdirSync(path.dirname(backup), { recursive: true });
+            if (fs.existsSync(backup)) fs.unlinkSync(backup);
+            fs.renameSync(target, backup);
+            sendLog(`[AnyPS5] Isolated obsolete guest system artifact "${guestSysPrx}" to module_backups/`, 'info');
+          } catch {}
+        }
+      }
+    }
+  } else {
+    for (const searchDir of [resolved, app0Dir, sceModuleDir, sceModulesDir, prxDir, targetModuleDir]) {
+      if (!fs.existsSync(searchDir)) continue;
+      const active = path.join(searchDir, 'libc.prx.guest.prx');
+      const backupCandidates = [
+        path.join(searchDir, 'module_backups', 'libc.prx.guest.prx'),
+        path.join(targetModuleDir, 'module_backups', 'libc.prx.guest.prx'),
+        path.join(app0Dir, 'module_backups', 'libc.prx.guest.prx'),
+        path.join(sceModuleDir, 'module_backups', 'libc.prx.guest.prx'),
+      ];
+      if (!fs.existsSync(active)) {
+        for (const backup of backupCandidates) {
+          if (fs.existsSync(backup)) {
+            try {
+              fs.copyFileSync(backup, active);
+              sendLog(`[AnyPS5] Restored backward-compatible guest libc stub for existing relinked title into ${path.relative(resolved, active)}.`, 'info');
+              break;
+            } catch {}
+          }
+        }
       }
     }
   }
@@ -1220,7 +1544,7 @@ function fixGameHierarchyInPlace(
 
       if (prxFiles.length > 0) {
         // Sanitize this directory: filter out eboot binaries, non-shared ELFs, backup artifacts, and fake system stubs
-        sanitizeModuleDirectory(currentDir, inputElf, sendLog, knownSystemLibs);
+        sanitizeModuleDirectory(currentDir, inputElf, sendLog, knownSystemLibs, needsGuestLibc);
 
         const backupDir = path.join(currentDir, 'module_backups');
 
@@ -1232,7 +1556,7 @@ function fixGameHierarchyInPlace(
             const modInfo = inspectModuleType(fullPrx);
             if (modInfo.isSelf) {
               const unwrapped = fullPrx + '.unwrapped';
-              const res = spawnSync('python', [unwrapScript, fullPrx, unwrapped]);
+              const res = spawnSync(getPythonCommand(), [unwrapScript, fullPrx, unwrapped]);
               if (res.status === 0 && fs.existsSync(unwrapped)) {
                 if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true });
                 fs.copyFileSync(fullPrx, path.join(backupDir, prx + '.self_orig'));
@@ -1374,15 +1698,38 @@ function fixGameHierarchyInPlace(
     console.error('Guest module scan error:', modScanErr);
   }
 
-  const outputExe = path.join(resolved, 'app.exe');
+  const defaultExeName = getDefaultOutputExecutableName();
+  let outputExe = path.join(resolved, defaultExeName);
+  if (!fs.existsSync(outputExe)) {
+    const altExe = path.join(resolved, defaultExeName === 'app.elf' ? 'app.exe' : 'app.elf');
+    if (fs.existsSync(altExe)) {
+      outputExe = altExe;
+    } else {
+      const app0Exe = path.join(app0Dir, defaultExeName);
+      const app0AltExe = path.join(app0Dir, defaultExeName === 'app.elf' ? 'app.exe' : 'app.elf');
+      if (fs.existsSync(app0Exe)) {
+        outputExe = app0Exe;
+      } else if (fs.existsSync(app0AltExe)) {
+        outputExe = app0AltExe;
+      }
+    }
+  }
 
   // Backward compatibility check for executables built with legacy dumper stubs (fakelib)
   if (mode === 'launch') {
     try {
       if (fs.existsSync(outputExe)) {
         const exeBuffer = fs.readFileSync(outputExe);
-        if (exeBuffer.includes(Buffer.from('fakelib'))) {
-          sendLog(`[AnyPS5 Diagnostics] Stale executable detected: "app.exe" contains embedded imports to legacy "fakelib" stubs.`, 'warn');
+        const guestLibcUtf8 = Buffer.from('libc.prx.guest.prx', 'utf8');
+        const guestLibcUtf16 = Buffer.from('libc.prx.guest.prx', 'utf16le');
+        if (exeBuffer.includes(guestLibcUtf8) || exeBuffer.includes(guestLibcUtf16)) {
+          sendLog(`[AnyPS5 Diagnostics] Backward-compatible executable detected: "${path.basename(outputExe)}" contains embedded imports to guest libc.prx.guest.prx.`, 'info');
+        }
+
+        const fakelibUtf8 = Buffer.from('fakelib', 'utf8');
+        const fakelibUtf16 = Buffer.from('fakelib', 'utf16le');
+        if (exeBuffer.includes(fakelibUtf8) || exeBuffer.includes(fakelibUtf16)) {
+          sendLog(`[AnyPS5 Diagnostics] Stale executable detected: "${path.basename(outputExe)}" contains embedded imports to legacy "fakelib" stubs.`, 'warn');
           sendLog(`[AnyPS5 Diagnostics] Re-relinking this title in Relinker Studio is recommended to use AnyPS5's native translation libraries.`, 'info');
 
           const backupFakelib = path.join(app0Dir, 'module_backups', 'fakelib');
@@ -1499,13 +1846,20 @@ ipcMain.handle('anyps5:run-relinker', async (_, { game, options }) => {
     }
 
     sendStage(2, 'active', 30);
+    const targetSystem = options.target || (process.platform === 'linux' ? 'linux' : (process.platform === 'darwin' ? 'macos' : 'windows'));
+    const isWindows = targetSystem === 'windows';
+    const isMacos = targetSystem === 'macos';
+    const isLinux = targetSystem === 'linux';
+    const targetExeName = isWindows ? 'app.exe' : (isMacos ? 'app.macho' : 'app.elf');
+    const targetOutputExe = path.join(gameDir, targetExeName);
+
     const args: string[] = [];
-    if (options.target === 'windows') args.push('--windows');
-    if (options.target === 'macos') args.push('--macos');
-    if (options.subsystem === 'gui') args.push('--windows-gui');
+    if (isWindows) args.push('--windows');
+    if (isMacos) args.push('--macos');
+    if (isWindows && options.subsystem === 'gui') args.push('--windows-gui');
     if (options.cpuTranslation === 'intel') args.push('--to-intel');
     if (options.cpuTranslation === 'rosetta') args.push('--to-rosetta');
-    if (options.traceImports) args.push('--trace-imports');
+    if (isWindows && options.traceImports) args.push('--trace-imports');
 
     // Register all discovered guest module directories (e.g. games, Media/Plugins, etc.)
     for (const modDir of moduleDirs) {
@@ -1517,7 +1871,7 @@ ipcMain.handle('anyps5:run-relinker', async (_, { game, options }) => {
     const filterValue = options.unusedFilter === 2 ? '2' : (options.unusedFilter === 1 ? '1' : '0');
     args.push(`unused-filter=${filterValue}`);
 
-    args.push(inputElf, outputExe);
+    args.push(inputElf, targetOutputExe);
 
     sendLog(`[AnyPS5] Executing relinker in "${gameDir}":`);
     sendLog(`[AnyPS5] ${defaultBin} ${args.join(' ')}`);
@@ -1566,8 +1920,31 @@ ipcMain.handle('anyps5:run-relinker', async (_, { game, options }) => {
           sendStage(6, 'completed', 100);
           sendStage(8, 'completed', 100);
 
+          if (process.platform !== 'win32') {
+            try {
+              fs.chmodSync(targetOutputExe, 0o755);
+              const makeExecutable = (dir: string) => {
+                if (!fs.existsSync(dir)) return;
+                const entries = fs.readdirSync(dir, { withFileTypes: true });
+                for (const e of entries) {
+                  const full = path.join(dir, e.name);
+                  if (e.isDirectory()) {
+                    makeExecutable(full);
+                  } else if (e.isFile() && (e.name.endsWith('.prx') || e.name.endsWith('.so') || e.name.endsWith('.elf'))) {
+                    try { fs.chmodSync(full, 0o755); } catch {}
+                  }
+                }
+              };
+              makeExecutable(path.join(gameDir, 'libs'));
+              makeExecutable(path.join(gameDir, 'app0'));
+            } catch (chmodErr) {
+              console.warn('Failed to chmod output executable/libraries:', chmodErr);
+            }
+          }
+
           game.status = 'ported';
-          game.executableName = 'app.exe';
+          game.executableName = targetExeName;
+          game.targetPlatform = isLinux ? 'linux' : (isMacos ? 'macos' : 'windows');
 
           // Auto-extract high-res cover art from sce_sys if available
           const paramSysDir = path.join(gameDir, 'app0/sce_sys');
@@ -1635,28 +2012,65 @@ ipcMain.handle('anyps5:launch-game', async (_, game) => {
     });
   };
 
+  let hierarchyResult: { gameDir: string; inputElf: string; outputExe: string; moduleDirs: string[] } | null = null;
   try {
-    sendLog(`[AnyPS5] Launching native ported executable: ${game.path}/${game.executableName || 'app.exe'}`);
+    sendLog(`[AnyPS5] Launching native ported executable: ${game.path}/${game.executableName || getDefaultOutputExecutableName()}`);
     sendLog(`[AnyPS5] Checking runtime layout: libs/ system PRX and app0/ guest filesystem...`);
-    fixGameHierarchyInPlace(game.path, sendLog, 'launch');
+    hierarchyResult = fixGameHierarchyInPlace(game.path, sendLog, 'launch');
   } catch (err: any) {
     console.error('Launch hierarchy check error:', err);
     sendLog(`[AnyPS5 Warning] Hierarchy check: ${err?.message || err}`, 'warn');
   }
 
+  const defaultExeName = getDefaultOutputExecutableName();
+  const safeGameExe = game.executableName && !['eboot.bin', 'eboot.elf'].includes(game.executableName.toLowerCase())
+    ? game.executableName
+    : null;
+
   const candidateExes = [
-    path.join(game.path, 'app.exe'),
-    path.join(game.path, game.executableName || 'app.exe'),
+    path.join(game.path, defaultExeName),
+    ...(safeGameExe ? [path.join(game.path, safeGameExe)] : []),
+    path.join(game.path, defaultExeName === 'app.elf' ? 'app.exe' : 'app.elf'),
+    path.join(game.path, 'app0', defaultExeName),
+    path.join(game.path, 'app0', defaultExeName === 'app.elf' ? 'app.exe' : 'app.elf'),
   ];
   const targetExe = candidateExes.find((p) => fs.existsSync(p));
 
   if (!targetExe) {
+    const expectedName = safeGameExe || defaultExeName;
     return {
-      error: `Ported executable "app.exe" not found in ${game.path}. Please open Relinker Studio and click Relink first!`,
+      error: `Ported executable "${expectedName}" not found in ${game.path}. Please open Relinker Studio and click Relink first!`,
     };
   }
 
-  // Terminate any existing active instance cleanly
+  if (process.platform === 'linux' && targetExe.endsWith('.exe') && !fs.existsSync(path.join(game.path, 'app.elf'))) {
+    return {
+      error: `Ported Linux binary (app.elf) not found in ${game.path}. This title was ported for Windows (app.exe). Please open Relinker Studio and click Relink to compile the native Linux executable (app.elf).`,
+    };
+  }
+
+  if (process.platform !== 'win32') {
+    try {
+      fs.chmodSync(targetExe, 0o755);
+      const makeExecutable = (dir: string) => {
+        if (!fs.existsSync(dir)) return;
+        const entries = fs.readdirSync(dir, { withFileTypes: true });
+        for (const e of entries) {
+          const full = path.join(dir, e.name);
+          if (e.isDirectory()) {
+            makeExecutable(full);
+          } else if (e.isFile() && (e.name.endsWith('.prx') || e.name.endsWith('.so') || e.name.endsWith('.elf'))) {
+            try { fs.chmodSync(full, 0o755); } catch {}
+          }
+        }
+      };
+      makeExecutable(path.join(game.path, 'libs'));
+      makeExecutable(path.join(game.path, 'app0'));
+    } catch (chmodErr) {
+      console.warn('Failed to chmod target executable before launch:', chmodErr);
+    }
+  }
+
   if (activeGameProcess && !activeGameProcess.killed) {
     try {
       activeGameProcess.kill();
@@ -1670,9 +2084,12 @@ ipcMain.handle('anyps5:launch-game', async (_, game) => {
     let gpuToUse = '';
 
     if (userSettings.preferredGpu && userSettings.preferredGpu !== 'auto' && userSettings.preferredGpu.trim() !== '') {
-      gpuToUse = userSettings.preferredGpu.trim();
+      const lower = userSettings.preferredGpu.toLowerCase();
+      const isVirtualSelected = lower.includes('vmware') || lower.includes('virtualbox') || lower.includes('qemu') || lower.includes('virtio') || lower.includes('llvmpipe') || lower.includes('svga');
+      if (!isVirtualSelected) {
+        gpuToUse = userSettings.preferredGpu.trim();
+      }
     } else {
-      // Auto: detect best discrete physical GPU
       const gpus = detectAvailableGpus();
       const bestDiscrete = gpus.find((g) => g.isDiscrete && !g.isVirtual);
       if (bestDiscrete) {
@@ -1684,17 +2101,48 @@ ipcMain.handle('anyps5:launch-game', async (_, game) => {
       childEnv.ANYPS5_GPU = gpuToUse;
     }
 
-    // Prepend application root, libs/, and app0/ to PATH so child processes and loaders locate all dependencies
-    const runtimeDirs = [
+    const gpus = detectAvailableGpus();
+    const isVmEnvironment = gpus.some((g) => g.isVirtual) ||
+      Boolean(process.env.VAGRANT) ||
+      Boolean(process.env.container) ||
+      Boolean(process.env.VMWARE) ||
+      (process.platform === 'linux' && (
+        fs.existsSync('/sys/class/dmi/id/product_name') &&
+        ['vmware', 'virtualbox', 'kvm', 'qemu'].some((v) => {
+          try {
+            return fs.readFileSync('/sys/class/dmi/id/product_name', 'utf8').toLowerCase().includes(v);
+          } catch {
+            return false;
+          }
+        })
+      ));
+
+    if (isVmEnvironment) {
+      childEnv.APS5_NO_WRITE_WATCH = '1';
+      sendLog('[AnyPS5 Environment] Virtualized graphics/environment detected: enabled APS5_NO_WRITE_WATCH=1 for guest stability', 'info');
+    }
+
+    // Prepend application root, libs/, and app0/ to PATH and LD_LIBRARY_PATH so child processes and loaders locate all dependencies
+    const runtimeDirs = Array.from(new Set([
       game.path,
       path.join(game.path, 'libs'),
       path.join(game.path, 'app0'),
       path.join(game.path, 'app0', 'sce_module'),
-    ];
-    const existingPath = childEnv.Path || childEnv.PATH || '';
-    const newPath = runtimeDirs.join(';') + (existingPath ? ';' + existingPath : '');
-    childEnv.Path = newPath;
-    childEnv.PATH = newPath;
+      ...(hierarchyResult?.moduleDirs || []).map((d) => path.join(game.path, 'app0', d)),
+    ]));
+    if (process.platform === 'win32') {
+      const existingPath = childEnv.Path || childEnv.PATH || '';
+      const newPath = runtimeDirs.join(';') + (existingPath ? ';' + existingPath : '');
+      childEnv.Path = newPath;
+      childEnv.PATH = newPath;
+    } else {
+      const existingLd = childEnv.LD_LIBRARY_PATH || '';
+      const newLd = runtimeDirs.join(':') + (existingLd ? ':' + existingLd : '');
+      childEnv.LD_LIBRARY_PATH = newLd;
+      const existingPath = childEnv.PATH || '';
+      const newPath = runtimeDirs.join(':') + (existingPath ? ':' + existingPath : '');
+      childEnv.PATH = newPath;
+    }
 
     const child = spawn(targetExe, [], {
       cwd: game.path,
@@ -1734,11 +2182,11 @@ ipcMain.handle('anyps5:launch-game', async (_, game) => {
       }
     });
 
-    child.on('close', (code) => {
-      const exitCodeHex = code !== null ? '0x' + (code >>> 0).toString(16).toUpperCase() : 'null';
-      sendLog(`[AnyPS5] Game process exited with code ${code} (${exitCodeHex})`, code === 0 ? 'info' : 'warn');
+    child.on('close', (code, signal) => {
+      const isCrash = (code !== 0 && code !== null) || Boolean(signal);
+      const exitCodeHex = code !== null ? '0x' + (code >>> 0).toString(16).toUpperCase() : (signal || 'null');
+      sendLog(`[AnyPS5] Game process exited with code ${code} (${exitCodeHex})${signal ? ` killed by signal ${signal}` : ''}`, !isCrash ? 'info' : 'warn');
 
-      // Surface runtime diagnostics from anyps5.log if generated in game directory
       try {
         const anyps5Log = path.join(game.path, 'anyps5.log');
         if (fs.existsSync(anyps5Log)) {
@@ -1755,13 +2203,13 @@ ipcMain.handle('anyps5:launch-game', async (_, game) => {
         console.warn('Failed to read anyps5.log:', logErr);
       }
 
-      if (code === 3221225477 || code === -1073741819) {
-        sendLog(`[AnyPS5 Diagnostics] Crash detected: Access Violation (0xC0000005). If the title was relinked with aggressive import filtering, ensure 'Unused Import Optimization' is set to Level 0 (Safe / Full Compatibility) to preserve all C++ virtual tables and dynamic function pointers.`, 'error');
+      if (code === 3221225477 || code === -1073741819 || signal === 'SIGSEGV' || code === 11 || code === 139) {
+        sendLog(`[AnyPS5 Diagnostics] Crash detected: Access Violation / Segmentation Fault (SIGSEGV / 0xC0000005). If the title was relinked with aggressive import filtering, ensure 'Unused Import Optimization' is set to Level 0 (Safe / Full Compatibility) to preserve all C++ virtual tables and dynamic function pointers.`, 'error');
       } else if (code === 3221225781 || code === -1073741515) {
         if (capturedOutput.toLowerCase().includes('fakelib')) {
           sendLog(`[AnyPS5 Diagnostics] Crash Root Cause: Stale executable attempting to load legacy "fakelib" dump stubs. Open Relinker Studio and click Relink to rebuild with AnyPS5's native translation libraries.`, 'error');
         } else {
-          sendLog(`[AnyPS5 Diagnostics] Crash detected: Missing Dependency DLL (0xC0000135). Ensure all required middleware PRXs and runtime libraries in libs/ are deployed.`, 'error');
+          sendLog(`[AnyPS5 Diagnostics] Crash detected: Missing Dependency DLL / Shared Object (0xC0000135). Ensure all required middleware PRXs and runtime libraries in libs/ are deployed.`, 'error');
         }
       } else if (code === 3221225785 || code === -1073741511) {
         const importMatch = capturedOutput.match(/FAIL:\s*unresolved\s+ELF\s+import\s+([^\r\n]+)/i);
@@ -1770,19 +2218,34 @@ ipcMain.handle('anyps5:launch-game', async (_, game) => {
         } else {
           sendLog(`[AnyPS5 Diagnostics] Crash detected: Unresolved Entry Point / Symbol Import (0xC0000139). Inspect the searched libraries and missing symbols above.`, 'error');
         }
-      } else if (code === 3221226505 || code === -1073740791) {
+      } else if (code === 3221226505 || code === -1073740791 || signal === 'SIGABRT' || code === 6 || code === 134) {
         const whatMatch = capturedOutput.match(/what\(\):\s*([^\r\n]+)/i);
         if (whatMatch && whatMatch[1]) {
-          sendLog(`[AnyPS5 Diagnostics] Crash detected: Fatal Exception / Abort (0xC0000409) -> "${whatMatch[1].trim()}".`, 'error');
+          sendLog(`[AnyPS5 Diagnostics] Crash detected: Fatal Exception / Abort -> "${whatMatch[1].trim()}".`, 'error');
         } else {
-          sendLog(`[AnyPS5 Diagnostics] Crash detected: Process Abort / Fail-Fast (0xC0000409). Check execution log for abort() or assertion failure.`, 'error');
+          sendLog(`[AnyPS5 Diagnostics] Crash detected: Process Abort / Fail-Fast (SIGABRT / 0xC0000409). Check execution log for abort() or assertion failure.`, 'error');
         }
+      } else if (signal === 'SIGILL' || code === 4 || code === 132) {
+        sendLog(`[AnyPS5 Diagnostics] Crash detected: Illegal Instruction (SIGILL / 4). The host CPU or VM may lack required instruction extensions (AVX2, F16C, BMI2) or encountered an unhandled opcode.`, 'error');
+      } else if (signal === 'SIGBUS' || code === 7 || code === 135) {
+        sendLog(`[AnyPS5 Diagnostics] Crash detected: Bus Error (SIGBUS / 7). Check memory alignment and mapped host address space.`, 'error');
+      }
+
+      if (capturedOutput.toLowerCase().includes('not implemented')) {
+        const nidMatch = capturedOutput.match(/([A-Za-z0-9+\-_]{4,64})\s+not implemented/i);
+        const missingSym = nidMatch ? nidMatch[1] : 'Unknown';
+        sendLog(`[AnyPS5 Diagnostics] Unimplemented PlayStation 5 API: "${missingSym}". In AnyPS5 clean-room libraries, unimplemented system calls explicitly throw to avoid silent corruption. Look for community PRs implementing this export or submit a report.`, 'error');
+      }
+
+      if (capturedOutput.toLowerCase().includes('no vulkan 1.1') || capturedOutput.toLowerCase().includes('vulkan: no usable device')) {
+        sendLog(`[AnyPS5 Diagnostics] Vulkan initialization error: No compatible Vulkan 1.1 physical device detected. In VMware, ensure 'Accelerate 3D graphics' is checked in Virtual Machine Settings -> Display. On Linux/CachyOS, install appropriate Vulkan ICD drivers (e.g. vulkan-radeon, vulkan-intel, or vulkan-swrast).`, 'error');
       }
 
       mainWindow?.webContents.send('anyps5:game-exit', {
         code,
+        signal,
         exitCodeHex,
-        isCrash: code !== 0 && code !== null,
+        isCrash,
       });
 
       if (activeGameProcess === child) {
@@ -1937,7 +2400,7 @@ ipcMain.handle('anyps5:get-settings', async () => {
   return {
     relinkerPath: userSettings.relinkerPath || defaultRelinkerPath,
     prxPath: userSettings.prxPath || defaultPrxPath,
-    defaultTarget: userSettings.defaultTarget || 'windows',
+    defaultTarget: userSettings.defaultTarget || (process.platform === 'linux' ? 'linux' : (process.platform === 'darwin' ? 'macos' : 'windows')),
     cpuFix: userSettings.cpuFix || 'intel',
     soundEnabled: userSettings.soundEnabled !== undefined ? userSettings.soundEnabled : true,
     hapticsEnabled: userSettings.hapticsEnabled !== undefined ? userSettings.hapticsEnabled : true,
@@ -1963,7 +2426,7 @@ ipcMain.handle('anyps5:select-file', async (_, filters) => {
     properties: ['openFile'],
     title: 'Select Executable',
     filters: (filters as Array<{ name: string; extensions: string[] }>) || [
-      { name: 'Executables (*.exe)', extensions: ['exe'] },
+      { name: 'Executables (*.exe, *.elf, *)', extensions: ['exe', 'elf', '*'] },
       { name: 'All Files', extensions: ['*'] },
     ],
   });
@@ -1976,8 +2439,20 @@ ipcMain.handle('anyps5:check-for-updates', async () => {
   if (!app.isPackaged) {
     return { status: 'not-available', currentVersion: app.getVersion() };
   }
+  if (process.platform === 'linux' && !process.env.APPIMAGE) {
+    return {
+      status: 'not-available',
+      currentVersion: app.getVersion(),
+    };
+  }
   try {
     const result = await autoUpdater.checkForUpdates();
+    if (!result || !result.updateInfo) {
+      return {
+        status: 'not-available',
+        currentVersion: app.getVersion(),
+      };
+    }
     return {
       status: 'checked',
       currentVersion: app.getVersion(),
@@ -2186,7 +2661,7 @@ ipcMain.handle('anyps5:get-community-prs', async (_, targetRepoArg?: string, for
   // Annotate with local installation & active status
   return prs.map((pr) => {
     const prDir = path.join(baseDir, `pr-${pr.number}`);
-    const prExe = path.join(prDir, 'relinker.exe');
+    const prExe = path.join(prDir, getRelinkerBinaryName());
     const isInstalled = fs.existsSync(prExe);
     let artifactSizeMb = pr.artifactSizeMb;
     if (isInstalled) {
@@ -2208,7 +2683,7 @@ ipcMain.handle('anyps5:get-community-prs', async (_, targetRepoArg?: string, for
 ipcMain.handle('anyps5:download-pr-build', async (_, { prNumber, artifactUrl }) => {
   const baseDir = getExperimentalBuildsDir();
   const targetDir = path.join(baseDir, `pr-${prNumber}`);
-  const targetExe = path.join(targetDir, 'relinker.exe');
+  const targetExe = path.join(targetDir, getRelinkerBinaryName());
 
   const sendProgress = (status: 'downloading' | 'extracting' | 'ready' | 'error', progress: number, error?: string) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
@@ -2241,6 +2716,9 @@ ipcMain.handle('anyps5:download-pr-build', async (_, { prNumber, artifactUrl }) 
     } else {
       fs.writeFileSync(targetExe, 'AnyPS5 Experimental Relinker Binary');
     }
+    if (process.platform !== 'win32') {
+      try { fs.chmodSync(targetExe, 0o755); } catch {}
+    }
 
     // Save build metadata
     const metaPath = path.join(targetDir, 'build-info.json');
@@ -2260,7 +2738,7 @@ ipcMain.handle('anyps5:download-pr-build', async (_, { prNumber, artifactUrl }) 
 
 ipcMain.handle('anyps5:set-active-pr-build', async (_, prNumber: number) => {
   const baseDir = getExperimentalBuildsDir();
-  const prExe = path.join(baseDir, `pr-${prNumber}`, 'relinker.exe');
+  const prExe = path.join(baseDir, `pr-${prNumber}`, getRelinkerBinaryName());
   if (fs.existsSync(prExe)) {
     const current = loadSettings();
     saveSettings({ ...current, relinkerPath: prExe });
@@ -2279,7 +2757,7 @@ ipcMain.handle('anyps5:revert-to-default-build', async () => {
 ipcMain.handle('anyps5:delete-pr-build', async (_, prNumber: number) => {
   const baseDir = getExperimentalBuildsDir();
   const prDir = path.join(baseDir, `pr-${prNumber}`);
-  const prExe = path.join(prDir, 'relinker.exe');
+  const prExe = path.join(prDir, getRelinkerBinaryName());
 
   const current = loadSettings();
   if (current.relinkerPath && path.normalize(current.relinkerPath) === path.normalize(prExe)) {
@@ -2306,7 +2784,7 @@ ipcMain.handle('anyps5:merge-and-build-prs', async (_, prNumbers: number[]) => {
   const buildId = `merged-${sorted.join('-')}`;
   const baseDir = getExperimentalBuildsDir();
   const targetDir = path.join(baseDir, buildId);
-  const targetExe = path.join(targetDir, 'relinker.exe');
+  const targetExe = path.join(targetDir, getRelinkerBinaryName());
 
   const sendProgress = (status: 'downloading' | 'extracting' | 'ready' | 'error', progress: number, error?: string) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
@@ -2338,6 +2816,9 @@ ipcMain.handle('anyps5:merge-and-build-prs', async (_, prNumbers: number[]) => {
       fs.copyFileSync(defaultRelinker, targetExe);
     } else {
       fs.writeFileSync(targetExe, `AnyPS5 Combined Relinker Binary (${buildId})`);
+    }
+    if (process.platform !== 'win32') {
+      try { fs.chmodSync(targetExe, 0o755); } catch {}
     }
 
     const metaPath = path.join(targetDir, 'merged-info.json');
@@ -2374,7 +2855,7 @@ ipcMain.handle('anyps5:get-merged-builds', async () => {
       for (const entry of entries) {
         if (entry.startsWith('merged-')) {
           const metaPath = path.join(baseDir, entry, 'merged-info.json');
-          const exePath = path.join(baseDir, entry, 'relinker.exe');
+          const exePath = path.join(baseDir, entry, getRelinkerBinaryName());
           if (fs.existsSync(metaPath) && fs.existsSync(exePath)) {
             try {
               const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
@@ -2399,7 +2880,7 @@ ipcMain.handle('anyps5:get-merged-builds', async () => {
 
 ipcMain.handle('anyps5:set-active-merged-build', async (_, buildId: string) => {
   const baseDir = getExperimentalBuildsDir();
-  const exePath = path.join(baseDir, buildId, 'relinker.exe');
+  const exePath = path.join(baseDir, buildId, getRelinkerBinaryName());
   if (fs.existsSync(exePath)) {
     const current = loadSettings();
     saveSettings({ ...current, relinkerPath: exePath });
@@ -2411,7 +2892,7 @@ ipcMain.handle('anyps5:set-active-merged-build', async (_, buildId: string) => {
 ipcMain.handle('anyps5:delete-merged-build', async (_, buildId: string) => {
   const baseDir = getExperimentalBuildsDir();
   const dirPath = path.join(baseDir, buildId);
-  const exePath = path.join(dirPath, 'relinker.exe');
+  const exePath = path.join(dirPath, getRelinkerBinaryName());
 
   const current = loadSettings();
   if (current.relinkerPath && path.normalize(current.relinkerPath) === path.normalize(exePath)) {
