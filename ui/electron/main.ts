@@ -184,7 +184,7 @@ function getFolderSize(targetPath: string): number {
     const stat = fs.statSync(targetPath);
     if (!stat.isDirectory()) {
       const base = path.basename(targetPath).toLowerCase();
-      if (base === 'eboot.bin' || base === 'eboot.elf' || base === 'app.exe') {
+      if (base === 'eboot.bin' || base === 'eboot.elf' || base === 'app.exe' || base === 'app.elf') {
         return getFolderSize(path.dirname(targetPath));
       }
       return stat.size;
@@ -523,11 +523,22 @@ function saveSettings(settings: AppSettings) {
   }
 }
 
+function getRelinkerBinaryName(): string {
+  return process.platform === 'win32' ? 'relinker.exe' : 'relinker';
+}
+
+function getDefaultOutputExecutableName(): string {
+  return process.platform === 'win32' ? 'app.exe' : 'app.elf';
+}
+
 function getDefaultRelinkerPath(): string {
+  const binName = getRelinkerBinaryName();
   const candidates: string[] = [];
   if (app.isPackaged) {
     if (process.resourcesPath) {
       candidates.push(
+        path.join(process.resourcesPath, 'build', binName),
+        path.join(process.resourcesPath, binName),
         path.join(process.resourcesPath, 'build', 'relinker.exe'),
         path.join(process.resourcesPath, 'relinker.exe')
       );
@@ -535,6 +546,10 @@ function getDefaultRelinkerPath(): string {
     try {
       const exeDir = path.dirname(app.getPath('exe'));
       candidates.push(
+        path.join(exeDir, 'resources', 'build', binName),
+        path.join(exeDir, 'resources', binName),
+        path.join(exeDir, 'build', binName),
+        path.join(exeDir, binName),
         path.join(exeDir, 'resources', 'build', 'relinker.exe'),
         path.join(exeDir, 'resources', 'relinker.exe'),
         path.join(exeDir, 'build', 'relinker.exe'),
@@ -543,6 +558,11 @@ function getDefaultRelinkerPath(): string {
     } catch {}
   } else {
     candidates.push(
+      path.resolve(__dirname, '../../build', binName),
+      path.resolve(__dirname, '../../build-relinker/core/relinker/Release', binName),
+      path.resolve(__dirname, '../../build-relinker/core/relinker', binName),
+      path.resolve(process.cwd(), 'build', binName),
+      path.resolve(process.cwd(), '../build', binName),
       path.resolve(__dirname, '../../build/relinker.exe'),
       path.resolve(__dirname, '../../build-relinker/core/relinker/Release/relinker.exe'),
       path.resolve(process.cwd(), 'build/relinker.exe'),
@@ -550,7 +570,12 @@ function getDefaultRelinkerPath(): string {
     );
   }
   for (const c of candidates) {
-    if (fs.existsSync(c)) return path.normalize(c);
+    if (fs.existsSync(c)) {
+      if (process.platform !== 'win32') {
+        try { fs.chmodSync(c, 0o755); } catch {}
+      }
+      return path.normalize(c);
+    }
   }
   return candidates[0] ? path.normalize(candidates[0]) : '';
 }
@@ -839,7 +864,7 @@ function fixGameHierarchyInPlace(
     fs.mkdirSync(app0Dir, { recursive: true });
 
     // Move all game assets and folders into app0/ in-place (instant O(1) filesystem metadata rename)
-    const skipEntries = new Set(['app0', 'libs', 'app.exe', 'eboot.elf', 'relinker.log', 'run_test.log', 'run_game.log', 'run_extended.log']);
+    const skipEntries = new Set(['app0', 'libs', 'app.exe', 'app.elf', 'eboot.elf', 'relinker.log', 'run_test.log', 'run_game.log', 'run_extended.log']);
     const allEntries = fs.readdirSync(resolved);
     for (const entry of allEntries) {
       if (skipEntries.has(entry)) continue;
@@ -1374,7 +1399,14 @@ function fixGameHierarchyInPlace(
     console.error('Guest module scan error:', modScanErr);
   }
 
-  const outputExe = path.join(resolved, 'app.exe');
+  const defaultExeName = getDefaultOutputExecutableName();
+  let outputExe = path.join(resolved, defaultExeName);
+  if (!fs.existsSync(outputExe)) {
+    const altExe = path.join(resolved, defaultExeName === 'app.elf' ? 'app.exe' : 'app.elf');
+    if (fs.existsSync(altExe)) {
+      outputExe = altExe;
+    }
+  }
 
   // Backward compatibility check for executables built with legacy dumper stubs (fakelib)
   if (mode === 'launch') {
@@ -1382,7 +1414,7 @@ function fixGameHierarchyInPlace(
       if (fs.existsSync(outputExe)) {
         const exeBuffer = fs.readFileSync(outputExe);
         if (exeBuffer.includes(Buffer.from('fakelib'))) {
-          sendLog(`[AnyPS5 Diagnostics] Stale executable detected: "app.exe" contains embedded imports to legacy "fakelib" stubs.`, 'warn');
+          sendLog(`[AnyPS5 Diagnostics] Stale executable detected: "${path.basename(outputExe)}" contains embedded imports to legacy "fakelib" stubs.`, 'warn');
           sendLog(`[AnyPS5 Diagnostics] Re-relinking this title in Relinker Studio is recommended to use AnyPS5's native translation libraries.`, 'info');
 
           const backupFakelib = path.join(app0Dir, 'module_backups', 'fakelib');
@@ -1499,13 +1531,23 @@ ipcMain.handle('anyps5:run-relinker', async (_, { game, options }) => {
     }
 
     sendStage(2, 'active', 30);
+    const targetSystem = options.target || (process.platform === 'linux' ? 'linux' : (process.platform === 'darwin' ? 'macos' : 'windows'));
+    const isWindows = targetSystem === 'windows';
+    const isMacos = targetSystem === 'macos';
+    const isLinux = targetSystem === 'linux';
+    const targetExeName = isWindows ? 'app.exe' : (isMacos ? 'app.macho' : 'app.elf');
+    const targetOutputExe = path.join(gameDir, targetExeName);
+
     const args: string[] = [];
-    if (options.target === 'windows') args.push('--windows');
-    if (options.target === 'macos') args.push('--macos');
-    if (options.subsystem === 'gui') args.push('--windows-gui');
+    if (isWindows) args.push('--windows');
+    if (isMacos) args.push('--macos');
+    if (isWindows && options.subsystem === 'gui') args.push('--windows-gui');
     if (options.cpuTranslation === 'intel') args.push('--to-intel');
     if (options.cpuTranslation === 'rosetta') args.push('--to-rosetta');
-    if (options.traceImports) args.push('--trace-imports');
+    if (isWindows && options.traceImports) args.push('--trace-imports');
+    if (isLinux) {
+      args.push('--rpath', '$ORIGIN/libs');
+    }
 
     // Register all discovered guest module directories (e.g. games, Media/Plugins, etc.)
     for (const modDir of moduleDirs) {
@@ -1517,7 +1559,7 @@ ipcMain.handle('anyps5:run-relinker', async (_, { game, options }) => {
     const filterValue = options.unusedFilter === 2 ? '2' : (options.unusedFilter === 1 ? '1' : '0');
     args.push(`unused-filter=${filterValue}`);
 
-    args.push(inputElf, outputExe);
+    args.push(inputElf, targetOutputExe);
 
     sendLog(`[AnyPS5] Executing relinker in "${gameDir}":`);
     sendLog(`[AnyPS5] ${defaultBin} ${args.join(' ')}`);
@@ -1566,8 +1608,16 @@ ipcMain.handle('anyps5:run-relinker', async (_, { game, options }) => {
           sendStage(6, 'completed', 100);
           sendStage(8, 'completed', 100);
 
+          if (process.platform !== 'win32') {
+            try {
+              fs.chmodSync(targetOutputExe, 0o755);
+            } catch (chmodErr) {
+              console.warn('Failed to chmod output executable:', chmodErr);
+            }
+          }
+
           game.status = 'ported';
-          game.executableName = 'app.exe';
+          game.executableName = targetExeName;
 
           // Auto-extract high-res cover art from sce_sys if available
           const paramSysDir = path.join(gameDir, 'app0/sce_sys');
@@ -1636,7 +1686,7 @@ ipcMain.handle('anyps5:launch-game', async (_, game) => {
   };
 
   try {
-    sendLog(`[AnyPS5] Launching native ported executable: ${game.path}/${game.executableName || 'app.exe'}`);
+    sendLog(`[AnyPS5] Launching native ported executable: ${game.path}/${game.executableName || getDefaultOutputExecutableName()}`);
     sendLog(`[AnyPS5] Checking runtime layout: libs/ system PRX and app0/ guest filesystem...`);
     fixGameHierarchyInPlace(game.path, sendLog, 'launch');
   } catch (err: any) {
@@ -1644,16 +1694,28 @@ ipcMain.handle('anyps5:launch-game', async (_, game) => {
     sendLog(`[AnyPS5 Warning] Hierarchy check: ${err?.message || err}`, 'warn');
   }
 
+  const defaultExeName = getDefaultOutputExecutableName();
   const candidateExes = [
-    path.join(game.path, 'app.exe'),
-    path.join(game.path, game.executableName || 'app.exe'),
+    path.join(game.path, game.executableName || defaultExeName),
+    path.join(game.path, defaultExeName),
+    path.join(game.path, defaultExeName === 'app.elf' ? 'app.exe' : 'app.elf'),
   ];
   const targetExe = candidateExes.find((p) => fs.existsSync(p));
 
   if (!targetExe) {
+    const expectedName = game.executableName || defaultExeName;
     return {
-      error: `Ported executable "app.exe" not found in ${game.path}. Please open Relinker Studio and click Relink first!`,
+      error: `Ported executable "${expectedName}" not found in ${game.path}. Please open Relinker Studio and click Relink first!`,
     };
+  }
+
+  // Ensure executable permissions on POSIX
+  if (process.platform !== 'win32') {
+    try {
+      fs.chmodSync(targetExe, 0o755);
+    } catch (chmodErr) {
+      console.warn('Failed to chmod target executable before launch:', chmodErr);
+    }
   }
 
   // Terminate any existing active instance cleanly
@@ -1684,17 +1746,26 @@ ipcMain.handle('anyps5:launch-game', async (_, game) => {
       childEnv.ANYPS5_GPU = gpuToUse;
     }
 
-    // Prepend application root, libs/, and app0/ to PATH so child processes and loaders locate all dependencies
+    // Prepend application root, libs/, and app0/ to PATH and LD_LIBRARY_PATH so child processes and loaders locate all dependencies
     const runtimeDirs = [
       game.path,
       path.join(game.path, 'libs'),
       path.join(game.path, 'app0'),
       path.join(game.path, 'app0', 'sce_module'),
     ];
-    const existingPath = childEnv.Path || childEnv.PATH || '';
-    const newPath = runtimeDirs.join(';') + (existingPath ? ';' + existingPath : '');
-    childEnv.Path = newPath;
-    childEnv.PATH = newPath;
+    if (process.platform === 'win32') {
+      const existingPath = childEnv.Path || childEnv.PATH || '';
+      const newPath = runtimeDirs.join(';') + (existingPath ? ';' + existingPath : '');
+      childEnv.Path = newPath;
+      childEnv.PATH = newPath;
+    } else {
+      const existingLd = childEnv.LD_LIBRARY_PATH || '';
+      const newLd = runtimeDirs.join(':') + (existingLd ? ':' + existingLd : '');
+      childEnv.LD_LIBRARY_PATH = newLd;
+      const existingPath = childEnv.PATH || '';
+      const newPath = runtimeDirs.join(':') + (existingPath ? ':' + existingPath : '');
+      childEnv.PATH = newPath;
+    }
 
     const child = spawn(targetExe, [], {
       cwd: game.path,
@@ -1937,7 +2008,7 @@ ipcMain.handle('anyps5:get-settings', async () => {
   return {
     relinkerPath: userSettings.relinkerPath || defaultRelinkerPath,
     prxPath: userSettings.prxPath || defaultPrxPath,
-    defaultTarget: userSettings.defaultTarget || 'windows',
+    defaultTarget: userSettings.defaultTarget || (process.platform === 'linux' ? 'linux' : (process.platform === 'darwin' ? 'macos' : 'windows')),
     cpuFix: userSettings.cpuFix || 'intel',
     soundEnabled: userSettings.soundEnabled !== undefined ? userSettings.soundEnabled : true,
     hapticsEnabled: userSettings.hapticsEnabled !== undefined ? userSettings.hapticsEnabled : true,
@@ -1963,7 +2034,7 @@ ipcMain.handle('anyps5:select-file', async (_, filters) => {
     properties: ['openFile'],
     title: 'Select Executable',
     filters: (filters as Array<{ name: string; extensions: string[] }>) || [
-      { name: 'Executables (*.exe)', extensions: ['exe'] },
+      { name: 'Executables (*.exe, *.elf, *)', extensions: ['exe', 'elf', '*'] },
       { name: 'All Files', extensions: ['*'] },
     ],
   });
@@ -2186,7 +2257,7 @@ ipcMain.handle('anyps5:get-community-prs', async (_, targetRepoArg?: string, for
   // Annotate with local installation & active status
   return prs.map((pr) => {
     const prDir = path.join(baseDir, `pr-${pr.number}`);
-    const prExe = path.join(prDir, 'relinker.exe');
+    const prExe = path.join(prDir, getRelinkerBinaryName());
     const isInstalled = fs.existsSync(prExe);
     let artifactSizeMb = pr.artifactSizeMb;
     if (isInstalled) {
@@ -2208,7 +2279,7 @@ ipcMain.handle('anyps5:get-community-prs', async (_, targetRepoArg?: string, for
 ipcMain.handle('anyps5:download-pr-build', async (_, { prNumber, artifactUrl }) => {
   const baseDir = getExperimentalBuildsDir();
   const targetDir = path.join(baseDir, `pr-${prNumber}`);
-  const targetExe = path.join(targetDir, 'relinker.exe');
+  const targetExe = path.join(targetDir, getRelinkerBinaryName());
 
   const sendProgress = (status: 'downloading' | 'extracting' | 'ready' | 'error', progress: number, error?: string) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
@@ -2241,6 +2312,9 @@ ipcMain.handle('anyps5:download-pr-build', async (_, { prNumber, artifactUrl }) 
     } else {
       fs.writeFileSync(targetExe, 'AnyPS5 Experimental Relinker Binary');
     }
+    if (process.platform !== 'win32') {
+      try { fs.chmodSync(targetExe, 0o755); } catch {}
+    }
 
     // Save build metadata
     const metaPath = path.join(targetDir, 'build-info.json');
@@ -2260,7 +2334,7 @@ ipcMain.handle('anyps5:download-pr-build', async (_, { prNumber, artifactUrl }) 
 
 ipcMain.handle('anyps5:set-active-pr-build', async (_, prNumber: number) => {
   const baseDir = getExperimentalBuildsDir();
-  const prExe = path.join(baseDir, `pr-${prNumber}`, 'relinker.exe');
+  const prExe = path.join(baseDir, `pr-${prNumber}`, getRelinkerBinaryName());
   if (fs.existsSync(prExe)) {
     const current = loadSettings();
     saveSettings({ ...current, relinkerPath: prExe });
@@ -2279,7 +2353,7 @@ ipcMain.handle('anyps5:revert-to-default-build', async () => {
 ipcMain.handle('anyps5:delete-pr-build', async (_, prNumber: number) => {
   const baseDir = getExperimentalBuildsDir();
   const prDir = path.join(baseDir, `pr-${prNumber}`);
-  const prExe = path.join(prDir, 'relinker.exe');
+  const prExe = path.join(prDir, getRelinkerBinaryName());
 
   const current = loadSettings();
   if (current.relinkerPath && path.normalize(current.relinkerPath) === path.normalize(prExe)) {
@@ -2306,7 +2380,7 @@ ipcMain.handle('anyps5:merge-and-build-prs', async (_, prNumbers: number[]) => {
   const buildId = `merged-${sorted.join('-')}`;
   const baseDir = getExperimentalBuildsDir();
   const targetDir = path.join(baseDir, buildId);
-  const targetExe = path.join(targetDir, 'relinker.exe');
+  const targetExe = path.join(targetDir, getRelinkerBinaryName());
 
   const sendProgress = (status: 'downloading' | 'extracting' | 'ready' | 'error', progress: number, error?: string) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
@@ -2338,6 +2412,9 @@ ipcMain.handle('anyps5:merge-and-build-prs', async (_, prNumbers: number[]) => {
       fs.copyFileSync(defaultRelinker, targetExe);
     } else {
       fs.writeFileSync(targetExe, `AnyPS5 Combined Relinker Binary (${buildId})`);
+    }
+    if (process.platform !== 'win32') {
+      try { fs.chmodSync(targetExe, 0o755); } catch {}
     }
 
     const metaPath = path.join(targetDir, 'merged-info.json');
@@ -2374,7 +2451,7 @@ ipcMain.handle('anyps5:get-merged-builds', async () => {
       for (const entry of entries) {
         if (entry.startsWith('merged-')) {
           const metaPath = path.join(baseDir, entry, 'merged-info.json');
-          const exePath = path.join(baseDir, entry, 'relinker.exe');
+          const exePath = path.join(baseDir, entry, getRelinkerBinaryName());
           if (fs.existsSync(metaPath) && fs.existsSync(exePath)) {
             try {
               const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
@@ -2399,7 +2476,7 @@ ipcMain.handle('anyps5:get-merged-builds', async () => {
 
 ipcMain.handle('anyps5:set-active-merged-build', async (_, buildId: string) => {
   const baseDir = getExperimentalBuildsDir();
-  const exePath = path.join(baseDir, buildId, 'relinker.exe');
+  const exePath = path.join(baseDir, buildId, getRelinkerBinaryName());
   if (fs.existsSync(exePath)) {
     const current = loadSettings();
     saveSettings({ ...current, relinkerPath: exePath });
@@ -2411,7 +2488,7 @@ ipcMain.handle('anyps5:set-active-merged-build', async (_, buildId: string) => {
 ipcMain.handle('anyps5:delete-merged-build', async (_, buildId: string) => {
   const baseDir = getExperimentalBuildsDir();
   const dirPath = path.join(baseDir, buildId);
-  const exePath = path.join(dirPath, 'relinker.exe');
+  const exePath = path.join(dirPath, getRelinkerBinaryName());
 
   const current = loadSettings();
   if (current.relinkerPath && path.normalize(current.relinkerPath) === path.normalize(exePath)) {

@@ -3,7 +3,7 @@ name: Build Upstream Core Binaries
 on:
   workflow_dispatch:
   push:
-    branches: [main, feature/upstream-sync]
+    branches: [main, feature/upstream-sync, feat/linux-studio-support]
     paths:
       - 'core/**'
       - 'cmake/**'
@@ -77,11 +77,8 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist-upstream/libs dist-upstream/build
-          # Copy relinker.exe
           cp -v build/core/relinker/relinker.exe dist-upstream/build/ || cp -v build/bin/relinker.exe dist-upstream/build/ || cp -v build/relinker.exe dist-upstream/build/
-          # Copy all built PRX libraries
           cp -v build/core/libs/libs/*.prx dist-upstream/libs/
-          # Copy MinGW runtime DLLs
           cp -v /c/winlibs/mingw64/bin/libgcc_s_seh-1.dll dist-upstream/libs/
           cp -v /c/winlibs/mingw64/bin/libstdc++-6.dll dist-upstream/libs/
           cp -v /c/winlibs/mingw64/bin/libwinpthread-1.dll dist-upstream/libs/
@@ -92,5 +89,50 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: anyps5-upstream-core-windows-x64
+          path: dist-upstream/
+          retention-days: 30
+
+  build-linux:
+    name: Build Linux x64 Relinker & PRX Libraries
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build
+
+      - uses: hendrikmuhs/ccache-action@v1.2.24
+        with:
+          key: linux-upstream-sync
+          save: true
+
+      - name: Configure CMake
+        run: cmake -S . -B build $CONFIGURE
+
+      - name: Build Relinker & System PRX Libraries
+        run: |
+          cmake --build build --target relinker
+          cmake --build build --target libs
+
+      - name: Package Linux Core Binaries
+        run: |
+          mkdir -p dist-upstream/libs dist-upstream/build
+          cp -v build/core/relinker/relinker dist-upstream/build/ || cp -v build/bin/relinker dist-upstream/build/ || cp -v build/relinker dist-upstream/build/
+          chmod +x dist-upstream/build/relinker
+          cp -v build/core/libs/libs/*.prx dist-upstream/libs/
+          chmod +x dist-upstream/libs/*.prx || true
+          ls -la dist-upstream/build/
+          ls -la dist-upstream/libs/
+
+      - name: Upload Linux Core Binaries Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: anyps5-upstream-core-linux-x64
           path: dist-upstream/
           retention-days: 30

@@ -33,8 +33,12 @@
     ],
     "extraResources": [
       {
-        "from": "../build/relinker.exe",
-        "to": "build/relinker.exe"
+        "from": "../build",
+        "to": "build",
+        "filter": [
+          "relinker",
+          "relinker.exe"
+        ]
       },
       {
         "from": "../libs",
@@ -45,6 +49,19 @@
         "to": "tools"
       }
     ],
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "public/icon.png",
+      "category": "Game",
+      "artifactName": "AnyPS5-Studio-${version}.${ext}"
+    },
     "win": {
       "target": [
         {
