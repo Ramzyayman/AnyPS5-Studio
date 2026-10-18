@@ -442,7 +442,8 @@ std::uint64_t _ZNSt7codecvtIwc9_MbstatetE2idE_nid_postfix = 0;
 std::uint64_t _ZNSt8numpunctIcE2idE_nid_postfix = 0;
 std::uint64_t _ZNSt8time_putIcSt19ostreambuf_iteratorIcSt11char_traitsIcEEE2idE_nid_postfix = 0;
 std::uint64_t _ZNSt7codecvtIDic9_MbstatetE2idE_nid_postfix = 0;
-const void* const _ZTVSt8time_putIcSt19ostreambuf_iteratorIcSt11char_traitsIcEEE_nid_postfix[] {
+extern const void* _ZTVSt8time_putIcSt19ostreambuf_iteratorIcSt11char_traitsIcEEE_nid_postfix[];
+const void* _ZTVSt8time_putIcSt19ostreambuf_iteratorIcSt11char_traitsIcEEE_nid_postfix[] {
     nullptr, nullptr,
     reinterpret_cast<const void*>(DestroyCopiedLocale),
     reinterpret_cast<const void*>(DestroyCopiedLocale)
