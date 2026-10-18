@@ -249,6 +249,52 @@ const void* const GenericCategoryVtable[] {
     reinterpret_cast<const void*>(GenericCategoryEquivalentCode_nid_no_patch)
 };
 const CategoryObject GenericCategory {GenericCategoryVtable + 2};
+
+const TypeRecord SystemCategoryType {SingleTypeVtable + 2, "St23_System_error_category", &ErrorCategoryType};
+static const char* APS5_VABI SystemCategoryName_nid_no_patch(const CategoryObject*) { return "system"; }
+const void* const SystemCategoryVtable[] {
+    nullptr, &SystemCategoryType,
+    reinterpret_cast<const void*>(GenericCategoryDestroy_nid_no_patch), reinterpret_cast<const void*>(GenericCategoryDelete_nid_no_patch),
+    reinterpret_cast<const void*>(SystemCategoryName_nid_no_patch), reinterpret_cast<const void*>(GenericCategoryMessage_nid_no_patch),
+    reinterpret_cast<const void*>(GenericCategoryCondition_nid_no_patch),
+    reinterpret_cast<const void*>(GenericCategoryEquivalentCondition_nid_no_patch),
+    reinterpret_cast<const void*>(GenericCategoryEquivalentCode_nid_no_patch)
+};
+const CategoryObject SystemCategory {SystemCategoryVtable + 2};
+
+const TypeRecord FutureCategoryType {SingleTypeVtable + 2, "St23_Future_error_category", &ErrorCategoryType};
+static const char* APS5_VABI FutureCategoryName_nid_no_patch(const CategoryObject*) { return "future"; }
+static const char* FutureErrorMessage(int value) {
+    switch (value) {
+    case 1: return "broken promise";
+    case 2: return "future already retrieved";
+    case 3: return "promise already satisfied";
+    case 4: return "no state";
+    default: return "unknown future error";
+    }
+}
+static GuestLocale::String* APS5_VABI FutureCategoryMessage_nid_no_patch(GuestLocale::String* result, const CategoryObject*, int value) {
+    if (!result) throw std::invalid_argument("future_category::message: null result");
+    const char* message = FutureErrorMessage(value);
+    const auto length = std::strlen(message);
+    const auto capacity = length | std::size_t{15};
+    char* storage = length <= 15 ? result->buffer : static_cast<char*>(_Znwm_nid_postfix(capacity + 1));
+    std::memcpy(storage, message, length + 1);
+    result->reserved = 0;
+    if (length > 15) result->pointer = storage;
+    result->size = length;
+    result->capacity = capacity;
+    return result;
+}
+const void* const FutureCategoryVtable[] {
+    nullptr, &FutureCategoryType,
+    reinterpret_cast<const void*>(GenericCategoryDestroy_nid_no_patch), reinterpret_cast<const void*>(GenericCategoryDelete_nid_no_patch),
+    reinterpret_cast<const void*>(FutureCategoryName_nid_no_patch), reinterpret_cast<const void*>(FutureCategoryMessage_nid_no_patch),
+    reinterpret_cast<const void*>(GenericCategoryCondition_nid_no_patch),
+    reinterpret_cast<const void*>(GenericCategoryEquivalentCondition_nid_no_patch),
+    reinterpret_cast<const void*>(GenericCategoryEquivalentCode_nid_no_patch)
+};
+const CategoryObject FutureCategory {FutureCategoryVtable + 2};
 }
 
 extern "C" {
@@ -257,6 +303,25 @@ const char* APS5_VABI _ZSt13_Syserror_mapi_nid_postfix(int value) {
 }
 const LibcException::CategoryObject* APS5_VABI _ZSt16generic_categoryv_nid_postfix() {
     return &LibcException::GenericCategory;
+}
+const LibcException::CategoryObject* APS5_VABI _ZSt15system_categoryv_nid_postfix() {
+    return &LibcException::SystemCategory;
+}
+const LibcException::CategoryObject* APS5_VABI _ZSt15future_categoryv_nid_postfix() {
+    return &LibcException::FutureCategory;
+}
+LibcException::TypeRecord _ZTISt14error_category_nid_postfix {LibcException::ClassTypeVtable + 2, "St14error_category", nullptr};
+void APS5_VABI _ZNSt14error_categoryD2Ev_nid_postfix(void*) {}
+LibcException::ErrorCode APS5_VABI _ZNKSt14error_category23default_error_conditionEi_nid_postfix(const LibcException::CategoryObject* self, int value) {
+    return {value, self};
+}
+bool APS5_VABI _ZNKSt14error_category10equivalentERKSt10error_codei_nid_postfix(
+    const LibcException::CategoryObject* self, const LibcException::ErrorCode* code, int value) {
+    return code != nullptr && code->category == self && code->value == value;
+}
+bool APS5_VABI _ZNKSt14error_category10equivalentEiRKSt15error_condition_nid_postfix(
+    const LibcException::CategoryObject* self, int value, const LibcException::ErrorCode* condition) {
+    return condition != nullptr && condition->category == self && condition->value == value;
 }
 GuestLocale::String* APS5_VABI _ZNKSt23_Generic_error_category7messageEi_nid_postfix(
     GuestLocale::String* result, const LibcException::CategoryObject* self, int value) {
@@ -449,6 +514,25 @@ LibcException::TypeRecord _ZTISt14overflow_error_nid_postfix {LibcException::Sin
 LibcException::ExceptionVtable _ZTVSt14overflow_error_nid_postfix {0, &_ZTISt14overflow_error_nid_postfix, LibcException::GuestDestroyMessage_nid_no_patch, LibcException::GuestDeleteMessage_nid_no_patch, LibcException::GuestMessageWhat_nid_no_patch};
 void APS5_VABI _ZNSt14overflow_errorD1Ev_nid_postfix(LibcException::ExceptionObject* self) { LibcException::DestroyMessage(self); }
 
+LibcException::TypeRecord _ZTISt15underflow_error_nid_postfix {LibcException::SingleTypeVtable + 2, "St15underflow_error", &_ZTISt13runtime_error_nid_postfix};
+LibcException::ExceptionVtable _ZTVSt15underflow_error_nid_postfix {0, &_ZTISt15underflow_error_nid_postfix, LibcException::GuestDestroyMessage_nid_no_patch, LibcException::GuestDeleteMessage_nid_no_patch, LibcException::GuestMessageWhat_nid_no_patch};
+void APS5_VABI _ZNSt15underflow_errorD1Ev_nid_postfix(LibcException::ExceptionObject* self) { LibcException::DestroyMessage(self); }
+
+LibcException::TypeRecord _ZTISt12future_error_nid_postfix {LibcException::SingleTypeVtable + 2, "St12future_error", &_ZTISt11logic_error_nid_postfix};
+LibcException::ExceptionVtable _ZTVSt12future_error_nid_postfix {0, &_ZTISt12future_error_nid_postfix, LibcException::GuestDestroyMessage_nid_no_patch, LibcException::GuestDeleteMessage_nid_no_patch, LibcException::GuestMessageWhat_nid_no_patch};
+void APS5_VABI _ZNSt12future_errorD1Ev_nid_postfix(LibcException::ExceptionObject* self) { LibcException::DestroyMessage(self); }
+
+[[noreturn]] void APS5_VABI _ZSt19_Throw_future_errorRKSt10error_code_nid_postfix(const void*) {
+    LibcException::ThrowMessage(_ZTVSt12future_error_nid_postfix, "future_error");
+}
+
+[[noreturn]] void APS5_VABI _ZSt25_Rethrow_future_exceptionSt13exception_ptr_nid_postfix(std::exception_ptr exception) {
+    std::rethrow_exception(exception);
+}
+
+LibcException::TypeRecord _ZTIv_nid_postfix {LibcException::ClassTypeVtable + 2, "v", nullptr};
+LibcException::TypeRecord _ZTIi_nid_postfix {LibcException::ClassTypeVtable + 2, "i", nullptr};
+
 LibcException::TypeRecord _ZTINSt8ios_base7failureE_nid_postfix {LibcException::SingleTypeVtable + 2, "NSt8ios_base7failureE", &_ZTISt12system_error_nid_postfix};
 LibcException::ExceptionVtable _ZTVNSt8ios_base7failureE_nid_postfix {0, &_ZTINSt8ios_base7failureE_nid_postfix, LibcException::GuestDestroyMessage_nid_no_patch, LibcException::GuestDeleteMessage_nid_no_patch, LibcException::GuestMessageWhat_nid_no_patch};
 void APS5_VABI _ZNSt8ios_base7failureD1Ev_nid_postfix(LibcException::ExceptionObject* self) { LibcException::DestroyMessage(self); }
@@ -468,6 +552,15 @@ const char* APS5_VABI _ZNKSt8ios_base7failure4whatEv_nid_postfix(const LibcExcep
 [[noreturn]] void APS5_VABI _ZSt19_Xbad_function_callv_nid_postfix() { LibcException::ThrowPlain(_ZTVSt17bad_function_call_nid_postfix); }
 [[noreturn]] void APS5_VABI _ZNSt8__sce_v219_Xbad_function_callEv_nid_postfix() { LibcException::ThrowPlain(_ZTVSt17bad_function_call_nid_postfix); }
 [[noreturn]] void APS5_VABI _ZSt19_Throw_bad_weak_ptrv_nid_postfix() { LibcException::ThrowPlain(_ZTVSt12bad_weak_ptr_nid_postfix); }
+[[noreturn]] void APS5_VABI _ZSt22_Throw_bad_node_accessPKc_nid_postfix(const char* message) {
+    LibcException::ThrowMessage(_ZTVSt12out_of_range_nid_postfix, message ? message : "bad node access");
+}
+[[noreturn]] void APS5_VABI _ZSt26_Throw_bad_optional_accessv_nid_postfix() {
+    LibcException::ThrowMessage(_ZTVSt11logic_error_nid_postfix, "bad optional access");
+}
+[[noreturn]] void APS5_VABI _ZSt26__throw_bad_variant_accessv_nid_postfix() {
+    LibcException::ThrowMessage(_ZTVSt11logic_error_nid_postfix, "bad variant access");
+}
 [[noreturn]] void APS5_VABI _ZSt13_Xregex_errorNSt15regex_constants10error_typeE_nid_postfix(std::regex_constants::error_type code) {
     struct RegexObject { LibcException::ExceptionObject base; std::regex_constants::error_type code; };
     auto* object = static_cast<RegexObject*>(__cxa_allocate_exception_nid_postfix(sizeof(RegexObject)));
