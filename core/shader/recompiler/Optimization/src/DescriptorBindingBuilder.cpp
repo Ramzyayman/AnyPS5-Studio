@@ -182,10 +182,11 @@ struct UnnormalizedProof {
     std::vector<bool> samplers;
     std::vector<bool> images;
     std::vector<bool> imagesAtBaseLevel;
+    std::vector<bool> samplersIgnoreCoordinates;
 };
 
 UnnormalizedProof ProveUnnormalized(const ShaderInfo& info, const ResourceSnapshot& snapshot) {
-    UnnormalizedProof proof{std::vector<bool>(info.samplers.size()), std::vector<bool>(info.images.size()), std::vector<bool>(info.images.size())};
+    UnnormalizedProof proof{std::vector<bool>(info.samplers.size()), std::vector<bool>(info.images.size()), std::vector<bool>(info.images.size()), std::vector<bool>(info.samplers.size())};
     for (std::uint32_t r = 0; r < info.samplers.size(); r++) {
         if (snapshot.samplers.at(r).dwordCount != 4u) fail("sampler descriptor must contain four dwords");
         const auto& sampler = info.samplers[r];
@@ -212,6 +213,8 @@ UnnormalizedProof ProveUnnormalized(const ShaderInfo& info, const ResourceSnapsh
         if (sampler.depthCompare) {
             failUnnormalized("is used with depth comparison");
         }
+        bool sampled = false;
+        const char* nullMismatch = nullptr;
         for (const auto& pair : info.sampledPairs) {
             if (pair.sampler != r) {
                 continue;
@@ -221,12 +224,23 @@ UnnormalizedProof ProveUnnormalized(const ShaderInfo& info, const ResourceSnapsh
                 failUnnormalized("samples an image selected at run time");
             }
             const auto& image = info.runtimeImageModes.at(pair.image).at(ResourceMaterializer::RuntimeImageMode(base, snapshot.images.at(pair.image), info.runtimeImageModes.at(pair.image)));
-            if (const auto* reason = ResourceMaterializer::UnnormalizedSampleMismatch(image)) {
+            const auto* reason = ResourceMaterializer::UnnormalizedSampleMismatch(image);
+            if (reason != nullptr && ResourceMaterializer::NullImageDescriptor(base, snapshot.images.at(pair.image))) {
+                if (nullMismatch == nullptr) nullMismatch = reason;
+                continue;
+            }
+            if (reason != nullptr) {
                 failUnnormalized(reason);
             }
             if (image.constantSwizzle) continue;
+            sampled = true;
             proof.images[pair.image] = true;
         }
+        if (!sampled && nullMismatch != nullptr) {
+            proof.samplersIgnoreCoordinates[r] = true;
+            continue;
+        }
+        if (nullMismatch != nullptr) failUnnormalized(nullMismatch);
         proof.samplers[r] = true;
     }
     for (std::uint32_t resource = 0; resource < info.images.size(); resource++) {
@@ -451,6 +465,7 @@ DescriptorBindingPlan DescriptorBindingBuilder::Prepare(const IrBindingLayout& l
                 for (const auto& pair : info.sampledPairs) if (pair.sampler == resource) compare |= info.images.at(pair.image).depthCompare && compareStates.at(pair.image) == 0u;
                 physical.samplerDepthCompare.push_back(compare);
                 physical.samplerUnnormalized.push_back(unnormalized.samplers.at(resource));
+                physical.samplerCoordinatesIgnored.push_back(unnormalized.samplersIgnoreCoordinates.at(resource));
                 const auto mode = 1u << (originals[element] & 1u);
                 physical.samplerIntegerBorder.push_back((samplerIntegerModes.at(resource) & mode) != 0u && (samplerFloatModes.at(resource) & mode) == 0u);
                 const auto& words = snapshot.samplers.at(resource).dwords;

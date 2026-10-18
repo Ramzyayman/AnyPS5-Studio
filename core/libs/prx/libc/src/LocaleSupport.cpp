@@ -360,16 +360,6 @@ std::size_t APS5_VABI _ZNSt7collateIcE7_GetcatEPPKNSt6locale5facetEPKS1__nid_pos
     return 1;
 }
 
-std::size_t APS5_VABI _ZNSt8numpunctIcE7_GetcatEPPKNSt6locale5facetEPKS1__nid_postfix(GuestLocale::Facet** facet, const GuestLocale::Implementation* const* locale) {
-    if (facet != nullptr && *facet == nullptr) {
-        if (locale == nullptr || *locale == nullptr || (*locale)->name == nullptr || std::strcmp((*locale)->name, "C") != 0) throw std::invalid_argument("numpunct::_Getcat: only the C locale is supported");
-        auto* numpunct = static_cast<GuestLocale::Facet*>(_Znwm_nid_postfix(sizeof(GuestLocale::Facet)));
-        *numpunct = {&g_localeVtable, 0, 0};
-        *facet = numpunct;
-    }
-    return 1;
-}
-
 void APS5_VABI _ZNSt8_LocinfoC1EPKc_nid_postfix(GuestLocale::LocinfoStorage* self, const char* localeName) {
     if (self == nullptr || localeName == nullptr || std::strcmp(localeName, "C") != 0) throw std::invalid_argument("_Locinfo: only the C locale is supported");
     new (self) GuestLocale::LocinfoStorage{};
@@ -435,38 +425,6 @@ std::uint32_t APS5_VABI _Towctrans_nid_postfix(std::uint32_t c, std::uint64_t de
 // storage (the guest constructs Dinkumware streams itself) so address-taking code links and only a
 // use of them would misbehave.
 std::uint64_t _ZNSt7codecvtIwc9_MbstatetE2idE_nid_postfix = 0;
-std::uint64_t _ZNSt8numpunctIcE2idE_nid_postfix = 0;
-std::uint64_t _ZNSt8time_putIcSt19ostreambuf_iteratorIcSt11char_traitsIcEEE2idE_nid_postfix = 0;
-std::uint64_t _ZNSt7codecvtIDic9_MbstatetE2idE_nid_postfix = 0;
-extern const void* _ZTVSt8time_putIcSt19ostreambuf_iteratorIcSt11char_traitsIcEEE_nid_postfix[];
-const void* _ZTVSt8time_putIcSt19ostreambuf_iteratorIcSt11char_traitsIcEEE_nid_postfix[] {
-    nullptr, nullptr,
-    reinterpret_cast<const void*>(DestroyCopiedLocale),
-    reinterpret_cast<const void*>(DestroyCopiedLocale)
-};
-
-struct SmanipInt {
-    void (APS5_VABI *pfn)(GuestLocale::IosBase* stream, int arg);
-    int arg;
-    int padding;
-};
-
-void APS5_VABI SetPrecision(GuestLocale::IosBase* stream, int arg) {
-    if (stream) stream->precision = arg;
-}
-
-void APS5_VABI SetWidth(GuestLocale::IosBase* stream, int arg) {
-    if (stream) stream->width = arg;
-}
-
-SmanipInt APS5_VABI _ZSt12setprecisioni_nid_postfix(int n) {
-    return {SetPrecision, n, 0};
-}
-
-SmanipInt APS5_VABI _ZSt4setwi_nid_postfix(int n) {
-    return {SetWidth, n, 0};
-}
-
 alignas(16) unsigned char _ZSt4cout_nid_postfix[0x400] {};
 alignas(16) unsigned char _ZSt4cerr_nid_postfix[0x400] {};
 alignas(16) unsigned char _ZSt3cin_nid_postfix[0x400] {};

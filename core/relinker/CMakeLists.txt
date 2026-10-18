@@ -124,15 +124,11 @@ if(BUILD_TESTING AND WIN32)
 endif()
 
 if(WIN32)
-    if(MSVC)
-        target_link_options(relinker PRIVATE /MANIFEST:NO)
-    else()
-        target_compile_options(relinker PRIVATE -municode)
-        target_link_options(relinker PRIVATE -municode)
-    endif()
     add_library(relinker_resources OBJECT ${CMAKE_CURRENT_SOURCE_DIR}/relinker.rc)
     set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/relinker.rc PROPERTIES OBJECT_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/relinker.manifest)
     target_sources(relinker PRIVATE $<TARGET_OBJECTS:relinker_resources>)
+    target_compile_options(relinker PRIVATE -municode)
+    target_link_options(relinker PRIVATE -municode)
 endif()
 
 if(WIN32)
@@ -442,6 +438,7 @@ if(BUILD_TESTING)
         foreach(opcode IN ITEMS add or adc sbb and sub xor cmp)
             list(APPEND tlsCoverageGroups alu_${opcode})
         endforeach()
+        list(APPEND tlsCoverageGroups gs_traps)
         foreach(group IN LISTS tlsCoverageGroups)
             add_test(NAME tls_function_coverage_${group} COMMAND ${Python3_EXECUTABLE}
                 ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_tls_function_coverage.py $<TARGET_FILE:relinker> ${group})
@@ -529,6 +526,9 @@ if(BUILD_TESTING)
         add_test(NAME guest_deferred_dependencies COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_guest_deferred_dependencies.py
             $<TARGET_FILE:relinker> $<TARGET_FILE:guest_module_args_host>)
+        add_test(NAME guest_preinit COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_guest_preinit.py
+            $<TARGET_FILE:relinker> $<TARGET_FILE:guest_module_args_host>)
         add_test(NAME guest_absolute_symbols COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_guest_absolute_symbols.py $<TARGET_FILE:relinker>)
         add_test(NAME guest_module_identity COMMAND ${Python3_EXECUTABLE}
@@ -542,6 +542,7 @@ if(BUILD_TESTING)
         add_asan_test_options(guest_module_args verify_asan_link_order=0)
         add_asan_test_options(guest_deferred_dependencies verify_asan_link_order=0)
         add_asan_test_options(guest_module_fini verify_asan_link_order=0)
+        add_asan_test_options(guest_preinit verify_asan_link_order=0)
         add_test(NAME guest_needed_nested_modules COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_guest_needed_nested_modules.py $<TARGET_FILE:relinker>)
         set(windows_stdio_host_arguments)

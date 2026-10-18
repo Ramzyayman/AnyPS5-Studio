@@ -8,6 +8,7 @@
 #include <functional>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -182,6 +183,62 @@ void testSmoothing() {
     check(early > 0.5 * 0.55 && early < 0.5 * 0.72, "smoothing reaches about 63 percent after one time constant");
 }
 
+void testSlowReportingMouse() {
+    const double speed = 0.5 * Pad::MouseFullTiltCountsPerSecond;
+    const double expected = expectedDeflection(defaults().settings, 0.5);
+    for (const double reportHz : {125.0, 250.0, 1000.0}) {
+        std::vector<TimedEvent> events{PadSimulation::MouseModeAt(0.0, true)};
+        PadSimulation::AppendMotion(events, 0.0, 2000.0, speed, 0.0, reportHz);
+        for (const double poll : {16.7, 8.3, 6.9, 1.0}) {
+            const auto samples = Simulate(defaults(), events, poll, 2000.0);
+            double low = 1.0;
+            double high = 0.0;
+            for (const auto& sample : samples) {
+                if (sample.ms < 1000.0) continue;
+                low = std::min(low, axis(sample.state.sticks[2]));
+                high = std::max(high, axis(sample.state.sticks[2]));
+            }
+            check(high - low < 0.125, "a " + std::to_string(reportHz) + " Hz mouse at " + std::to_string(poll) + " ms polls wavers by " + std::to_string(high - low));
+            check(std::abs((high + low) / 2.0 - expected) < 0.05, "a " + std::to_string(reportHz) + " Hz mouse at " + std::to_string(poll) + " ms polls stays around the expected tilt");
+        }
+    }
+}
+
+void testReportRateSmoothing() {
+    for (const double reportHz : {125.0, 250.0, 1000.0}) {
+        Pad::MouseStick mouse(defaults().settings);
+        check(mouse.SmoothingMs() == defaults().settings.mouseSmoothingMs, "smoothing starts at the setting");
+        const double periodSeconds = 1.0 / reportHz;
+        for (int report = 0; report < static_cast<int>(reportHz); ++report) {
+            mouse.Move(6, 0);
+            mouse.Advance(periodSeconds);
+        }
+        check(std::abs(mouse.ReportRate() - reportHz) < 0.1 * reportHz, "measured " + std::to_string(mouse.ReportRate()) + " reports per second for a " + std::to_string(reportHz) + " Hz mouse");
+        const double smoothing = mouse.SmoothingMs();
+        check(std::abs(smoothing - std::max(10.0, 3000.0 / reportHz)) < 0.15 * smoothing, "smoothing " + std::to_string(smoothing) + " ms for a " + std::to_string(reportHz) + " Hz mouse");
+    }
+    Pad::MouseStick slow(defaults().settings);
+    for (int step = 0; step < 40; ++step) {
+        slow.Move(30, 0);
+        slow.Advance(0.025);
+    }
+    check(std::abs(slow.ReportRate() - 40.0) < 2.0 && slow.SmoothingMs() == Pad::MouseSmoothingLimitMs, "smoothing for very slow reports stops at 30 ms");
+    auto off = defaults().settings;
+    off.mouseSmoothingMs = 0.0;
+    Pad::MouseStick unsmoothed(off);
+    for (int report = 0; report < 125; ++report) {
+        unsmoothed.Move(6, 0);
+        unsmoothed.Advance(0.008);
+    }
+    check(unsmoothed.SmoothingMs() == 0.0, "a smoothing of 0 stays off for a slow mouse");
+    Pad::MouseStick single(defaults().settings);
+    for (int report = 0; report < 125; ++report) {
+        single.Move(1, 0);
+        single.Advance(0.008);
+    }
+    check(single.ReportRate() == 0.0 && single.SmoothingMs() == defaults().settings.mouseSmoothingMs, "single-count reports are not taken for a slow mouse");
+}
+
 std::vector<TimedEvent> waveMotion(double base, double swing) {
     constexpr double Pi = 3.14159265358979323846;
     std::vector<TimedEvent> events{PadSimulation::MouseModeAt(0.0, true)};
@@ -283,9 +340,31 @@ void testToggleRequests() {
     const auto now = Pad::KeyboardMouse::Clock::now();
     check(keyboardMouse.HandleEvent(PadSimulation::ButtonEvent(SDL_BUTTON_MIDDLE, true), now).toggleMouse, "middle click asks to toggle the mouse");
     check(!keyboardMouse.HandleEvent(PadSimulation::ButtonEvent(SDL_BUTTON_MIDDLE, false), now).toggleMouse, "releasing it asks for nothing");
+    check(keyboardMouse.HandleEvent(KeyEvent(SDL_SCANCODE_F7, true), now).toggleMouse, "F7 asks to toggle the mouse");
+    check(!keyboardMouse.HandleEvent(KeyEvent(SDL_SCANCODE_F7, false), now).toggleMouse, "releasing F7 asks for nothing");
     check(keyboardMouse.HandleEvent(KeyEvent(SDL_SCANCODE_F11, true), now).toggleFullscreen, "F11 asks to toggle fullscreen");
+    const auto overlay = keyboardMouse.HandleEvent(KeyEvent(SDL_SCANCODE_F10, true), now);
+    check(overlay.togglePerformanceOverlay && !overlay.toggleFullscreen, "F10 asks to toggle the performance overlay");
+    check(!keyboardMouse.HandleEvent(KeyEvent(SDL_SCANCODE_F10, false), now).togglePerformanceOverlay, "releasing F10 asks for nothing");
 }
 
+void testDefaultL2() {
+    const auto l2 = static_cast<std::uint32_t>(Pad::PadButton::L2);
+    const auto r2 = static_cast<std::uint32_t>(Pad::PadButton::R2);
+    const auto now = Pad::KeyboardMouse::Clock::now();
+    for (const auto& [name, press, release] : {
+             std::tuple{"R", KeyEvent(SDL_SCANCODE_R, true), KeyEvent(SDL_SCANCODE_R, false)},
+             std::tuple{"mouse button 4", PadSimulation::ButtonEvent(SDL_BUTTON_X1, true), PadSimulation::ButtonEvent(SDL_BUTTON_X1, false)}}) {
+        Pad::KeyboardMouse keyboardMouse(defaults());
+        keyboardMouse.HandleEvent(press, now);
+        const auto held = keyboardMouse.Compose(PadInputState{});
+        check((held.buttons & l2) != 0 && held.analogButtonsL2 == 255, std::string(name) + " presses L2 fully");
+        check((held.buttons & r2) == 0 && held.analogButtonsR2 == 0, std::string(name) + " leaves R2 alone");
+        keyboardMouse.HandleEvent(release, now);
+        const auto released = keyboardMouse.Compose(PadInputState{});
+        check((released.buttons & l2) == 0 && released.analogButtonsL2 == 0, std::string(name) + " released lets go of L2");
+    }
+}
 
 void testTitleReadsMouse() {
     const auto square = static_cast<std::uint32_t>(Pad::PadButton::Square);
@@ -341,6 +420,8 @@ int main() {
             {"decay", testDecay},
             {"max speed clamp", testMaxSpeedClamp},
             {"smoothing", testSmoothing},
+            {"slow reporting mouse", testSlowReportingMouse},
+            {"report rate smoothing", testReportRateSmoothing},
             {"poll rate independence", testPollRateIndependence},
             {"vertical scale", testVerticalScale},
             {"mouse mode off", testMouseModeOff},
@@ -349,6 +430,7 @@ int main() {
             {"wheel and keys on focus loss", testWheelFocusLoss},
             {"focus loss releases the mouse", testFocusLossReleasesMouse},
             {"toggle requests", testToggleRequests},
+            {"default L2", testDefaultL2},
             {"title reads the mouse", testTitleReadsMouse},
         };
         for (const auto& [name, test] : tests) {

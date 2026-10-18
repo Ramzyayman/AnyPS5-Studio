@@ -746,11 +746,6 @@ static void* StartNativeThread(void* opaque) {
         PthreadPrivate* self;
         ~ThreadGuard() {
             CurrentGuestState().current = nullptr;
-#if defined(__linux__)
-            if (self->_detached) {
-                RetireGuestStack(self);
-            }
-#endif
             ReleaseThread(self);
         }
     } guard{self};
@@ -856,6 +851,7 @@ int APS5_VABI scePthreadCreate(Pthread* thread, const PthreadAttr* attr, Pthread
         if (detached) {
             if (const int result = pthread_detach(p->hostThread); result != 0)
                 throw std::system_error(result, std::generic_category(), "Detaching guest thread");
+            RetireGuestStack(p.get());
         }
     } catch (...) {
         start.set_value(false);
@@ -909,6 +905,7 @@ int APS5_VABI scePthreadDetach(Pthread thread) {
 #else
     if (const int result = pthread_detach(thread->hostThread); result != 0)
         throw std::system_error(result, std::generic_category(), "Detaching guest thread");
+    RetireGuestStack(thread);
     ReleaseThread(thread);
 #endif
     return SCE_OK;

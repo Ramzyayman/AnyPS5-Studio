@@ -193,11 +193,10 @@ inline std::string FormatPointer(const std::string& spec, const void* pointer) {
     for (unsigned long long rest = value; rest != 0; rest >>= 4) digits.insert(digits.begin(), "0123456789abcdef"[rest & 15]);
     if (digits.empty() && !(hasPrecision && precision == 0)) digits = "0";
     if (digits.size() < precision) digits.insert(0, precision - digits.size(), '0');
-    const std::size_t used = digits.size() + 2;
-    const std::size_t padding = width > used ? width - used : 0;
-    if (left) return "0x" + digits + std::string(padding, ' ');
-    if (zero && !hasPrecision) return "0x" + std::string(padding, '0') + digits;
-    return std::string(padding, ' ') + "0x" + digits;
+    const std::size_t padding = width > digits.size() ? width - digits.size() : 0;
+    if (left) return digits + std::string(padding, ' ');
+    if (zero && !hasPrecision) return std::string(padding, '0') + digits;
+    return std::string(padding, ' ') + digits;
 }
 
 constexpr size_t maximumArgumentPosition = 99;
@@ -380,7 +379,7 @@ inline int FormatWindows(char* buffer, size_t size, const char* format, const vo
                 }
             }
             output.Value(spec + 's', utf8.c_str());
-        } else if (conversion == 'p' && length.empty()) {
+        } else if (conversion == 'p' && (length.empty() || length == "l")) {
             const std::string text = FormatPointer(spec, args.Next<void*>());
             output.Append(text.data(), text.size());
         } else if (conversion == 'm') {

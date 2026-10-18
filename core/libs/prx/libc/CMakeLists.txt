@@ -343,6 +343,16 @@ if(BUILD_TESTING)
         set_tests_properties(guest_path_case PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
     endif()
+    add_test_executable(guest_path_drive_component_tests ${LIBS_INCLUDE_DIR}/tests/GuestPathDriveComponent.cpp)
+    target_include_directories(guest_path_drive_component_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(guest_path_drive_component_tests PRIVATE libc)
+    configure_windows_unwind(guest_path_drive_component_tests)
+    add_test(NAME guest_path_drive_component COMMAND guest_path_drive_component_tests)
+    set_tests_properties(guest_path_drive_component PROPERTIES TIMEOUT 20)
+    if(WIN32)
+        set_tests_properties(guest_path_drive_component PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
+    endif()
     add_test_executable(guest_directory_tests ${LIBS_INCLUDE_DIR}/tests/GuestDirectory.cpp)
     target_include_directories(guest_directory_tests PRIVATE ${LIBS_INCLUDE_DIR})
     target_link_libraries(guest_directory_tests PRIVATE libc)
@@ -463,8 +473,9 @@ if(BUILD_TESTING)
     configure_windows_unwind(guest_standard_stream_tests)
     add_test(NAME guest_standard_streams COMMAND guest_standard_stream_tests)
     add_test(NAME guest_standard_streams_closed_stdout COMMAND guest_standard_stream_tests --closed-stdout)
+    add_test(NAME guest_standard_streams_exclusive_stdout COMMAND guest_standard_stream_tests --exclusive-stdout)
     if(WIN32)
-        set_tests_properties(guest_standard_streams guest_standard_streams_closed_stdout PROPERTIES ENVIRONMENT_MODIFICATION
+        set_tests_properties(guest_standard_streams guest_standard_streams_closed_stdout guest_standard_streams_exclusive_stdout PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
     endif()
     add_test_executable(file_streams_tests ${LIBS_INCLUDE_DIR}/tests/FileStreams.cpp)
@@ -771,6 +782,18 @@ if(BUILD_TESTING)
     endif()
 endif()
 
+add_test_executable(guest_libc_cnd_init_default_name_tests EXCLUDE_FROM_ALL ${LIBS_INCLUDE_DIR}/tests/GuestLibcCndInitDefaultName.cpp)
+target_include_directories(guest_libc_cnd_init_default_name_tests PRIVATE ${LIBS_INCLUDE_DIR})
+target_link_libraries(guest_libc_cnd_init_default_name_tests PRIVATE libc)
+configure_windows_unwind(guest_libc_cnd_init_default_name_tests)
+if(BUILD_TESTING)
+    set_target_properties(guest_libc_cnd_init_default_name_tests PROPERTIES EXCLUDE_FROM_ALL FALSE)
+    add_test(NAME guest_libc_cnd_init_default_name COMMAND guest_libc_cnd_init_default_name_tests)
+    if(WIN32)
+        set_tests_properties(guest_libc_cnd_init_default_name PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
+    endif()
+endif()
+
 add_test_executable(guest_libc_cnd_timed_wait_tests EXCLUDE_FROM_ALL ${LIBS_INCLUDE_DIR}/tests/GuestLibcCndTimedWait.cpp)
 target_include_directories(guest_libc_cnd_timed_wait_tests PRIVATE ${LIBS_INCLUDE_DIR})
 target_link_libraries(guest_libc_cnd_timed_wait_tests PRIVATE libc)
@@ -837,5 +860,14 @@ if(MINGW)
             ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>"
             PASS_REGULAR_EXPRESSION "kept failure report ran[^~]*aborting[^~]*SIGABRT. on thread[^~]*all threads:"
             FAIL_REGULAR_EXPRESSION "kept failure report ran[^~]*kept failure report ran")
+        add_test(NAME windows_crash_stack_words COMMAND windows_backtrace_report_tests fault)
+        set_tests_properties(windows_crash_stack_words PROPERTIES TIMEOUT 20
+            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>;APS5_CRASH_STACK_BYTES=set:2048"
+            PASS_REGULAR_EXPRESSION "FATAL: unhandled exception 0xc0000005[^~]*stack words from rsp[^~]*data at stack words that point outside the stack[^~]*c0ffee0000000000 c0ffee0000000001 c0ffee0000000002 c0ffee0000000003 c0ffee0000000004 c0ffee0000000005 c0ffee0000000006 c0ffee0000000007")
+        add_test(NAME windows_crash_without_stack_words COMMAND windows_backtrace_report_tests fault)
+        set_tests_properties(windows_crash_without_stack_words PROPERTIES TIMEOUT 20
+            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>;APS5_CRASH_STACK_BYTES=unset:"
+            PASS_REGULAR_EXPRESSION "FATAL: unhandled exception 0xc0000005"
+            FAIL_REGULAR_EXPRESSION "stack words from rsp;data at stack words")
     endif()
 endif()

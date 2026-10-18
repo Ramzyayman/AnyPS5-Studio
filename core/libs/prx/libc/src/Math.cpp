@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cerrno>
 #include <cfenv>
+#include <climits>
 #include <cmath>
 #include <cstdlib>
 #include <cstdint>
@@ -305,6 +306,8 @@ double APS5_VABI acos_nid_postfix(double x) { return std::acos(x); }
 double APS5_VABI sqrt_nid_postfix(double x) { return std::sqrt(x); }
 float APS5_VABI sqrtf_nid_postfix(float x) { return std::sqrt(x); }
 double APS5_VABI fabs_nid_postfix(double x) { return std::fabs(x); }
+float APS5_VABI fabsf_nid_postfix(float x) { return std::fabs(x); }
+long double APS5_VABI fabsl_nid_postfix(long double x) { return std::fabs(x); }
 int APS5_VABI abs_nid_postfix(int x) { return x < 0 ? static_cast<int>(0u - static_cast<unsigned>(x)) : x; }
 double APS5_VABI trunc_nid_postfix(double x) { return std::trunc(x); }
 double APS5_VABI ceil_nid_postfix(double x) { return std::ceil(x); }
@@ -319,6 +322,8 @@ long double APS5_VABI fminl_nid_postfix(long double x, long double y) { return G
 double APS5_VABI fmax_nid_postfix(double x, double y) { return GuestFmax(x, y); }
 float APS5_VABI fmaxf_nid_postfix(float x, float y) { return GuestFmax(x, y); }
 long double APS5_VABI fmaxl_nid_postfix(long double x, long double y) { return GuestFmax(x, y); }
+double APS5_VABI fdim_nid_postfix(double x, double y) { return std::fdim(x, y); }
+float APS5_VABI fdimf_nid_postfix(float x, float y) { return std::fdim(x, y); }
 long double APS5_VABI acosl_nid_postfix(long double x) { return std::acos(x); }
 long double APS5_VABI acoshl_nid_postfix(long double x) { return std::acosh(x); }
 long double APS5_VABI asinhl_nid_postfix(long double x) { return std::asinh(x); }
@@ -390,6 +395,9 @@ float APS5_VABI log1pf_nid_postfix(float x) { return std::log1p(x); }
 double APS5_VABI expm1_nid_postfix(double x) { return std::expm1(x); }
 float APS5_VABI expm1f_nid_postfix(float x) { return std::expm1(x); }
 float APS5_VABI erff_nid_postfix(float x) { return std::erf(x); }
+double APS5_VABI erf_nid_postfix(double x) { return std::erf(x); }
+double APS5_VABI erfc_nid_postfix(double x) { return std::erfc(x); }
+float APS5_VABI erfcf_nid_postfix(float x) { return std::erfc(x); }
 int signgam_nid_postfix = 0;
 
 double APS5_VABI lgamma_nid_postfix(double x) {
@@ -512,12 +520,7 @@ float APS5_VABI roundf_nid_postfix(float x) { return std::round(x); }
 double APS5_VABI round_nid_postfix(double x) { return std::round(x); }
 float APS5_VABI cbrtf_nid_postfix(float x) { return std::cbrt(x); }
 float APS5_VABI remainderf_nid_postfix(float x, float y) { return std::remainder(x, y); }
-double APS5_VABI nextafter_nid_postfix(double x, double y) { return std::nextafter(x, y); }
 float APS5_VABI nextafterf_nid_postfix(float x, float y) { return std::nextafter(x, y); }
-long double APS5_VABI nextafterl_nid_postfix(long double x, long double y) { return std::nextafter(x, y); }
-double APS5_VABI nexttoward_nid_postfix(double x, long double y) { return std::nexttoward(x, y); }
-float APS5_VABI nexttowardf_nid_postfix(float x, long double y) { return std::nexttoward(x, y); }
-long double APS5_VABI nexttowardl_nid_postfix(long double x, long double y) { return std::nexttoward(x, y); }
 int APS5_VABI __isfinite_nid_postfix(double x) { return std::isfinite(x) ? 1 : 0; }
 int APS5_VABI __isnan_nid_postfix(double x) { return std::isnan(x) ? 1 : 0; }
 int APS5_VABI __isinf_nid_postfix(double x) { return std::isinf(x) ? 1 : 0; }
@@ -550,6 +553,16 @@ long double APS5_VABI powl_nid_postfix(long double base, long double exp) { retu
 long double APS5_VABI ldexpl_nid_postfix(long double x, int exp) { return std::ldexp(x, exp); }
 long double APS5_VABI truncl_nid_postfix(long double x) { return std::trunc(x); }
 double APS5_VABI logb_nid_postfix(double x) { return std::logb(x); }
+int APS5_VABI ilogb_nid_postfix(double x) {
+    if (x == 0.0) {
+        return INT_MIN;
+    }
+    if (!std::isfinite(x)) {
+        return INT_MAX;
+    }
+    return std::ilogb(x);
+}
+int APS5_VABI ilogbf_nid_postfix(float x) { return ilogb_nid_postfix(static_cast<double>(x)); }
 double APS5_VABI remainder_nid_postfix(double x, double y) { return std::remainder(x, y); }
 float APS5_VABI _FSinh_nid_postfix(float x, float y) { return y * std::sinh(x); }
 float APS5_VABI _FCosh_nid_postfix(float x, float y) { return y * std::cosh(x); }
@@ -675,12 +688,4 @@ union SonyDconst {
 
 static_assert(std::endian::native == std::endian::little);
 SonyDconst _Inf_nid_postfix {{0, 0, 0, 0x7ff0, 0, 0, 0, 0}};
-
-int APS5_VABI ilogbf_nid_postfix(float x) {
-    return std::ilogbf(x);
-}
-
-int APS5_VABI _Dsign_nid_postfix(double x) {
-    return std::signbit(x) ? 1 : 0;
-}
 }

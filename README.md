@@ -8,6 +8,7 @@
   <strong>Native PlayStation 5 Static Binary Relinker & Modern Desktop Gaming Studio</strong>
 </p>
 
+
 <p align="center">
   <a href="https://github.com/Ramzyayman/AnyPS5-Studio/releases"><img src="https://img.shields.io/github/v/release/Ramzyayman/AnyPS5-Studio?include_prereleases&color=0070d1&label=Release" alt="Release" /></a>
   <a href="https://github.com/Ramzyayman/AnyPS5-Studio/actions"><img src="https://img.shields.io/badge/Platforms-Windows%20%7C%20Linux%20x64-34d399" alt="Platforms" /></a>

@@ -156,24 +156,11 @@ WindowsEntryStub WindowsEntryStubBuilder::Build(const std::uint32_t dataRva, con
             for (std::size_t index = guestModules.size(); index < libraries.size(); ++index) {
                 if (libraries[index] == "libc.prx" && import.Library != "libc.prx") order.push_back(CheckedRva(index));
             }
-            const std::set<std::string> coreSystemLibs = {"libc.prx", "libkernel.prx", "libSceLibcInternal.prx", "libSceAmpr.prx"};
-            if (coreSystemLibs.contains(import.Library)) {
-                for (const auto& fallbackName : {"libc.prx", "libkernel.prx", "libSceLibcInternal.prx", "libSceAmpr.prx"}) {
-                    if (fallbackName != import.Library) {
-                        for (std::size_t index = guestModules.size(); index < libraries.size(); ++index) {
-                            if (libraries[index] == fallbackName && std::find(order.begin(), order.end(), CheckedRva(index)) == order.end())
-                                order.push_back(CheckedRva(index));
-                        }
-                    }
-                }
-            }
-            if (import.Library == "libc.prx" || import.Library == "libSceLibcInternal.prx") {
+            if (import.Library == "libSceLibcInternal.prx") {
                 for (std::size_t index = 0; index < guestModules.size(); ++index) {
                     const auto& names = guestModules[index].Names;
-                    if (std::find(names.begin(), names.end(), "libc.prx") != names.end() && !guestModules[index].ZeroReturnExports.contains(import.Name)) {
-                        if (std::find(order.begin(), order.end(), CheckedRva(index)) == order.end())
-                            order.push_back(CheckedRva(index));
-                    }
+                    if (std::find(names.begin(), names.end(), "libc.prx") != names.end() && !guestModules[index].ZeroReturnExports.contains(import.Name))
+                        order.push_back(CheckedRva(index));
                 }
             }
         }

@@ -35,49 +35,6 @@ void copyToFixedBuffer(char* destination, std::size_t destinationSize, const std
     std::memcpy(destination, source.c_str(), source.size() + 1);
 }
 
-std::filesystem::path resolveParamPath(bool& isSfo) {
-    const std::filesystem::path jsonFallbacks[] = {
-        ResolvePath_nid_no_patch(AppMetadataParamJsonGuestPath),
-        ResolvePath_nid_no_patch("/app0/sce_sys/PARAM.JSON"),
-        ResolvePath_nid_no_patch("/app0/SCE_SYS/param.json"),
-        ResolvePath_nid_no_patch("/app0/SCE_SYS/PARAM.JSON"),
-        ResolvePath_nid_no_patch("/app0/param.json"),
-        ResolvePath_nid_no_patch("/sce_sys/param.json"),
-        ResolvePath_nid_no_patch("/sce_sys/PARAM.JSON"),
-        std::filesystem::current_path() / "app0" / "sce_sys" / "param.json",
-        std::filesystem::current_path() / "sce_sys" / "param.json",
-        std::filesystem::current_path() / "param.json"
-    };
-    for (const auto& candidate : jsonFallbacks) {
-        std::error_code error;
-        if (std::filesystem::is_regular_file(candidate, error)) {
-            isSfo = false;
-            return candidate;
-        }
-    }
-    const std::filesystem::path sfoFallbacks[] = {
-        ResolvePath_nid_no_patch(AppMetadataParamSfoGuestPath),
-        ResolvePath_nid_no_patch("/app0/sce_sys/PARAM.SFO"),
-        ResolvePath_nid_no_patch("/app0/SCE_SYS/param.sfo"),
-        ResolvePath_nid_no_patch("/app0/SCE_SYS/PARAM.SFO"),
-        ResolvePath_nid_no_patch("/app0/param.sfo"),
-        ResolvePath_nid_no_patch("/sce_sys/param.sfo"),
-        ResolvePath_nid_no_patch("/sce_sys/PARAM.SFO"),
-        std::filesystem::current_path() / "app0" / "sce_sys" / "param.sfo",
-        std::filesystem::current_path() / "sce_sys" / "param.sfo",
-        std::filesystem::current_path() / "param.sfo"
-    };
-    for (const auto& candidate : sfoFallbacks) {
-        std::error_code error;
-        if (std::filesystem::is_regular_file(candidate, error)) {
-            isSfo = true;
-            return candidate;
-        }
-    }
-    isSfo = false;
-    return jsonFallbacks[0];
-}
-
 ParsedParamJson parseParams(const std::filesystem::path& paramJson, const std::filesystem::path& paramSfo) {
     if (std::filesystem::exists(paramJson)) return parseParamJson(paramJson);
     if (std::filesystem::exists(paramSfo)) return parseParamSfo(paramSfo);
@@ -87,10 +44,7 @@ ParsedParamJson parseParams(const std::filesystem::path& paramJson, const std::f
 void ensureTitleLoaded() {
     std::lock_guard lock(g_metadataMutex);
     if (g_titleLoaded) return;
-    bool isSfo = false;
-    const auto resolvedPath = resolveParamPath(isSfo);
-    if (!std::filesystem::exists(resolvedPath)) throw std::runtime_error("param.json or param.sfo not found");
-    const auto parsed = isSfo ? parseParamSfo(resolvedPath) : parseParamJson(resolvedPath);
+    const auto parsed = parseParams(ResolvePath_nid_no_patch(AppMetadataParamJsonGuestPath), ResolvePath_nid_no_patch(AppMetadataParamSfoGuestPath));
     copyToFixedBuffer(g_title, sizeof(g_title), parsed.title);
     copyToFixedBuffer(g_titleId, sizeof(g_titleId), parsed.titleId);
     g_downloadDataSizeMiB = parsed.downloadDataSizeMiB;
@@ -101,12 +55,10 @@ void ensureTitleLoaded() {
 
 const bool g_downloadDataMounted = [] {
     try {
-        bool isSfo = false;
-        const auto paramPath = resolveParamPath(isSfo);
-        if (!std::filesystem::exists(paramPath)) return false;
-        const auto parsed = isSfo ? parseParamSfo(paramPath) : parseParamJson(paramPath);
-        if (parsed.downloadDataSizeMiB == 0) return false;
         const auto run = std::filesystem::current_path();
+        const auto metadata = run / "app0" / "sce_sys";
+        if (!std::filesystem::exists(metadata / "param.json") && !std::filesystem::exists(metadata / "param.sfo")) return false;
+        if (parseParams(metadata / "param.json", metadata / "param.sfo").downloadDataSizeMiB == 0) return false;
         std::filesystem::create_directories(run / "download0");
         return true;
     } catch (const std::exception&) {
@@ -116,10 +68,9 @@ const bool g_downloadDataMounted = [] {
 
 const bool g_dataMounted = [] {
     try {
-        bool isSfo = false;
-        const auto paramPath = resolveParamPath(isSfo);
-        if (!std::filesystem::exists(paramPath)) return false;
         const auto run = std::filesystem::current_path();
+        const auto metadata = run / "app0" / "sce_sys";
+        if (!std::filesystem::exists(metadata / "param.json") && !std::filesystem::exists(metadata / "param.sfo")) return false;
         std::filesystem::create_directories(run / "data");
         return true;
     } catch (const std::exception&) {
@@ -131,25 +82,7 @@ void ensureIconLoaded() {
     std::lock_guard lock(g_metadataMutex);
     if (g_iconAttempted) return;
     g_iconAttempted = true;
-    auto resolvedPath = ResolvePath_nid_no_patch(AppMetadataIconGuestPath);
-    if (!std::filesystem::exists(resolvedPath)) {
-        const std::filesystem::path fallbacks[] = {
-            ResolvePath_nid_no_patch("/app0/sce_sys/ICON0.PNG"),
-            ResolvePath_nid_no_patch("/app0/SCE_SYS/icon0.png"),
-            ResolvePath_nid_no_patch("/app0/icon0.png"),
-            ResolvePath_nid_no_patch("/sce_sys/icon0.png"),
-            std::filesystem::current_path() / "app0" / "sce_sys" / "icon0.png",
-            std::filesystem::current_path() / "sce_sys" / "icon0.png",
-            std::filesystem::current_path() / "icon0.png"
-        };
-        for (const auto& candidate : fallbacks) {
-            std::error_code error;
-            if (std::filesystem::is_regular_file(candidate, error)) {
-                resolvedPath = candidate;
-                break;
-            }
-        }
-    }
+    const auto resolvedPath = ResolvePath_nid_no_patch(AppMetadataIconGuestPath);
     if (!std::filesystem::exists(resolvedPath)) return;
     std::ifstream file(resolvedPath, std::ios::binary);
     if (!file.is_open()) throw std::runtime_error("failed to open icon0.png");
