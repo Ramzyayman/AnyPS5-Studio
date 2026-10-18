@@ -1111,8 +1111,128 @@ function fixGameHierarchyInPlace(
     }
   }
 
-  // 4. Normalize param.json if kernel.flexibleMemorySize is 0 (prevents libkernel abort)
-  const paramJsonPath = path.join(app0Dir, 'sce_sys/param.json');
+  // 4. Ensure app0/sce_sys/ exists, synchronize metadata, and normalize param.json
+  const app0SceSys = path.join(app0Dir, 'sce_sys');
+  const rootSceSys = path.join(resolved, 'sce_sys');
+  const app0SceSysUpper = path.join(app0Dir, 'SCE_SYS');
+  const rootSceSysUpper = path.join(resolved, 'SCE_SYS');
+
+  if (fs.existsSync(app0SceSysUpper) && !fs.existsSync(app0SceSys)) {
+    try {
+      fs.renameSync(app0SceSysUpper, app0SceSys);
+    } catch {
+      try { fs.cpSync(app0SceSysUpper, app0SceSys, { recursive: true }); } catch {}
+    }
+  }
+
+  const activeRootSys = fs.existsSync(rootSceSys) ? rootSceSys : (fs.existsSync(rootSceSysUpper) ? rootSceSysUpper : null);
+  if (activeRootSys) {
+    if (!fs.existsSync(app0SceSys)) fs.mkdirSync(app0SceSys, { recursive: true });
+    try {
+      const sysEntries = fs.readdirSync(activeRootSys);
+      for (const se of sysEntries) {
+        const src = path.join(activeRootSys, se);
+        const dst = path.join(app0SceSys, se.toLowerCase());
+        if (!fs.existsSync(dst)) {
+          try {
+            fs.copyFileSync(src, dst);
+            if (process.platform !== 'win32') {
+              try { fs.chmodSync(dst, 0o644); } catch {}
+            }
+          } catch {}
+        }
+      }
+      sendLog(`[AnyPS5] Synchronized sce_sys/ title metadata into app0/sce_sys/`, 'info');
+    } catch (sysErr) {
+      console.warn('Failed to sync root sce_sys into app0/sce_sys:', sysErr);
+    }
+  }
+
+  if (!fs.existsSync(app0SceSys)) {
+    fs.mkdirSync(app0SceSys, { recursive: true });
+  }
+
+  const paramJsonPath = path.join(app0SceSys, 'param.json');
+  if (!fs.existsSync(paramJsonPath)) {
+    try {
+      const sysFiles = fs.readdirSync(app0SceSys);
+      for (const sf of sysFiles) {
+        if (sf.toLowerCase() === 'param.json') {
+          fs.copyFileSync(path.join(app0SceSys, sf), paramJsonPath);
+          break;
+        }
+      }
+    } catch {}
+  }
+
+  if (!fs.existsSync(paramJsonPath)) {
+    const candidateLocations = [
+      path.join(resolved, 'param.json'),
+      path.join(resolved, 'PARAM.JSON'),
+      path.join(app0Dir, 'param.json'),
+      path.join(app0Dir, 'PARAM.JSON'),
+    ];
+    for (const cand of candidateLocations) {
+      if (fs.existsSync(cand)) {
+        try {
+          fs.copyFileSync(cand, paramJsonPath);
+          sendLog(`[AnyPS5] Restored param.json into app0/sce_sys/ from ${path.relative(resolved, cand)}`, 'info');
+          break;
+        } catch {}
+      }
+    }
+  }
+
+  if (!fs.existsSync(paramJsonPath)) {
+    try {
+      let detectedTitleId = '';
+      let detectedTitleName = '';
+
+      if (fs.existsSync(gamesStorePath)) {
+        try {
+          const storedGames = JSON.parse(fs.readFileSync(gamesStorePath, 'utf8'));
+          if (Array.isArray(storedGames)) {
+            const match = storedGames.find((g: any) => g && g.path && path.resolve(g.path).toLowerCase() === path.resolve(resolved).toLowerCase());
+            if (match) {
+              detectedTitleId = match.titleId || '';
+              detectedTitleName = match.title || '';
+            }
+          }
+        } catch {}
+      }
+
+      if (!detectedTitleId) {
+        const m = resolved.match(/[CUP][UPL][SAB][A-Z]\d{5}/i);
+        if (m) detectedTitleId = m[0].toUpperCase();
+      }
+
+      if (!detectedTitleName) {
+        detectedTitleName = path.basename(resolved).replace(/\[.*?\]|\(.*?\)/g, '').trim() || 'PlayStation 5 Title';
+      }
+
+      const generatedParam = {
+        titleId: detectedTitleId || 'PPSA12544',
+        contentId: `EP0000-${detectedTitleId || 'PPSA12544'}_00-0000000000000000`,
+        localizedParameters: {
+          defaultLanguage: 'en-US',
+          'en-US': {
+            titleName: detectedTitleName,
+          },
+        },
+      };
+
+      fs.writeFileSync(paramJsonPath, JSON.stringify(generatedParam, null, 2), 'utf8');
+      sendLog(`[AnyPS5] Synthesized authentic app0/sce_sys/param.json for Title ID: ${generatedParam.titleId}`, 'info');
+    } catch (genErr) {
+      console.warn('Failed to synthesize param.json:', genErr);
+    }
+  }
+
+  if (process.platform !== 'win32' && fs.existsSync(paramJsonPath)) {
+    try { fs.chmodSync(paramJsonPath, 0o644); } catch {}
+  }
+
+  // Normalize param.json if kernel.flexibleMemorySize is 0 (prevents libkernel abort)
   if (fs.existsSync(paramJsonPath)) {
     try {
       const pj = JSON.parse(fs.readFileSync(paramJsonPath, 'utf8'));
