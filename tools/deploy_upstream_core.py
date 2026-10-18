@@ -29,7 +29,7 @@ def deploy(target_platform):
                     in_prog_id = item.get("databaseId")
                     if in_prog_id:
                         print(f"Waiting for in-progress core build run #{in_prog_id} to finish...")
-                        run_cmd(f"gh run watch {in_prog_id} --interval 10 --timeout 600", check=False)
+                        run_cmd(f"gh run watch {in_prog_id} --interval 10", check=False)
                         break
         except Exception as prog_err:
             print(f"Warning: Failed to inspect in-progress runs: {prog_err}")

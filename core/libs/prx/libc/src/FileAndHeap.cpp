@@ -326,7 +326,11 @@ int APS5_VABI fopen_s_nid_postfix(FileStream** result, const char* filename, con
 }
 
 int APS5_VABI fclose_nid_postfix(FileStream* stream) {
-    if (stream && !stream->IsOpen()) {
+    if (!stream) {
+        errno = 22;
+        return -1;
+    }
+    if (!stream->IsOpen()) {
         std::unique_ptr<FileStream> owner(stream->IsDynamic() ? stream : nullptr);
         errno = 9;
         return -1;
@@ -362,7 +366,8 @@ FileStream* APS5_VABI _ZSt7_FiopenPKcNSt5_IosbIiE9_OpenmodeEi_nid_postfix(const 
 }
 
 size_t APS5_VABI fread_nid_postfix(void* buffer, size_t size, size_t count, FileStream* stream) {
-    if (stream && !stream->IsOpen()) { errno = 9; return 0; }
+    if (!stream) { errno = 22; return 0; }
+    if (!stream->IsOpen()) { errno = 9; return 0; }
     auto* handle = GetNativeStream(stream);
     if (size == 0 || count == 0) return 0;
     if (!buffer) throw std::runtime_error("fread: null buffer");
@@ -377,7 +382,8 @@ size_t APS5_VABI fread_nid_postfix(void* buffer, size_t size, size_t count, File
 }
 
 size_t APS5_VABI fwrite_nid_postfix(const void* buffer, size_t size, size_t count, FileStream* stream) {
-    if (stream && !stream->IsOpen()) { errno = 9; return 0; }
+    if (!stream) { errno = 22; return 0; }
+    if (!stream->IsOpen()) { errno = 9; return 0; }
     auto* handle = GetNativeStream(stream);
     if (size == 0 || count == 0) return 0;
     if (!buffer) throw std::runtime_error("fwrite: null buffer");
@@ -387,7 +393,8 @@ size_t APS5_VABI fwrite_nid_postfix(const void* buffer, size_t size, size_t coun
 }
 
 int APS5_VABI fseeko_nid_postfix(FileStream* stream, std::int64_t offset, int origin) {
-    if (stream && !stream->IsOpen()) { errno = 9; return -1; }
+    if (!stream) { errno = 22; return -1; }
+    if (!stream->IsOpen()) { errno = 9; return -1; }
     if (origin != SEEK_SET && origin != SEEK_CUR && origin != SEEK_END) { errno = 22; return -1; }
 #ifdef _WIN32
     auto* native = GetNativeStream(stream);
@@ -404,7 +411,8 @@ int APS5_VABI fseeko_nid_postfix(FileStream* stream, std::int64_t offset, int or
 }
 
 std::int64_t APS5_VABI ftello_nid_postfix(FileStream* stream) {
-    if (stream && !stream->IsOpen()) { errno = 9; return -1; }
+    if (!stream) { errno = 22; return -1; }
+    if (!stream->IsOpen()) { errno = 9; return -1; }
 #ifdef _WIN32
     auto* native = GetNativeStream(stream);
     if (IsPipeStream(native)) { errno = 29; return -1; }
@@ -437,6 +445,7 @@ int APS5_VABI fsetpos_nid_postfix(FileStream* stream, const std::int64_t* positi
 }
 
 void APS5_VABI rewind_nid_postfix(FileStream* stream) {
+    if (!stream) return;
     const int saved = errno;
     if (fseeko_nid_postfix(stream, 0, SEEK_SET) == 0) errno = saved;
     stream->ClearError();
@@ -444,7 +453,8 @@ void APS5_VABI rewind_nid_postfix(FileStream* stream) {
 
 int APS5_VABI fputs_nid_postfix(const char* str, FileStream* stream) {
     if (!str) throw std::runtime_error("fputs: null string");
-    if (stream && !stream->IsOpen()) { errno = 9; return -1; }
+    if (!stream) { errno = 22; return -1; }
+    if (!stream->IsOpen()) { errno = 9; return -1; }
     const int result = std::fputs(str, GetNativeStream(stream));
     stream->SyncStatus();
     return result;
