@@ -1,7 +1,7 @@
 # AnyPS5 Studio
 
 <p align="center">
-  <img src="https://github.com/Ramzyayman/AnyPS5-Studio/releases/download/v1.1.2/01_HomeScreen_DreamingSarah.png" alt="AnyPS5 Studio Hero" width="950" />
+  <img src="https://raw.githubusercontent.com/Ramzyayman/AnyPS5-Studio/assets/01_HomeScreen_DreamingSarah.png" alt="AnyPS5 Studio Hero" width="950" />
 </p>
 
 <p align="center">
@@ -31,36 +31,36 @@ Unlike traditional virtual-machine emulators, AnyPS5 operates via **static binar
 Immersive console-grade interface with dynamic background hero artwork, smooth navigation, DualSense wireless controller status, and detailed compatibility breakdowns.
 
 <p align="center">
-  <img src="https://github.com/Ramzyayman/AnyPS5-Studio/releases/download/v1.1.2/02_HomeScreen_AstrosPlayroom.png" alt="Home Screen Showcase" width="470" />
+  <img src="https://raw.githubusercontent.com/Ramzyayman/AnyPS5-Studio/assets/02_HomeScreen_AstrosPlayroom.png" alt="Home Screen Showcase" width="470" />
   &nbsp;
-  <img src="https://github.com/Ramzyayman/AnyPS5-Studio/releases/download/v1.1.2/03_Technical_Specs_Drawer.png" alt="Technical Specs Drawer" width="470" />
+  <img src="https://raw.githubusercontent.com/Ramzyayman/AnyPS5-Studio/assets/03_Technical_Specs_Drawer.png" alt="Technical Specs Drawer" width="470" />
 </p>
 
 ### 2. Dual-Mode Relinker Studio
 Convert real PlayStation 5 binaries with a single click in **Simple Mode**, or fine-tune CPU instruction lowering, subsystem targets, and symbol optimization in **Advanced Mode**.
 
 <p align="center">
-  <img src="https://github.com/Ramzyayman/AnyPS5-Studio/releases/download/v1.1.2/04_RelinkerStudio_SimpleMode.png" alt="Relinker Studio Simple Mode" width="470" />
+  <img src="https://raw.githubusercontent.com/Ramzyayman/AnyPS5-Studio/assets/04_RelinkerStudio_SimpleMode.png" alt="Relinker Studio Simple Mode" width="470" />
   &nbsp;
-  <img src="https://github.com/Ramzyayman/AnyPS5-Studio/releases/download/v1.1.2/05_RelinkerStudio_AdvancedMode.png" alt="Relinker Studio Advanced Mode" width="470" />
+  <img src="https://raw.githubusercontent.com/Ramzyayman/AnyPS5-Studio/assets/05_RelinkerStudio_AdvancedMode.png" alt="Relinker Studio Advanced Mode" width="470" />
 </p>
 
 ### 3. State-Driven Game Launcher & Real-Time Telemetry
 Monitors active game sessions with live elapsed playtime tracking, Vulkan pipeline counters, genuine CPU instruction extension checks, and high-performance discrete GPU prioritization.
 
 <p align="center">
-  <img src="https://github.com/Ramzyayman/AnyPS5-Studio/releases/download/v1.1.2/10_GameLauncher_ActiveSession.png" alt="State-Driven Game Launcher" width="470" />
+  <img src="https://raw.githubusercontent.com/Ramzyayman/AnyPS5-Studio/assets/10_GameLauncher_ActiveSession.png" alt="State-Driven Game Launcher" width="470" />
   &nbsp;
-  <img src="https://github.com/Ramzyayman/AnyPS5-Studio/releases/download/v1.1.2/08_SystemTelemetry.png" alt="System Hardware Telemetry" width="470" />
+  <img src="https://raw.githubusercontent.com/Ramzyayman/AnyPS5-Studio/assets/08_SystemTelemetry.png" alt="System Hardware Telemetry" width="470" />
 </p>
 
 ### 4. Compatibility Auditor & Clean-Room System PRXs
 Inspect imported function NIDs, discover missing middleware stubs, and manage installed clean-room PlayStation 5 system libraries.
 
 <p align="center">
-  <img src="https://github.com/Ramzyayman/AnyPS5-Studio/releases/download/v1.1.2/06_NidInspector.png" alt="PlayStation 5 NID Inspector" width="470" />
+  <img src="https://raw.githubusercontent.com/Ramzyayman/AnyPS5-Studio/assets/06_NidInspector.png" alt="PlayStation 5 NID Inspector" width="470" />
   &nbsp;
-  <img src="https://github.com/Ramzyayman/AnyPS5-Studio/releases/download/v1.1.2/07_PrxLibraries.png" alt="Clean-Room PRX Modules" width="470" />
+  <img src="https://raw.githubusercontent.com/Ramzyayman/AnyPS5-Studio/assets/07_PrxLibraries.png" alt="Clean-Room PRX Modules" width="470" />
 </p>
 
 ---
