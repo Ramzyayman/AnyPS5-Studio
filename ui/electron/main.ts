@@ -408,6 +408,9 @@ interface AppSettings {
   preferredGpu?: string;
   gameRuntimes?: Record<string, string>;
   defaultRuntimeId?: string;
+  hasCompletedSetup?: boolean;
+  lastSeenVersion?: string;
+  gamesDirectory?: string;
 }
 
 interface DetectedGpu {
@@ -2562,6 +2565,9 @@ ipcMain.handle('anyps5:get-settings', async () => {
     preferredGpu: userSettings.preferredGpu || 'auto',
     defaultRelinkerPath: resolved.relinkerPath,
     defaultPrxPath: resolved.libsPath,
+    hasCompletedSetup: userSettings.hasCompletedSetup,
+    lastSeenVersion: userSettings.lastSeenVersion,
+    gamesDirectory: userSettings.gamesDirectory,
   };
 });
 

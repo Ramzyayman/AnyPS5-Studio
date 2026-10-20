@@ -1,6 +1,6 @@
 {
   "name": "anyps5-ui",
-  "version": "1.2.0",
+  "version": "1.2.1-preview",
   "type": "module",
   "description": "PlayStation 5 styled Launcher and Relinker Studio for AnyPS5",
   "author": "RamsMadeUI",
@@ -75,10 +75,9 @@
       "artifactName": "AnyPS5-Studio-Setup-${version}.${ext}"
     },
     "nsis": {
-      "oneClick": false,
-      "perMachine": true,
-      "allowElevation": true,
-      "allowToChangeInstallationDirectory": true,
+      "oneClick": true,
+      "perMachine": false,
+      "allowElevation": false,
       "installerIcon": "public/icon.ico",
       "uninstallerIcon": "public/icon.ico",
       "installerHeaderIcon": "public/icon.ico",

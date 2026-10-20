@@ -131,6 +131,9 @@ export interface AppSettings {
   defaultPrxPath?: string;
   gameRuntimes?: Record<string, string>;
   defaultRuntimeId?: string;
+  hasCompletedSetup?: boolean;
+  lastSeenVersion?: string;
+  gamesDirectory?: string;
 }
 
 export interface GitHubAuthStatus {

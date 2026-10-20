@@ -10,6 +10,9 @@ import { AddGameModal } from './components/AddGameModal';
 import { SettingsPage } from './components/SettingsPage';
 import { CommunityPRBuilds } from './components/CommunityPRBuilds';
 import { RuntimeManager } from './components/RuntimeManager';
+import { OnboardingWizard } from './components/OnboardingWizard';
+import { SystemUpdatedModal } from './components/SystemUpdatedModal';
+
 import { GameItem } from './types';
 import { apiBridge } from './services/apiBridge';
 import { audioService } from './services/audioService';
@@ -29,6 +32,10 @@ export const App: React.FC = () => {
   const [downloadedUpdateVersion, setDownloadedUpdateVersion] = useState<string | null>(null);
   const [showUpdateToast, setShowUpdateToast] = useState<boolean>(false);
   const [communitySearchKeyword, setCommunitySearchKeyword] = useState<string>('');
+  const [isSetupWizardOpen, setIsSetupWizardOpen] = useState<boolean>(false);
+  const [isSystemUpdatedOpen, setIsSystemUpdatedOpen] = useState<boolean>(false);
+  const [currentAppVersion, setCurrentAppVersion] = useState<string>('1.2.1-preview');
+
 
   // Advanced navbar items setting (persisted in localStorage, default OFF)
   const [showAdvancedNav, setShowAdvancedNav] = useState<boolean>(() => {
@@ -54,16 +61,32 @@ export const App: React.FC = () => {
     }
   };
 
-  // Load games & initial settings from apiBridge
+  // Load games & initial settings from apiBridge with onboarding check
   useEffect(() => {
-    apiBridge.getGames().then((loaded) => {
-      setGames(loaded);
-    });
-    apiBridge.getSettings().then((settings) => {
-      if (settings && settings.advanced !== undefined) {
-        setShowAdvancedNav(settings.advanced);
+    async function initApp() {
+      try {
+        const [loadedGames, settings, appVer] = await Promise.all([
+          apiBridge.getGames(),
+          apiBridge.getSettings(),
+          apiBridge.getAppVersion().catch(() => '1.2.1-preview'),
+        ]);
+        setGames(loadedGames);
+        setCurrentAppVersion(appVer);
+
+        if (settings && settings.advanced !== undefined) {
+          setShowAdvancedNav(settings.advanced);
+        }
+
+        if (!settings.hasCompletedSetup) {
+          setIsSetupWizardOpen(true);
+        } else if (settings.lastSeenVersion !== appVer) {
+          setIsSystemUpdatedOpen(true);
+        }
+      } catch (err) {
+        console.error('Failed to initialize app state:', err);
       }
-    }).catch(() => {});
+    }
+    initApp();
   }, []);
 
   // Listen for background auto-updates
@@ -85,7 +108,7 @@ export const App: React.FC = () => {
   // Keyboard navigation for authentic console feel
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (isAddGameOpen || activeRunningGame) return;
+      if (isAddGameOpen || activeRunningGame || isSetupWizardOpen || isSystemUpdatedOpen) return;
 
       // Tab switching via Q/E or [ / ]
       if ((e.key === 'q' || e.key === 'Q' || e.key === '[') && !['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) {
@@ -145,7 +168,7 @@ export const App: React.FC = () => {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [games, selectedGameIndex, activeTab, isAddGameOpen, activeRunningGame, availableTabs]);
+  }, [games, selectedGameIndex, activeTab, isAddGameOpen, activeRunningGame, availableTabs, isSetupWizardOpen, isSystemUpdatedOpen]);
 
   // Gamepad API Polling
   useEffect(() => {
@@ -158,7 +181,7 @@ export const App: React.FC = () => {
       const gp = gamepads[0];
       setGamepadConnected(Boolean(gp));
 
-      if (gp && !isAddGameOpen && activeTab !== 'settings' && !activeRunningGame) {
+      if (gp && !isAddGameOpen && activeTab !== 'settings' && !activeRunningGame && !isSetupWizardOpen && !isSystemUpdatedOpen) {
         // L1 / LB (Button 4) and R1 / RB (Button 5) tab navigation
         const l1Pressed = gp.buttons[4]?.pressed;
         const r1Pressed = gp.buttons[5]?.pressed;
@@ -228,7 +251,7 @@ export const App: React.FC = () => {
 
     animationFrameId = requestAnimationFrame(pollGamepads);
     return () => cancelAnimationFrame(animationFrameId);
-  }, [games, selectedGameIndex, activeTab, isAddGameOpen, activeRunningGame, availableTabs]);
+  }, [games, selectedGameIndex, activeTab, isAddGameOpen, activeRunningGame, availableTabs, isSetupWizardOpen, isSystemUpdatedOpen]);
 
   const handleUpdateGameStatus = (gameId: string, status: 'ported', updatedGame?: GameItem) => {
     setGames((prev) => {
@@ -279,6 +302,19 @@ export const App: React.FC = () => {
     setSelectedGameIndex(0);
   };
 
+  const handleOnboardingComplete = (config: { gamesDirectory?: string; useSampleGames?: boolean }) => {
+    setIsSetupWizardOpen(false);
+    if (config.useSampleGames && games.length === 0) {
+      setGames(INITIAL_GAMES);
+      apiBridge.saveGames(INITIAL_GAMES);
+    }
+  };
+
+  const handleSystemUpdatedContinue = async () => {
+    setIsSystemUpdatedOpen(false);
+    await apiBridge.saveSettings({ lastSeenVersion: currentAppVersion });
+  };
+
   const selectedGame = games[selectedGameIndex] || games[0];
 
   return (
@@ -295,9 +331,12 @@ export const App: React.FC = () => {
         />
       </div>
 
-      {/* Main Tab Screen - Extends full viewport from y = 0 */}
-      <main className="w-full h-full min-h-0 overflow-hidden">
-        {/* Tab Views - Kept alive in memory, visibility toggled via CSS */}
+      {/* Main Tab Screen - Extends full viewport from y = 0 */}
+
+      <main className="w-full h-full min-h-0 overflow-hidden">
+
+        {/* Tab Views - Kept alive in memory, visibility toggled via CSS */}
+
         <div className={`w-full h-full ${activeTab === 'games' ? 'block' : 'hidden'}`}>
           <HomeScreen
             games={games}
@@ -456,6 +495,20 @@ export const App: React.FC = () => {
           </div>
         </div>
       )}
+      {/* PlayStation 5 Out-of-Box Experience (OOBE) First-Run Setup Wizard */}
+      {isSetupWizardOpen && (
+        <OnboardingWizard
+          currentVersion={currentAppVersion}
+          onComplete={handleOnboardingComplete}
+        />
+      )}
+
+      {/* System Software Updated Dialog */}
+      <SystemUpdatedModal
+        isOpen={isSystemUpdatedOpen}
+        currentVersion={currentAppVersion}
+        onContinue={handleSystemUpdatedContinue}
+      />
     </div>
   );
 };
