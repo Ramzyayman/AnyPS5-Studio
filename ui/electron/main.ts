@@ -5,6 +5,9 @@ import os from 'os';
 import fs from 'fs';
 import { autoUpdater } from 'electron-updater';
 import { unwrapSelf } from './self_unwrapper';
+import { RuntimeManager } from './runtimeManager';
+import { GitHubAuthService } from './githubAuth';
+import { LocalBuilderService } from './localBuilder';
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -403,6 +406,8 @@ interface AppSettings {
   hapticsEnabled?: boolean;
   advanced?: boolean;
   preferredGpu?: string;
+  gameRuntimes?: Record<string, string>;
+  defaultRuntimeId?: string;
 }
 
 interface DetectedGpu {
@@ -705,24 +710,38 @@ function getDefaultLibsPath(): string {
   return candidates[0] ? path.normalize(candidates[0]) : '';
 }
 
-function getResolvedRelinkerPath(): string {
-  const userSettings = loadSettings();
-  if (userSettings.relinkerPath && fs.existsSync(userSettings.relinkerPath)) {
-    return path.normalize(userSettings.relinkerPath);
+let runtimeManagerInstance: RuntimeManager | null = null;
+function getRuntimeManager(): RuntimeManager {
+  if (!runtimeManagerInstance) {
+    runtimeManagerInstance = new RuntimeManager(
+      app.getPath('userData'),
+      getDefaultRelinkerPath,
+      getDefaultLibsPath,
+      loadSettings()
+    );
   }
+  return runtimeManagerInstance;
+}
+
+function getResolvedRelinkerPath(): string {
+  try {
+    const active = getRuntimeManager().resolveRuntime();
+    if (active && active.relinkerPath && fs.existsSync(active.relinkerPath)) {
+      return path.normalize(active.relinkerPath);
+    }
+  } catch {}
   return getDefaultRelinkerPath();
 }
 
 function getResolvedLibsPath(): string {
-  const userSettings = loadSettings();
-  let baseDir = '';
-  if (userSettings.prxPath && fs.existsSync(userSettings.prxPath)) {
-    baseDir = path.normalize(userSettings.prxPath);
-  } else {
-    baseDir = getDefaultLibsPath();
-  }
+  try {
+    const active = getRuntimeManager().resolveRuntime();
+    if (active && active.libsPath && fs.existsSync(active.libsPath)) {
+      return path.normalize(active.libsPath);
+    }
+  } catch {}
+  const baseDir = getDefaultLibsPath();
   if (baseDir && fs.existsSync(baseDir)) {
-    // If baseDir has a nested 'libs' directory containing PRX files, automatically resolve it
     const nested = path.join(baseDir, 'libs');
     if (fs.existsSync(nested) && fs.statSync(nested).isDirectory()) {
       try {
@@ -734,6 +753,22 @@ function getResolvedLibsPath(): string {
     }
   }
   return baseDir;
+}
+
+let gitHubAuthServiceInstance: GitHubAuthService | null = null;
+function getGitHubAuthService(): GitHubAuthService {
+  if (!gitHubAuthServiceInstance) {
+    gitHubAuthServiceInstance = new GitHubAuthService(app.getPath('userData'));
+  }
+  return gitHubAuthServiceInstance;
+}
+
+let localBuilderServiceInstance: LocalBuilderService | null = null;
+function getLocalBuilderService(): LocalBuilderService {
+  if (!localBuilderServiceInstance) {
+    localBuilderServiceInstance = new LocalBuilderService(app.getPath('userData'));
+  }
+  return localBuilderServiceInstance;
 }
 
 function getPythonCommand(): string {
@@ -769,6 +804,44 @@ function getResolvedUnwrapScript(): string {
     if (fs.existsSync(c)) return path.normalize(c);
   }
   return candidates[0] ? path.normalize(candidates[0]) : '';
+}
+
+function isAuthenticGuestModule(filePath: string): boolean {
+  try {
+    if (!fs.existsSync(filePath)) return false;
+    const stat = fs.statSync(filePath);
+    if (!stat.isFile() || stat.size < 64 * 1024) return false;
+
+    const buf = Buffer.alloc(64);
+    const fd = fs.openSync(filePath, 'r');
+    const bytesRead = fs.readSync(fd, buf, 0, 64, 0);
+    fs.closeSync(fd);
+
+    if (bytesRead < 20) return false;
+
+    // Check that the file is not a Windows PE executable (does NOT start with MZ / 0x4D, 0x5A)
+    if (buf[0] === 0x4d && buf[1] === 0x5a) return false;
+
+    // Check for Sony SELF magic (0x1D3D154F or 0xEEF51454)
+    const magic32 = buf.readUInt32LE(0);
+    if (magic32 === 0x1d3d154f || magic32 === 0xeef51454) {
+      return true;
+    }
+
+    // Check for 64-bit ELF magic (\x7FELF, class ELFCLASS64 = 2, type ET_DYN / 0xFE18)
+    if (buf[0] === 0x7f && buf[1] === 0x45 && buf[2] === 0x4c && buf[3] === 0x46) {
+      if (buf[4] === 2) {
+        const eType = buf.readUInt16LE(16);
+        if (eType === 3 || eType === 0xfe18) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  } catch {
+    return false;
+  }
 }
 
 function sanitizeModuleDirectory(
@@ -839,9 +912,7 @@ function sanitizeModuleDirectory(
     // If fake dump stubs are treated as guest modules, they conflict with AnyPS5 native Vulkan/OS drivers and crash at runtime.
     if (!shouldIsolate) {
       const stem = lower.replace(/(\.sprx|\.prx|\.native|\.guest)+$/i, '');
-      const conflictingDriverStubs = new Set([
-        'libc',
-        'libscelibcinternal',
+      const hardwareDriverStubs = new Set([
         'libsceagc',
         'libsceagcdriver',
         'libscepsml',
@@ -849,10 +920,13 @@ function sanitizeModuleDirectory(
         'libkernel_web',
         'libkernel_sys',
       ]);
-      if (conflictingDriverStubs.has(stem)) {
-        if (!preserveGuestLibc || lower !== 'libc.prx.guest.prx') {
+      if (hardwareDriverStubs.has(stem)) {
+        shouldIsolate = true;
+        isolateReason = `Conflicting hardware/system driver stub (provided natively by AnyPS5 in libs/${stem}.prx)`;
+      } else if (stem === 'libc' || stem === 'libscelibcinternal') {
+        if (!lower.endsWith('.guest.prx') && !isAuthenticGuestModule(fullPath)) {
           shouldIsolate = true;
-          isolateReason = `Conflicting system library stub (provided natively by AnyPS5 in libs/${stem}.prx)`;
+          isolateReason = `Dummy or corrupt guest ${entry} (size < 64KB or non-authentic module header)`;
         }
       }
     }
@@ -907,7 +981,8 @@ function sanitizeModuleDirectory(
 function fixGameHierarchyInPlace(
   gameDir: string,
   sendLog: (msg: string, level?: string) => void,
-  mode: 'launch' | 'relink' = 'launch'
+  mode: 'launch' | 'relink' = 'launch',
+  customLibsPath?: string
 ) {
   const resolved = path.resolve(gameDir);
   if (!fs.existsSync(resolved)) {
@@ -1016,7 +1091,7 @@ function fixGameHierarchyInPlace(
   }
 
   const knownSystemLibs = new Set<string>();
-  const sourceLibs = getResolvedLibsPath();
+  const sourceLibs = (customLibsPath && fs.existsSync(customLibsPath)) ? customLibsPath : getResolvedLibsPath();
   if (sourceLibs && fs.existsSync(sourceLibs)) {
     const collectSourceFiles = (dir: string): { name: string; fullPath: string; stat: fs.Stats }[] => {
       const results: { name: string; fullPath: string; stat: fs.Stats }[] = [];
@@ -1377,7 +1452,37 @@ function fixGameHierarchyInPlace(
     fs.mkdirSync(sceModuleDir, { recursive: true });
   }
 
-  // Check if existing executable or guest modules rely on guest libc.prx.guest.prx (backward compatibility)
+  const targetModuleDir = hasSingular ? sceModuleDir : (hasPlural ? sceModulesDir : (hasPrx ? prxDir : sceModuleDir));
+
+  // Self-Healing: Check if authentic guest libc / libSceLibcInternal was previously isolated into module_backups
+  const libcNames = ['libc.prx', 'libc.sprx', 'libSceLibcInternal.prx', 'libscelibcinternal.prx'];
+  const backupDirsToCheck = [
+    path.join(sceModuleDir, 'module_backups'),
+    path.join(app0Dir, 'module_backups'),
+    path.join(resolved, 'module_backups'),
+    path.join(targetModuleDir, 'module_backups'),
+  ];
+
+  for (const libcName of libcNames) {
+    const activeTarget = path.join(sceModuleDir, libcName);
+    if (!fs.existsSync(activeTarget)) {
+      for (const bDir of backupDirsToCheck) {
+        const backupFile = path.join(bDir, libcName);
+        if (fs.existsSync(backupFile) && isAuthenticGuestModule(backupFile)) {
+          try {
+            if (!fs.existsSync(sceModuleDir)) fs.mkdirSync(sceModuleDir, { recursive: true });
+            fs.copyFileSync(backupFile, activeTarget);
+            sendLog(`[AnyPS5] Restored authentic guest ${libcName} from module_backups to sce_module/`, 'info');
+            break;
+          } catch (restoreErr) {
+            console.warn(`Failed to restore ${libcName} from backup:`, restoreErr);
+          }
+        }
+      }
+    }
+  }
+
+  // Check if existing executable, guest modules, or bundled files rely on guest libc
   const targetExeName = getDefaultOutputExecutableName();
   const candidateExes = [
     path.join(resolved, targetExeName),
@@ -1387,10 +1492,20 @@ function fixGameHierarchyInPlace(
   ];
 
   let needsGuestLibc = false;
-  if (mode === 'launch') {
-    const guestLibcUtf8 = Buffer.from('libc.prx.guest.prx', 'utf8');
-    const guestLibcUtf16 = Buffer.from('libc.prx.guest.prx', 'utf16le');
+  for (const libcName of ['libc.prx', 'libc.sprx']) {
+    const candidateLibc = path.join(sceModuleDir, libcName);
+    const candidateLibcTarget = path.join(targetModuleDir, libcName);
+    if ((fs.existsSync(candidateLibc) && isAuthenticGuestModule(candidateLibc)) ||
+        (fs.existsSync(candidateLibcTarget) && isAuthenticGuestModule(candidateLibcTarget))) {
+      needsGuestLibc = true;
+      break;
+    }
+  }
 
+  const guestLibcUtf8 = Buffer.from('libc.prx.guest.prx', 'utf8');
+  const guestLibcUtf16 = Buffer.from('libc.prx.guest.prx', 'utf16le');
+
+  if (!needsGuestLibc) {
     for (const exePath of candidateExes) {
       if (fs.existsSync(exePath)) {
         try {
@@ -1402,32 +1517,31 @@ function fixGameHierarchyInPlace(
         } catch {}
       }
     }
+  }
 
-    if (!needsGuestLibc) {
-      for (const checkDir of [sceModuleDir, sceModulesDir, prxDir, app0Dir]) {
-        if (!fs.existsSync(checkDir)) continue;
-        try {
-          const entries = fs.readdirSync(checkDir);
-          for (const ent of entries) {
-            if (ent.endsWith('.guest.prx') && ent !== 'libc.prx.guest.prx') {
-              const fullModPath = path.join(checkDir, ent);
-              try {
-                const modBuf = fs.readFileSync(fullModPath);
-                if (modBuf.includes(guestLibcUtf8) || modBuf.includes(guestLibcUtf16)) {
-                  needsGuestLibc = true;
-                  break;
-                }
-              } catch {}
-            }
+  if (!needsGuestLibc) {
+    for (const checkDir of [sceModuleDir, sceModulesDir, prxDir, app0Dir]) {
+      if (!fs.existsSync(checkDir)) continue;
+      try {
+        const entries = fs.readdirSync(checkDir);
+        for (const ent of entries) {
+          if (ent.endsWith('.guest.prx') && ent !== 'libc.prx.guest.prx') {
+            const fullModPath = path.join(checkDir, ent);
+            try {
+              const modBuf = fs.readFileSync(fullModPath);
+              if (modBuf.includes(guestLibcUtf8) || modBuf.includes(guestLibcUtf16)) {
+                needsGuestLibc = true;
+                break;
+              }
+            } catch {}
           }
-          if (needsGuestLibc) break;
-        } catch {}
-      }
+        }
+        if (needsGuestLibc) break;
+      } catch {}
     }
   }
 
-  // Ensure all module directories, app0, and root are sanitized for backup artifacts (.bak_*), non-shared ELFs, and conflicting system stubs
-  const targetModuleDir = hasSingular ? sceModuleDir : (hasPlural ? sceModulesDir : (hasPrx ? prxDir : sceModuleDir));
+  // Ensure all module directories, app0, and root are sanitized for backup artifacts (.bak_*), non-shared ELFs, and conflicting hardware stubs
   if (fs.existsSync(targetModuleDir)) {
     sanitizeModuleDirectory(targetModuleDir, inputElf, sendLog, knownSystemLibs, needsGuestLibc);
   }
@@ -1435,24 +1549,25 @@ function fixGameHierarchyInPlace(
     sanitizeModuleDirectory(app0Dir, inputElf, sendLog, knownSystemLibs, needsGuestLibc);
   }
 
-  // Clean up any stale guest system library artifacts that conflict with AnyPS5 native translations
-  if (!needsGuestLibc) {
-    for (const guestSysPrx of ['libc.prx.guest.prx', 'libkernel.prx.guest.prx', 'libSceLibcInternal.prx.guest.prx']) {
-      for (const searchDir of [resolved, app0Dir, sceModuleDir, sceModulesDir, prxDir, targetModuleDir]) {
-        if (!fs.existsSync(searchDir)) continue;
-        const target = path.join(searchDir, guestSysPrx);
-        if (fs.existsSync(target)) {
-          try {
-            const backup = path.join(searchDir, 'module_backups', guestSysPrx);
-            if (!fs.existsSync(path.dirname(backup))) fs.mkdirSync(path.dirname(backup), { recursive: true });
-            if (fs.existsSync(backup)) fs.unlinkSync(backup);
-            fs.renameSync(target, backup);
-            sendLog(`[AnyPS5] Isolated obsolete guest system artifact "${guestSysPrx}" to module_backups/`, 'info');
-          } catch {}
-        }
+  // Clean up any obsolete hardware driver artifacts that conflict with AnyPS5 native translations
+  for (const guestSysPrx of ['libkernel.prx.guest.prx']) {
+    for (const searchDir of [resolved, app0Dir, sceModuleDir, sceModulesDir, prxDir, targetModuleDir]) {
+      if (!fs.existsSync(searchDir)) continue;
+      const target = path.join(searchDir, guestSysPrx);
+      if (fs.existsSync(target)) {
+        try {
+          const backup = path.join(searchDir, 'module_backups', guestSysPrx);
+          if (!fs.existsSync(path.dirname(backup))) fs.mkdirSync(path.dirname(backup), { recursive: true });
+          if (fs.existsSync(backup)) fs.unlinkSync(backup);
+          fs.renameSync(target, backup);
+          sendLog(`[AnyPS5] Isolated conflicting hardware driver artifact "${guestSysPrx}" to module_backups/`, 'info');
+        } catch {}
       }
     }
-  } else {
+  }
+
+  // Ensure guest libc artifact is retained or restored from backup when needed
+  if (needsGuestLibc) {
     for (const searchDir of [resolved, app0Dir, sceModuleDir, sceModulesDir, prxDir, targetModuleDir]) {
       if (!fs.existsSync(searchDir)) continue;
       const active = path.join(searchDir, 'libc.prx.guest.prx');
@@ -1467,7 +1582,7 @@ function fixGameHierarchyInPlace(
           if (fs.existsSync(backup)) {
             try {
               fs.copyFileSync(backup, active);
-              sendLog(`[AnyPS5] Restored backward-compatible guest libc stub for existing relinked title into ${path.relative(resolved, active)}.`, 'info');
+              sendLog(`[AnyPS5] Restored guest libc artifact "${path.basename(active)}" from module_backups to ${path.relative(resolved, active)}`, 'info');
               break;
             } catch {}
           }
@@ -1748,7 +1863,7 @@ function fixGameHierarchyInPlace(
         const guestLibcUtf8 = Buffer.from('libc.prx.guest.prx', 'utf8');
         const guestLibcUtf16 = Buffer.from('libc.prx.guest.prx', 'utf16le');
         if (exeBuffer.includes(guestLibcUtf8) || exeBuffer.includes(guestLibcUtf16)) {
-          sendLog(`[AnyPS5 Diagnostics] Backward-compatible executable detected: "${path.basename(outputExe)}" contains embedded imports to guest libc.prx.guest.prx.`, 'info');
+          sendLog(`[AnyPS5 Diagnostics] Guest libc integration: "${path.basename(outputExe)}" links against guest libc.prx.guest.prx for SDK 9.00+ Dinkumware threading symbols.`, 'info');
         }
 
         const fakelibUtf8 = Buffer.from('fakelib', 'utf8');
@@ -1849,16 +1964,24 @@ ipcMain.handle('anyps5:run-relinker', async (_, { game, options }) => {
     sendLog(`[AnyPS5] Preparing in-place relinker pipeline for "${game.title}"...`, 'info');
     sendStage(1, 'active', 20);
 
+    // Step 0: Resolve designated runtime engine
+    const currentSettings = loadSettings();
+    const targetRuntimeId = options?.runtimeId || game.runtimeId || (game.titleId ? currentSettings.gameRuntimes?.[game.titleId] : undefined);
+    const resolvedRuntime = getRuntimeManager().resolveRuntime(targetRuntimeId);
+    sendLog(`[AnyPS5 Runtime] Selected Runtime Engine: "${resolvedRuntime.name}" (${resolvedRuntime.id})`, 'info');
+
     // Step 1: Fix folder hierarchy in-place in native location (mode: 'relink' isolates legacy stubs)
-    const { gameDir, inputElf, outputExe, moduleDirs } = fixGameHierarchyInPlace(game.path, sendLog, 'relink');
+    const { gameDir, inputElf, outputExe, moduleDirs } = fixGameHierarchyInPlace(game.path, sendLog, 'relink', resolvedRuntime.libsPath);
     game.path = gameDir;
     sendStage(1, 'completed', 100);
 
     sendStage(7, 'active', 50);
     sendStage(7, 'completed', 100);
 
-    // Step 2: Locate compiled relinker.exe binary
-    const defaultBin = getResolvedRelinkerPath();
+    // Step 2: Locate compiled relinker binary
+    const defaultBin = (resolvedRuntime.relinkerPath && fs.existsSync(resolvedRuntime.relinkerPath))
+      ? resolvedRuntime.relinkerPath
+      : getResolvedRelinkerPath();
 
     if (!defaultBin || !fs.existsSync(defaultBin)) {
       const errMsg = `Native relinker binary not found at ${defaultBin || 'installation path'}`;
@@ -2037,11 +2160,16 @@ ipcMain.handle('anyps5:launch-game', async (_, game) => {
     });
   };
 
+  const currentSettings = loadSettings();
+  const targetRuntimeId = game.runtimeId || (game.titleId ? currentSettings.gameRuntimes?.[game.titleId] : undefined);
+  const resolvedRuntime = getRuntimeManager().resolveRuntime(targetRuntimeId);
+  sendLog(`[AnyPS5 Runtime] Active Runtime Engine: "${resolvedRuntime.name}" (${resolvedRuntime.id})`, 'info');
+
   let hierarchyResult: { gameDir: string; inputElf: string; outputExe: string; moduleDirs: string[] } | null = null;
   try {
     sendLog(`[AnyPS5] Launching native ported executable: ${game.path}/${game.executableName || getDefaultOutputExecutableName()}`);
     sendLog(`[AnyPS5] Checking runtime layout: libs/ system PRX and app0/ guest filesystem...`);
-    hierarchyResult = fixGameHierarchyInPlace(game.path, sendLog, 'launch');
+    hierarchyResult = fixGameHierarchyInPlace(game.path, sendLog, 'launch', resolvedRuntime.libsPath);
   } catch (err: any) {
     console.error('Launch hierarchy check error:', err);
     sendLog(`[AnyPS5 Warning] Hierarchy check: ${err?.message || err}`, 'warn');
@@ -2147,8 +2275,9 @@ ipcMain.handle('anyps5:launch-game', async (_, game) => {
       sendLog('[AnyPS5 Environment] Virtualized graphics/environment detected: enabled APS5_NO_WRITE_WATCH=1 for guest stability', 'info');
     }
 
-    // Prepend application root, libs/, and app0/ to PATH and LD_LIBRARY_PATH so child processes and loaders locate all dependencies
+    // Direct Path Execution: Prepend active runtime's libs directory, followed by application root, libs/, and app0/
     const runtimeDirs = Array.from(new Set([
+      resolvedRuntime.libsPath,
       game.path,
       path.join(game.path, 'libs'),
       path.join(game.path, 'app0'),
@@ -2343,13 +2472,14 @@ ipcMain.handle('anyps5:get-telemetry', async () => {
     }
   } catch {}
 
-  // Locate relinker executable
-  const relinkerPath = getResolvedRelinkerPath();
-  const relinkerBinaryFound = fs.existsSync(relinkerPath);
+  // Locate relinker executable & system PRX libraries
+  const resolvedRuntime = getRuntimeManager().resolveRuntime();
+  const relinkerPath = resolvedRuntime.relinkerPath;
+  const relinkerBinaryFound = resolvedRuntime.isValid && fs.existsSync(relinkerPath);
 
   // Check clean-room PRX system libraries
-  const libsDir = getResolvedLibsPath();
-  const prxVersion = fs.existsSync(libsDir) ? 'v0.8.4-cleanroom' : 'Not installed';
+  const libsDir = resolvedRuntime.libsPath;
+  const prxVersion = (resolvedRuntime.isValid && fs.existsSync(libsDir)) ? 'v0.8.4-cleanroom' : 'Not installed';
 
   // Determine CPU vendor & translation recommendation
   const isAmd = /AMD|Ryzen|Threadripper|EPYC/i.test(cpuModel);
@@ -2419,20 +2549,19 @@ ipcMain.handle('anyps5:is-maximized', () => {
 // Settings & File Selection IPC Handlers
 ipcMain.handle('anyps5:get-settings', async () => {
   const userSettings = loadSettings();
-  const defaultRelinkerPath = getDefaultRelinkerPath();
-  const defaultPrxPath = getDefaultLibsPath();
+  const resolved = getRuntimeManager().resolveRuntime();
 
   return {
-    relinkerPath: userSettings.relinkerPath || defaultRelinkerPath,
-    prxPath: userSettings.prxPath || defaultPrxPath,
+    relinkerPath: resolved.relinkerPath,
+    prxPath: resolved.libsPath,
     defaultTarget: userSettings.defaultTarget || (process.platform === 'linux' ? 'linux' : (process.platform === 'darwin' ? 'macos' : 'windows')),
     cpuFix: userSettings.cpuFix || 'intel',
     soundEnabled: userSettings.soundEnabled !== undefined ? userSettings.soundEnabled : true,
     hapticsEnabled: userSettings.hapticsEnabled !== undefined ? userSettings.hapticsEnabled : true,
     advanced: userSettings.advanced !== undefined ? userSettings.advanced : false,
     preferredGpu: userSettings.preferredGpu || 'auto',
-    defaultRelinkerPath,
-    defaultPrxPath,
+    defaultRelinkerPath: resolved.relinkerPath,
+    defaultPrxPath: resolved.libsPath,
   };
 });
 
@@ -2523,107 +2652,12 @@ const getExperimentalBuildsDir = () => {
   return dir;
 };
 
-const CURATED_COMMUNITY_PRS = [
-  {
-    id: 104,
-    number: 104,
-    title: 'libkernel: Implement scePthreadSetAffinity & Core Mask Scheduling',
-    author: {
-      login: 'relinker-core',
-      avatar_url: 'https://avatars.githubusercontent.com/u/10137?v=4',
-      html_url: 'https://github.com/relinker-core'
-    },
-    html_url: 'https://github.com/Ramzyayman/AnyPS5-Studio/pull/104',
-    state: 'open' as const,
-    created_at: '2026-10-15T14:32:00Z',
-    updated_at: '2026-10-16T18:40:00Z',
-    body: 'Resolves thread starvation on high core-count AMD Zen and Intel Raptor Lake CPUs by translating PlayStation 5 8-core CPU affinity masks directly to Windows SetThreadAffinityMask APIs.',
-    headSha: 'a7c91e4',
-    headBranch: 'kernel/pthread-affinity',
-    labels: [
-      { name: 'kernel', color: '1d76db' },
-      { name: 'threading', color: '0e8a16' }
-    ],
-    artifactAvailable: true,
-    artifactSizeMb: 14.8,
-  },
-  {
-    id: 118,
-    number: 118,
-    title: 'libSceVideoOut: 4K (3840x2160) Dynamic Resolution Scaling & HDR10 Buffer Fix',
-    author: {
-      login: 'vulkan-graphics',
-      avatar_url: 'https://avatars.githubusercontent.com/u/23561?v=4',
-      html_url: 'https://github.com/vulkan-graphics'
-    },
-    html_url: 'https://github.com/Ramzyayman/AnyPS5-Studio/pull/118',
-    state: 'open' as const,
-    created_at: '2026-10-14T09:15:00Z',
-    updated_at: '2026-10-16T21:10:00Z',
-    body: 'Adds dynamic surface scaling hooks to translate PS5 resolution negotiation to native Vulkan VkSwapchainKHR formats, preventing black screen on 4K 120Hz displays.',
-    headSha: 'f39b201',
-    headBranch: 'video/4k-hdr-scaling',
-    labels: [
-      { name: 'graphics', color: '5319e7' },
-      { name: 'vulkan', color: 'b60205' }
-    ],
-    artifactAvailable: true,
-    artifactSizeMb: 15.2,
-  },
-  {
-    id: 122,
-    number: 122,
-    title: 'AMD Zen 4 AVX-512 FMA Lowering & Vector Execution Optimization',
-    author: {
-      login: 'zen4-codegen',
-      avatar_url: 'https://avatars.githubusercontent.com/u/38910?v=4',
-      html_url: 'https://github.com/zen4-codegen'
-    },
-    html_url: 'https://github.com/Ramzyayman/AnyPS5-Studio/pull/122',
-    state: 'open' as const,
-    created_at: '2026-10-13T11:20:00Z',
-    updated_at: '2026-10-16T12:00:00Z',
-    body: 'Enables native AVX-512 code emission when AMD Ryzen 7000/8000/9000 CPUs are detected, bypassing AVX2 vector decomposition for 15-22% higher relink throughput.',
-    headSha: '8c41de9',
-    headBranch: 'codegen/zen4-avx512',
-    labels: [
-      { name: 'relinker', color: 'fbca04' },
-      { name: 'performance', color: '0052cc' }
-    ],
-    artifactAvailable: true,
-    artifactSizeMb: 16.1,
-  },
-  {
-    id: 135,
-    number: 135,
-    title: "Astro's Playroom: Eliminate Audio Stutter in DualSense Emulation",
-    author: {
-      login: 'ps5-soundeng',
-      avatar_url: 'https://avatars.githubusercontent.com/u/49102?v=4',
-      html_url: 'https://github.com/ps5-soundeng'
-    },
-    html_url: 'https://github.com/Ramzyayman/AnyPS5-Studio/pull/135',
-    state: 'open' as const,
-    created_at: '2026-10-12T16:45:00Z',
-    updated_at: '2026-10-15T22:30:00Z',
-    body: 'Corrects 48kHz audio circular ring buffer underruns when emulating the DualSense haptic sound track simultaneously with main surround sound outputs.',
-    headSha: 'd4821ca',
-    headBranch: 'audio/astros-audio-sync',
-    labels: [
-      { name: 'audio', color: 'c2e0c6' },
-      { name: 'compatibility', color: '0e8a16' }
-    ],
-    artifactAvailable: true,
-    artifactSizeMb: 14.9,
-  }
-];
 
 const prCache = new Map<string, { timestamp: number; data: any[] }>();
 
 ipcMain.handle('anyps5:get-community-prs', async (_, targetRepoArg?: string, forceRefresh?: boolean) => {
   const baseDir = getExperimentalBuildsDir();
-  const settings = loadSettings();
-  const currentRelinker = settings.relinkerPath || getDefaultRelinkerPath();
+  const customRuntimesBase = path.join(app.getPath('userData'), 'runtimes', 'custom');
   const targetRepo = targetRepoArg && targetRepoArg.trim() ? targetRepoArg.trim() : 'boykopovar/AnyPS5';
 
   const cacheKey = targetRepo.toLowerCase();
@@ -2664,8 +2698,6 @@ ipcMain.handle('anyps5:get-community-prs', async (_, targetRepoArg?: string, for
             headSha: item.head?.sha?.substring(0, 7) || 'HEAD',
             headBranch: item.head?.ref || 'main',
             labels: (item.labels || []).map((l: any) => ({ name: l.name, color: l.color })),
-            artifactAvailable: true,
-            artifactSizeMb: 15.0,
           }));
           prCache.set(cacheKey, { timestamp: now, data: prs });
           fetchedSuccessfully = true;
@@ -2678,129 +2710,145 @@ ipcMain.handle('anyps5:get-community-prs', async (_, targetRepoArg?: string, for
     }
   }
 
-  // If live fetch failed due to network error, fallback to cache or upstream offline fallback
-  if (!fetchedSuccessfully) {
-    if (cached) {
-      prs = cached.data;
-    } else if (targetRepo.toLowerCase() === 'boykopovar/anyps5') {
-      prs = [...CURATED_COMMUNITY_PRS];
-    }
+  // If live fetch failed due to network error, use cached data if available, otherwise return empty
+  if (!fetchedSuccessfully && cached) {
+    prs = cached.data;
   }
+
+  const activeRuntime = getRuntimeManager().resolveRuntime();
+  const binName = getRelinkerBinaryName();
 
   // Annotate with local installation & active status
   return prs.map((pr) => {
-    const prDir = path.join(baseDir, `pr-${pr.number}`);
-    const prExe = path.join(prDir, getRelinkerBinaryName());
-    const isInstalled = fs.existsSync(prExe);
-    let artifactSizeMb = pr.artifactSizeMb;
+    const customPrDir = path.join(customRuntimesBase, `pr-${pr.number}`);
+    const customPrExe = path.join(customPrDir, binName);
+    const legacyPrExe = path.join(baseDir, `pr-${pr.number}`, binName);
+
+    const isInstalled = fs.existsSync(customPrExe) || fs.existsSync(legacyPrExe);
+    let artifactSizeMb: number | undefined;
     if (isInstalled) {
       try {
-        const stats = fs.statSync(prExe);
+        const activePath = fs.existsSync(customPrExe) ? customPrExe : legacyPrExe;
+        const stats = fs.statSync(activePath);
         artifactSizeMb = Math.round((stats.size / (1024 * 1024)) * 10) / 10;
       } catch {}
     }
-    const isActive = isInstalled && path.normalize(currentRelinker) === path.normalize(prExe);
+
+    const isActive = isInstalled && (
+      activeRuntime.id === `custom-pr-${pr.number}` ||
+      (activeRuntime.relinkerPath && (
+        path.normalize(activeRuntime.relinkerPath) === path.normalize(customPrExe) ||
+        path.normalize(activeRuntime.relinkerPath) === path.normalize(legacyPrExe)
+      ))
+    );
+
     return {
       ...pr,
       isInstalled,
       isActive,
-      artifactSizeMb: artifactSizeMb || pr.artifactSizeMb,
+      artifactSizeMb,
     };
   });
 });
 
-ipcMain.handle('anyps5:download-pr-build', async (_, { prNumber, artifactUrl }) => {
-  const baseDir = getExperimentalBuildsDir();
-  const targetDir = path.join(baseDir, `pr-${prNumber}`);
-  const targetExe = path.join(targetDir, getRelinkerBinaryName());
-
-  const sendProgress = (status: 'downloading' | 'extracting' | 'ready' | 'error', progress: number, error?: string) => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('anyps5:pr-download-progress', {
-        prNumber,
-        status,
-        progress,
-        error
-      });
+// Real Pull Request Compilation via Local Builder
+ipcMain.handle('anyps5:build-pr', async (_, { prNumber, headSha, title }: { prNumber: number; headSha: string; title: string }) => {
+  return getLocalBuilderService().buildPullRequest(
+    prNumber,
+    headSha,
+    title,
+    getRuntimeManager(),
+    (logMsg) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('anyps5:builder-log', logMsg);
+      }
+    },
+    (status) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('anyps5:builder-status', status);
+        mainWindow.webContents.send('anyps5:pr-download-progress', {
+          prNumber,
+          status: status.status === 'completed' ? 'ready' : status.status === 'error' ? 'error' : status.status,
+          progress: status.progress,
+          message: status.message,
+          error: status.error,
+        });
+      }
     }
-  };
+  );
+});
 
-  try {
-    sendProgress('downloading', 15);
-    await new Promise((r) => setTimeout(r, 350));
-    sendProgress('downloading', 55);
-    await new Promise((r) => setTimeout(r, 450));
-    sendProgress('downloading', 90);
-    await new Promise((r) => setTimeout(r, 250));
-
-    sendProgress('extracting', 95);
-    if (!fs.existsSync(targetDir)) {
-      fs.mkdirSync(targetDir, { recursive: true });
+// Delegate download-pr-build to real buildPullRequest
+ipcMain.handle('anyps5:download-pr-build', async (_, { prNumber, artifactUrl, headSha, title }: { prNumber: number; artifactUrl?: string; headSha?: string; title?: string }) => {
+  return getLocalBuilderService().buildPullRequest(
+    prNumber,
+    headSha || 'HEAD',
+    title || `PR #${prNumber}`,
+    getRuntimeManager(),
+    (logMsg) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('anyps5:builder-log', logMsg);
+      }
+    },
+    (status) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('anyps5:builder-status', status);
+        mainWindow.webContents.send('anyps5:pr-download-progress', {
+          prNumber,
+          status: status.status === 'completed' ? 'ready' : status.status === 'error' ? 'error' : status.status,
+          progress: status.progress,
+          message: status.message,
+          error: status.error,
+        });
+      }
     }
-
-    // Provision executable from default relinker
-    const defaultRelinker = getDefaultRelinkerPath();
-    if (fs.existsSync(defaultRelinker)) {
-      fs.copyFileSync(defaultRelinker, targetExe);
-    } else {
-      fs.writeFileSync(targetExe, 'AnyPS5 Experimental Relinker Binary');
-    }
-    if (process.platform !== 'win32') {
-      try { fs.chmodSync(targetExe, 0o755); } catch {}
-    }
-
-    // Save build metadata
-    const metaPath = path.join(targetDir, 'build-info.json');
-    fs.writeFileSync(metaPath, JSON.stringify({
-      prNumber,
-      installedAt: new Date().toISOString(),
-      artifactUrl: artifactUrl || 'github-actions-ci'
-    }, null, 2));
-
-    sendProgress('ready', 100);
-    return { success: true, path: targetExe };
-  } catch (err: any) {
-    sendProgress('error', 0, err?.message || String(err));
-    return { success: false, error: err?.message || String(err) };
-  }
+  );
 });
 
 ipcMain.handle('anyps5:set-active-pr-build', async (_, prNumber: number) => {
-  const baseDir = getExperimentalBuildsDir();
-  const prExe = path.join(baseDir, `pr-${prNumber}`, getRelinkerBinaryName());
-  if (fs.existsSync(prExe)) {
+  const runtimeId = `custom-pr-${prNumber}`;
+  const success = getRuntimeManager().setActiveGlobalRuntime(runtimeId);
+  if (success) {
+    const resolved = getRuntimeManager().resolveRuntime(runtimeId);
     const current = loadSettings();
-    saveSettings({ ...current, relinkerPath: prExe });
+    saveSettings({ ...current, relinkerPath: resolved.relinkerPath, prxPath: resolved.libsPath });
+    return true;
+  }
+
+  // Fallback for legacy builds
+  const legacyPrExe = path.join(getExperimentalBuildsDir(), `pr-${prNumber}`, getRelinkerBinaryName());
+  if (fs.existsSync(legacyPrExe)) {
+    const current = loadSettings();
+    saveSettings({ ...current, relinkerPath: legacyPrExe });
     return true;
   }
   return false;
 });
 
 ipcMain.handle('anyps5:revert-to-default-build', async () => {
-  const defaultRelinker = getDefaultRelinkerPath();
+  getRuntimeManager().setActiveGlobalRuntime('bundled');
+  const resolved = getRuntimeManager().resolveRuntime('bundled');
   const current = loadSettings();
-  saveSettings({ ...current, relinkerPath: defaultRelinker });
+  saveSettings({ ...current, relinkerPath: resolved.relinkerPath, prxPath: resolved.libsPath });
   return true;
 });
 
 ipcMain.handle('anyps5:delete-pr-build', async (_, prNumber: number) => {
-  const baseDir = getExperimentalBuildsDir();
-  const prDir = path.join(baseDir, `pr-${prNumber}`);
-  const prExe = path.join(prDir, getRelinkerBinaryName());
+  const runtimeId = `custom-pr-${prNumber}`;
+  getRuntimeManager().removeRuntime(runtimeId);
 
+  const customPrDir = path.join(app.getPath('userData'), 'runtimes', 'custom', `pr-${prNumber}`);
+  const legacyPrDir = path.join(getExperimentalBuildsDir(), `pr-${prNumber}`);
+  if (fs.existsSync(customPrDir)) {
+    try { fs.rmSync(customPrDir, { recursive: true, force: true }); } catch {}
+  }
+  if (fs.existsSync(legacyPrDir)) {
+    try { fs.rmSync(legacyPrDir, { recursive: true, force: true }); } catch {}
+  }
+
+  const active = getRuntimeManager().resolveRuntime();
   const current = loadSettings();
-  if (current.relinkerPath && path.normalize(current.relinkerPath) === path.normalize(prExe)) {
-    saveSettings({ ...current, relinkerPath: getDefaultRelinkerPath() });
-  }
-
-  if (fs.existsSync(prDir)) {
-    try {
-      fs.rmSync(prDir, { recursive: true, force: true });
-    } catch (err) {
-      console.error('Failed to remove PR build directory:', err);
-      return false;
-    }
-  }
+  saveSettings({ ...current, relinkerPath: active.relinkerPath, prxPath: active.libsPath });
   return true;
 });
 
@@ -2809,67 +2857,20 @@ ipcMain.handle('anyps5:merge-and-build-prs', async (_, prNumbers: number[]) => {
     return { success: false, error: 'No pull requests selected for merge.' };
   }
 
-  const sorted = [...new Set(prNumbers)].sort((a, b) => a - b);
-  const buildId = `merged-${sorted.join('-')}`;
-  const baseDir = getExperimentalBuildsDir();
-  const targetDir = path.join(baseDir, buildId);
-  const targetExe = path.join(targetDir, getRelinkerBinaryName());
-
-  const sendProgress = (status: 'downloading' | 'extracting' | 'ready' | 'error', progress: number, error?: string) => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('anyps5:pr-download-progress', {
-        prNumber: sorted[0],
-        status,
-        progress,
-        error
-      });
+  return getLocalBuilderService().mergeAndBuildPRs(
+    prNumbers,
+    getRuntimeManager(),
+    (logMsg) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('anyps5:builder-log', logMsg);
+      }
+    },
+    (status) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('anyps5:builder-status', status);
+      }
     }
-  };
-
-  try {
-    sendProgress('downloading', 20);
-    await new Promise((r) => setTimeout(r, 400));
-    sendProgress('downloading', 45);
-    await new Promise((r) => setTimeout(r, 450));
-    sendProgress('extracting', 75);
-    await new Promise((r) => setTimeout(r, 500));
-    sendProgress('extracting', 90);
-    await new Promise((r) => setTimeout(r, 350));
-
-    if (!fs.existsSync(targetDir)) {
-      fs.mkdirSync(targetDir, { recursive: true });
-    }
-
-    const defaultRelinker = getDefaultRelinkerPath();
-    if (fs.existsSync(defaultRelinker)) {
-      fs.copyFileSync(defaultRelinker, targetExe);
-    } else {
-      fs.writeFileSync(targetExe, `AnyPS5 Combined Relinker Binary (${buildId})`);
-    }
-    if (process.platform !== 'win32') {
-      try { fs.chmodSync(targetExe, 0o755); } catch {}
-    }
-
-    const metaPath = path.join(targetDir, 'merged-info.json');
-    fs.writeFileSync(metaPath, JSON.stringify({
-      id: buildId,
-      name: `Combined Build: PR #${sorted.join(' + #')}`,
-      prNumbers: sorted,
-      installedAt: new Date().toISOString(),
-      relinkerPath: targetExe
-    }, null, 2));
-
-    sendProgress('ready', 100);
-    return {
-      success: true,
-      buildId,
-      relinkerPath: targetExe,
-      mergedPRs: sorted
-    };
-  } catch (err: any) {
-    sendProgress('error', 0, err?.message || String(err));
-    return { success: false, error: err?.message || String(err) };
-  }
+  );
 });
 
 ipcMain.handle('anyps5:get-merged-builds', async () => {
@@ -2938,4 +2939,166 @@ ipcMain.handle('anyps5:delete-merged-build', async (_, buildId: string) => {
   }
   return false;
 });
+
+// Runtime Manager IPC Handlers
+ipcMain.handle('anyps5:runtimes-get-manifest', async () => {
+  return getRuntimeManager().getManifest();
+});
+
+ipcMain.handle('anyps5:runtimes-list', async () => {
+  return getRuntimeManager().listRuntimes();
+});
+
+ipcMain.handle('anyps5:runtimes-resolve', async (_, runtimeId?: string) => {
+  return getRuntimeManager().resolveRuntime(runtimeId);
+});
+
+ipcMain.handle('anyps5:runtimes-set-active-global', async (_, runtimeId: string) => {
+  return getRuntimeManager().setActiveGlobalRuntime(runtimeId);
+});
+
+ipcMain.handle('anyps5:runtimes-register-custom', async (_, args: { name: string; customPath: string; relinkerOverride?: string; libsOverride?: string }) => {
+  return getRuntimeManager().registerCustomRuntime(args.name, args.customPath, args.relinkerOverride, args.libsOverride);
+});
+
+ipcMain.handle('anyps5:runtimes-remove', async (_, runtimeId: string) => {
+  return getRuntimeManager().removeRuntime(runtimeId);
+});
+
+// Per-Game Runtime Selection IPC Handlers
+ipcMain.handle('anyps5:set-game-runtime', async (_, { titleId, runtimeId }: { titleId: string; runtimeId: string }) => {
+  try {
+    const current = loadSettings();
+    const gameRuntimes = { ...(current.gameRuntimes || {}) };
+    if (runtimeId && runtimeId !== 'bundled' && runtimeId !== 'inherit') {
+      gameRuntimes[titleId] = runtimeId;
+    } else {
+      delete gameRuntimes[titleId];
+    }
+    saveSettings({ ...current, gameRuntimes });
+    return true;
+  } catch (err) {
+    console.error('Failed to set game runtime:', err);
+    return false;
+  }
+});
+
+ipcMain.handle('anyps5:get-game-runtime', async (_, titleId: string) => {
+  const current = loadSettings();
+  return current.gameRuntimes?.[titleId];
+});
+
+// GitHub Device Flow & CI Artifacts IPC Handlers
+ipcMain.handle('anyps5:github-get-auth-status', async () => {
+  return getGitHubAuthService().getAuthStatus();
+});
+
+ipcMain.handle('anyps5:github-request-device-code', async () => {
+  try {
+    return await getGitHubAuthService().requestDeviceCode();
+  } catch (err: any) {
+    console.error('IPC github-request-device-code error:', err);
+    throw err;
+  }
+});
+
+ipcMain.handle('anyps5:github-check-device-code', async (_, deviceCode: string) => {
+  try {
+    return await getGitHubAuthService().checkDeviceCode(deviceCode);
+  } catch (err: any) {
+    console.error('IPC github-check-device-code error:', err);
+    return { status: 'error', error: err?.message || String(err) };
+  }
+});
+
+ipcMain.handle('anyps5:github-set-pat', async (_, token: string) => {
+  return getGitHubAuthService().setPersonalAccessToken(token);
+});
+
+ipcMain.handle('anyps5:github-disconnect', async () => {
+  return getGitHubAuthService().disconnect();
+});
+
+ipcMain.handle('anyps5:github-fetch-commits', async (_, args?: { repo?: string; page?: number; perPage?: number }) => {
+  const repo = args?.repo || 'boykopovar/AnyPS5';
+  const page = args?.page || 1;
+  const perPage = args?.perPage || 100;
+  return getGitHubAuthService().fetchCommits(repo, page, perPage, getRuntimeManager());
+});
+
+ipcMain.handle('anyps5:github-compare-commits', async (_, args?: { baseSha?: string; headRef?: string; repo?: string }) => {
+  const baseSha = args?.baseSha;
+  const headRef = args?.headRef || 'main';
+  const repo = args?.repo || 'boykopovar/AnyPS5';
+  return getGitHubAuthService().compareWithHead(baseSha, headRef, repo, getRuntimeManager());
+});
+
+ipcMain.handle('anyps5:github-download-commit', async (_, commit: { sha: string; shortSha: string; message: string; date?: string }) => {
+  return getGitHubAuthService().downloadCommitArtifact(
+    commit,
+    getRuntimeManager(),
+    (status, progress, error) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('anyps5:commit-download-progress', {
+          shortSha: commit.shortSha,
+          status,
+          progress,
+          error,
+        });
+      }
+    }
+  );
+});
+
+// Local Builder & Dev Studio IPC Handlers
+ipcMain.handle('anyps5:builder-inspect-toolchain', async () => {
+  return getLocalBuilderService().inspectToolchain();
+});
+
+ipcMain.handle('anyps5:builder-install-toolchain', async () => {
+  return getLocalBuilderService().installManagedToolchain((progress) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('anyps5:builder-toolchain-progress', progress);
+    }
+  });
+});
+
+ipcMain.handle('anyps5:builder-get-source-status', async () => {
+  return getLocalBuilderService().getSourceStatus();
+});
+
+ipcMain.handle('anyps5:builder-sync-source', async () => {
+  return getLocalBuilderService().syncSource((logMsg) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('anyps5:builder-log', logMsg);
+    }
+  });
+});
+
+ipcMain.handle('anyps5:builder-start-build', async () => {
+  return getLocalBuilderService().startBuild(
+    getRuntimeManager(),
+    (logMsg) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('anyps5:builder-log', logMsg);
+      }
+    },
+    (status) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('anyps5:builder-status', status);
+      }
+    }
+  );
+});
+
+ipcMain.handle('anyps5:builder-cancel-build', async () => {
+  return getLocalBuilderService().cancelBuild();
+});
+
+ipcMain.handle('anyps5:builder-get-active-build', async () => {
+  return getLocalBuilderService().getActiveBuild();
+});
+
+
+
 

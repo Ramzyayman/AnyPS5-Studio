@@ -27,8 +27,10 @@ contextBridge.exposeInMainWorld('anyps5', {
     };
   },
   getCommunityPRs: (repo?: string, forceRefresh?: boolean) => ipcRenderer.invoke('anyps5:get-community-prs', repo, forceRefresh),
-  downloadPRBuild: (args: { prNumber: number; artifactUrl?: string }) => 
+  downloadPRBuild: (args: { prNumber: number; artifactUrl?: string; headSha?: string; title?: string }) => 
     ipcRenderer.invoke('anyps5:download-pr-build', args),
+  buildPR: (args: { prNumber: number; headSha: string; title: string }) => 
+    ipcRenderer.invoke('anyps5:build-pr', args),
   setActivePRBuild: (prNumber: number) => ipcRenderer.invoke('anyps5:set-active-pr-build', prNumber),
   revertToDefaultBuild: () => ipcRenderer.invoke('anyps5:revert-to-default-build'),
   deletePRBuild: (prNumber: number) => ipcRenderer.invoke('anyps5:delete-pr-build', prNumber),
@@ -75,5 +77,59 @@ contextBridge.exposeInMainWorld('anyps5', {
       ipcRenderer.removeListener('anyps5:window-maximized-change', handler);
     };
   },
+  getRuntimesManifest: () => ipcRenderer.invoke('anyps5:runtimes-get-manifest'),
+  listRuntimes: () => ipcRenderer.invoke('anyps5:runtimes-list'),
+  resolveRuntime: (runtimeId?: string) => ipcRenderer.invoke('anyps5:runtimes-resolve', runtimeId),
+  setActiveGlobalRuntime: (runtimeId: string) => ipcRenderer.invoke('anyps5:runtimes-set-active-global', runtimeId),
+  registerCustomRuntime: (args: { name: string; customPath: string; relinkerOverride?: string; libsOverride?: string }) =>
+    ipcRenderer.invoke('anyps5:runtimes-register-custom', args),
+  removeRuntime: (runtimeId: string) => ipcRenderer.invoke('anyps5:runtimes-remove', runtimeId),
+  setGameRuntime: (titleId: string, runtimeId: string) => ipcRenderer.invoke('anyps5:set-game-runtime', { titleId, runtimeId }),
+  getGameRuntime: (titleId: string) => ipcRenderer.invoke('anyps5:get-game-runtime', titleId),
+  getGitHubAuthStatus: () => ipcRenderer.invoke('anyps5:github-get-auth-status'),
+  requestGitHubDeviceCode: () => ipcRenderer.invoke('anyps5:github-request-device-code'),
+  checkGitHubDeviceCode: (deviceCode: string) => ipcRenderer.invoke('anyps5:github-check-device-code', deviceCode),
+  setGitHubPersonalAccessToken: (token: string) => ipcRenderer.invoke('anyps5:github-set-pat', token),
+  disconnectGitHub: () => ipcRenderer.invoke('anyps5:github-disconnect'),
+  fetchUpstreamCommits: (args?: { repo?: string; page?: number; perPage?: number }) => ipcRenderer.invoke('anyps5:github-fetch-commits', args),
+  compareUpstreamCommits: (args?: { baseSha?: string; headRef?: string; repo?: string }) => ipcRenderer.invoke('anyps5:github-compare-commits', args),
+  downloadCommitArtifact: (commit: { sha: string; shortSha: string; message: string; date?: string }) =>
+    ipcRenderer.invoke('anyps5:github-download-commit', commit),
+  onCommitDownloadProgress: (callback: (data: { shortSha: string; status: string; progress: number; error?: string }) => void) => {
+    const handler = (_: unknown, data: any) => callback(data);
+    ipcRenderer.on('anyps5:commit-download-progress', handler);
+    return () => {
+      ipcRenderer.removeListener('anyps5:commit-download-progress', handler);
+    };
+  },
+  inspectToolchain: () => ipcRenderer.invoke('anyps5:builder-inspect-toolchain'),
+  installManagedToolchain: () => ipcRenderer.invoke('anyps5:builder-install-toolchain'),
+  onToolchainInstallProgress: (callback: (data: any) => void) => {
+    const handler = (_: unknown, data: any) => callback(data);
+    ipcRenderer.on('anyps5:builder-toolchain-progress', handler);
+    return () => {
+      ipcRenderer.removeListener('anyps5:builder-toolchain-progress', handler);
+    };
+  },
+  getSourceStatus: () => ipcRenderer.invoke('anyps5:builder-get-source-status'),
+  syncSource: () => ipcRenderer.invoke('anyps5:builder-sync-source'),
+  startBuild: () => ipcRenderer.invoke('anyps5:builder-start-build'),
+  cancelBuild: () => ipcRenderer.invoke('anyps5:builder-cancel-build'),
+  getActiveBuild: () => ipcRenderer.invoke('anyps5:builder-get-active-build'),
+  onBuilderLog: (callback: (data: any) => void) => {
+    const handler = (_: unknown, data: any) => callback(data);
+    ipcRenderer.on('anyps5:builder-log', handler);
+    return () => {
+      ipcRenderer.removeListener('anyps5:builder-log', handler);
+    };
+  },
+  onBuildStatus: (callback: (data: any) => void) => {
+    const handler = (_: unknown, data: any) => callback(data);
+    ipcRenderer.on('anyps5:builder-status', handler);
+    return () => {
+      ipcRenderer.removeListener('anyps5:builder-status', handler);
+    };
+  },
 });
+
 

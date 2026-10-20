@@ -6,36 +6,33 @@ import {
   Gamepad2, 
   Volume2, 
   Check, 
-  FileCode2,
-  HardDrive,
   RefreshCw,
   DownloadCloud,
   CheckCircle2,
   Sliders,
-  FolderSearch,
   Monitor,
   Shield,
-  Sparkles
+  Layers,
+  ArrowRight
 } from 'lucide-react';
 import { audioService } from '../services/audioService';
 import { apiBridge } from '../services/apiBridge';
-import { UpdateStatus, DetectedGpu } from '../types';
+import { UpdateStatus, DetectedGpu, ResolvedRuntime } from '../types';
 
 interface SettingsPageProps {
   onNavigateBack: () => void;
   showAdvancedNav: boolean;
   onToggleAdvancedNav: (enabled: boolean) => void;
+  onNavigateToRuntimes?: () => void;
 }
 
 export const SettingsPage: React.FC<SettingsPageProps> = ({ 
   onNavigateBack,
   showAdvancedNav,
-  onToggleAdvancedNav
+  onToggleAdvancedNav,
+  onNavigateToRuntimes
 }) => {
-  const [relinkerPath, setRelinkerPath] = useState<string>('');
-  const [prxPath, setPrxPath] = useState<string>('');
-  const [defaultRelinkerPath, setDefaultRelinkerPath] = useState<string>('');
-  const [defaultPrxPath, setDefaultPrxPath] = useState<string>('');
+  const [activeRuntime, setActiveRuntime] = useState<ResolvedRuntime | null>(null);
   const [defaultTarget, setDefaultTarget] = useState<string>('windows');
   const [cpuFix, setCpuFix] = useState<string>('intel');
   const [preferredGpu, setPreferredGpu] = useState<string>('auto');
@@ -62,12 +59,10 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
       }
     }).catch(() => {});
 
+    apiBridge.resolveRuntime().then(setActiveRuntime).catch(() => {});
+
     apiBridge.getSettings().then((settings) => {
       if (settings) {
-        if (settings.relinkerPath) setRelinkerPath(settings.relinkerPath);
-        if (settings.prxPath) setPrxPath(settings.prxPath);
-        if (settings.defaultRelinkerPath) setDefaultRelinkerPath(settings.defaultRelinkerPath);
-        if (settings.defaultPrxPath) setDefaultPrxPath(settings.defaultPrxPath);
         if (settings.defaultTarget) setDefaultTarget(settings.defaultTarget);
         if (settings.cpuFix) setCpuFix(settings.cpuFix);
         if (settings.preferredGpu) setPreferredGpu(settings.preferredGpu);
@@ -83,7 +78,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
         }
       }
     });
-  }, []);
+  }, [showAdvancedNav]);
 
   const primaryDiscreteGpu = availableGpus.find((g) => g.isDiscrete && !g.isVirtual) ||
     availableGpus.find((g) => !g.isVirtual) ||
@@ -96,29 +91,8 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
     setIsSaved(false);
   };
 
-  const handleBrowseRelinker = async () => {
-    const selected = await apiBridge.selectFile([
-      { name: 'Executable (*.exe)', extensions: ['exe'] },
-      { name: 'All Files (*.*)', extensions: ['*'] }
-    ]);
-    if (selected) {
-      setRelinkerPath(selected);
-      setIsSaved(false);
-    }
-  };
-
-  const handleBrowsePrx = async () => {
-    const selected = await apiBridge.selectGameFolder();
-    if (selected) {
-      setPrxPath(selected);
-      setIsSaved(false);
-    }
-  };
-
   const handleResetDefaults = () => {
     audioService.playNavTick();
-    if (defaultRelinkerPath) setRelinkerPath(defaultRelinkerPath);
-    if (defaultPrxPath) setPrxPath(defaultPrxPath);
     setPreferredGpu('auto');
     setDefaultTarget('windows');
     setCpuFix('intel');
@@ -147,8 +121,6 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
   const handleSave = async () => {
     audioService.playConfirm();
     await apiBridge.saveSettings({
-      relinkerPath,
-      prxPath,
       defaultTarget,
       cpuFix,
       soundEnabled,
@@ -188,7 +160,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
           <div>
             <h1 className="text-2xl font-bold tracking-tight text-white">System Settings</h1>
             <p className="text-xs text-white/50 mt-0.5">
-              Configure hardware graphics binding, architecture lowering, audio feedback, and system binaries.
+              Configure hardware graphics binding, architecture lowering, and audio feedback.
             </p>
           </div>
         </div>
@@ -300,64 +272,73 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
             </div>
           </div>
 
-          {/* Section 2: Core Engine & Middleware Paths */}
+          {/* Section 2: Runtime Engine & Libraries */}
           <div className="p-6 rounded-2xl bg-[#0b0e14]/90 border border-white/10 shadow-xl backdrop-blur-md">
-            <div className="flex items-center space-x-2.5 pb-4 border-b border-white/10 mb-5">
-              <HardDrive className="w-4 h-4 text-[#0070d1]" />
-              <h2 className="text-sm font-semibold text-white tracking-wide">Engine & Middleware Paths</h2>
+            <div className="flex items-center justify-between pb-4 border-b border-white/10 mb-5">
+              <div className="flex items-center space-x-2.5">
+                <Layers className="w-4 h-4 text-[#0070d1]" />
+                <h2 className="text-sm font-semibold text-white tracking-wide">Runtime Engine & Libraries</h2>
+              </div>
+              {activeRuntime && (
+                <span
+                  className={`px-2.5 py-0.5 rounded-full font-mono text-[10px] font-semibold border ${
+                    activeRuntime.isValid
+                      ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                      : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                  }`}
+                >
+                  {activeRuntime.isValid ? 'Engine Active' : 'Incomplete'}
+                </span>
+              )}
             </div>
 
             <div className="space-y-4">
-              <div>
-                <label className="block text-xs font-medium text-white/80 mb-1.5">Native Relinker Executable</label>
-                <div className="flex items-center space-x-2.5">
-                  <input
-                    type="text"
-                    value={relinkerPath}
-                    onChange={(e) => {
-                      setRelinkerPath(e.target.value);
-                      setIsSaved(false);
-                    }}
-                    placeholder="Loading installation path..."
-                    className="w-full px-3.5 py-2.5 rounded-xl bg-white/[0.04] border border-white/10 text-white text-xs font-mono focus:outline-none focus:border-white/30 focus:ring-1 focus:ring-white/20 transition-all"
-                  />
-                  <button
-                    type="button"
-                    onClick={handleBrowseRelinker}
-                    className="px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 text-white/90 hover:text-white text-xs font-medium border border-white/10 transition-colors flex-shrink-0"
-                  >
-                    Browse...
-                  </button>
+              <div className="p-3.5 rounded-xl bg-white/[0.03] border border-white/10 space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-white/60">Active Profile</span>
+                  <span className="font-semibold text-white">
+                    {activeRuntime?.name || 'Bundled Stable (v0.1.2)'}
+                  </span>
                 </div>
-                <p className="text-[11px] text-white/40 mt-1.5">
-                  Path to the compiled 64-bit PlayStation 5 ELF to PE/COFF dynamic relinker binary.
-                </p>
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-white/60">Profile Type</span>
+                  <span className="font-mono text-neutral-300 capitalize">
+                    {activeRuntime?.type || 'bundled'}
+                  </span>
+                </div>
+                {activeRuntime?.commitHash && (
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-white/60">Commit Reference</span>
+                    <span className="font-mono text-[#0070d1] bg-[#0070d1]/10 px-2 py-0.5 rounded border border-[#0070d1]/30">
+                      {activeRuntime.commitHash}
+                    </span>
+                  </div>
+                )}
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-white/60">Status</span>
+                  <span className="text-white/80 font-mono text-[11px]">
+                    {activeRuntime?.isValid ? 'Relinker & PRX Libraries Verified' : 'Missing binaries or libraries'}
+                  </span>
+                </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-medium text-white/80 mb-1.5">System PRX Libraries Directory</label>
-                <div className="flex items-center space-x-2.5">
-                  <input
-                    type="text"
-                    value={prxPath}
-                    onChange={(e) => {
-                      setPrxPath(e.target.value);
-                      setIsSaved(false);
-                    }}
-                    placeholder="Loading installation path..."
-                    className="w-full px-3.5 py-2.5 rounded-xl bg-white/[0.04] border border-white/10 text-white text-xs font-mono focus:outline-none focus:border-white/30 focus:ring-1 focus:ring-white/20 transition-all"
-                  />
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
+                <p className="text-[11px] text-white/40 leading-relaxed">
+                  Relinker binaries and system PRX libraries are exclusively located and managed by the Runtime Manager.
+                </p>
+                {onNavigateToRuntimes && (
                   <button
                     type="button"
-                    onClick={handleBrowsePrx}
-                    className="px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 text-white/90 hover:text-white text-xs font-medium border border-white/10 transition-colors flex-shrink-0"
+                    onClick={() => {
+                      audioService.playNavTick();
+                      onNavigateToRuntimes();
+                    }}
+                    className="flex items-center justify-center space-x-1.5 px-3.5 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-white text-xs font-medium border border-white/10 transition-colors flex-shrink-0"
                   >
-                    Browse...
+                    <span>Open Runtime Manager</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
                   </button>
-                </div>
-                <p className="text-[11px] text-white/40 mt-1.5">
-                  Directory containing clean-room libkernel.prx, libSceAgcDriver.prx, and middleware modules.
-                </p>
+                )}
               </div>
             </div>
           </div>
@@ -436,7 +417,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
                     <span className="px-2 py-0.5 rounded-full bg-white/10 text-[10px] text-white/70 font-mono">Experimental</span>
                   </div>
                   <span className="text-[11px] text-white/50 leading-relaxed mt-1">
-                    Reveals Community PR Builds, NID Inspector, PRX Libraries, and System Status in the top navigation bar.
+                    Reveals Runtime Manager, Community PR Builds, NID Inspector, PRX Libraries, and System Status in the top navigation bar.
                   </span>
                 </div>
               </label>

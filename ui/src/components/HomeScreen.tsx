@@ -19,8 +19,9 @@ import {
   Trash2,
   AlertTriangle
 } from 'lucide-react';
-import { GameItem } from '../types';
+import { GameItem, RuntimeProfile } from '../types';
 import { audioService } from '../services/audioService';
+import { apiBridge } from '../services/apiBridge';
 
 interface HomeScreenProps {
   games: GameItem[];
@@ -51,6 +52,30 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   const [sampleNoticeGame, setSampleNoticeGame] = useState<GameItem | null>(null);
   const selectedGame = games[selectedGameIndex] || games[0];
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
+
+  const [availableRuntimes, setAvailableRuntimes] = useState<RuntimeProfile[]>([]);
+  const [selectedGameRuntimeId, setSelectedGameRuntimeId] = useState<string>('inherit');
+
+  useEffect(() => {
+    if (selectedGame) {
+      apiBridge.getRuntimesManifest().then((m) => {
+        setAvailableRuntimes(m.runtimes);
+      }).catch(() => {});
+
+      apiBridge.getGameRuntime(selectedGame.titleId).then((rId) => {
+        setSelectedGameRuntimeId(rId || selectedGame.runtimeId || 'inherit');
+      }).catch(() => {});
+    }
+  }, [selectedGame, showTechnicalDrawer]);
+
+  const handleRuntimeChange = async (newRuntimeId: string) => {
+    audioService.playNavTick();
+    setSelectedGameRuntimeId(newRuntimeId);
+    if (selectedGame) {
+      selectedGame.runtimeId = newRuntimeId === 'inherit' ? undefined : newRuntimeId;
+      await apiBridge.setGameRuntime(selectedGame.titleId, newRuntimeId);
+    }
+  };
 
   // Smoothly center the active game tile when selection changes
   useEffect(() => {
@@ -458,6 +483,29 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                       <span>All core runtime dependencies resolved</span>
                     </p>
                   )}
+                </div>
+
+                <div className="p-3 rounded-xl bg-white/5 border border-white/10 space-y-1.5">
+                  <span className="text-[10px] text-blue-400 uppercase tracking-wider font-semibold block">
+                    Runtime Engine (Per-Game)
+                  </span>
+                  <select
+                    value={selectedGameRuntimeId}
+                    onChange={(e) => handleRuntimeChange(e.target.value)}
+                    className="w-full px-2.5 py-2 bg-neutral-900 border border-white/15 rounded-lg text-xs text-white focus:outline-none focus:border-blue-400"
+                  >
+                    <option value="inherit" className="bg-[#080b11] text-white">
+                      Inherit Global Default
+                    </option>
+                    {availableRuntimes.map((rt) => (
+                      <option key={rt.id} value={rt.id} className="bg-[#080b11] text-white">
+                        {rt.name} ({rt.type})
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-[10px] text-neutral-400 leading-normal">
+                    Direct Path Execution: Runs against this runtime's libs without admin prompts or symlinks.
+                  </p>
                 </div>
 
                 <div>

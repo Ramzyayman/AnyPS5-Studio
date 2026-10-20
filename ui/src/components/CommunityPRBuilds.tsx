@@ -1,24 +1,25 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   GitPullRequest,
   GitMerge,
   Check,
-  Zap,
-  Download,
+  Hammer,
   Trash2,
   ExternalLink,
   RefreshCw,
   Search,
   X,
   AlertCircle,
-  Clock,
-  GitBranch,
-  CheckSquare,
   Square,
+  CheckSquare,
   ChevronRight,
-  Layers
+  Terminal,
+  Loader2,
+  SlidersHorizontal,
+  ChevronDown,
+  Layers,
 } from 'lucide-react';
-import { CommunityPR, PRBuildDownloadProgress, MergedBuildInfo } from '../types';
+import { CommunityPR, PRBuildDownloadProgress, MergedBuildInfo, BuilderLogMessage } from '../types';
 import { apiBridge } from '../services/apiBridge';
 import { audioService } from '../services/audioService';
 
@@ -32,7 +33,7 @@ interface CommunityPRBuildsProps {
 export const CommunityPRBuilds: React.FC<CommunityPRBuildsProps> = ({
   initialSearch = '',
   onClearInitialSearch,
-  onNavigateToRelinker
+  onNavigateToRelinker,
 }) => {
   const [prs, setPrs] = useState<CommunityPR[]>([]);
   const [mergedBuilds, setMergedBuilds] = useState<MergedBuildInfo[]>([]);
@@ -44,6 +45,13 @@ export const CommunityPRBuilds: React.FC<CommunityPRBuildsProps> = ({
   const [activePRNumber, setActivePRNumber] = useState<number | null>(null);
   const [activeMergedId, setActiveMergedId] = useState<string | null>(null);
   const [selectedPRDetail, setSelectedPRDetail] = useState<CommunityPR | null>(null);
+
+  // Active build & live compiler logs state
+  const [buildingPR, setBuildingPR] = useState<number | null>(null);
+  const [showConsole, setShowConsole] = useState<boolean>(false);
+  const [logs, setLogs] = useState<BuilderLogMessage[]>([]);
+  const [autoScroll, setAutoScroll] = useState<boolean>(true);
+  const terminalBottomRef = useRef<HTMLDivElement>(null);
 
   // PR Lookup Form
   const [customPRNumber, setCustomPRNumber] = useState<string>('');
@@ -69,7 +77,7 @@ export const CommunityPRBuilds: React.FC<CommunityPRBuildsProps> = ({
     try {
       const [prData, mergedData] = await Promise.all([
         apiBridge.getCommunityPRs(targetRepo, forceRefresh),
-        apiBridge.getMergedBuilds()
+        apiBridge.getMergedBuilds(),
       ]);
       setPrs(prData);
       setMergedBuilds(mergedData);
@@ -80,7 +88,6 @@ export const CommunityPRBuilds: React.FC<CommunityPRBuildsProps> = ({
       setActivePRNumber(activePR ? activePR.number : null);
       setActiveMergedId(activeMerged ? activeMerged.id : null);
 
-      // Keep detail selection fresh if it was updated
       if (selectedPRDetail) {
         const refreshedSelected = prData.find((p) => p.number === selectedPRDetail.number);
         if (refreshedSelected) setSelectedPRDetail(refreshedSelected);
@@ -104,20 +111,50 @@ export const CommunityPRBuilds: React.FC<CommunityPRBuildsProps> = ({
   useEffect(() => {
     loadData();
 
-    const unsub = apiBridge.onPRDownloadProgress((prog) => {
+    // Check active build status for console and button rehydration
+    apiBridge.getActiveBuild().then((active) => {
+      if (active.isBuilding && active.buildingPR) {
+        setBuildingPR(active.buildingPR);
+        setShowConsole(true);
+        if (active.recentLogs && active.recentLogs.length > 0) {
+          setLogs(active.recentLogs);
+        }
+      }
+    }).catch(() => {});
+
+    // Subscribe to progress updates
+    const unsubProgress = apiBridge.onPRDownloadProgress((prog) => {
       setDownloading((prev) => ({
         ...prev,
-        [prog.prNumber]: prog
+        [prog.prNumber]: prog,
       }));
 
       if (prog.status === 'ready') {
         audioService.playConfirm();
+        setBuildingPR(null);
         loadData();
+      } else if (prog.status === 'error') {
+        setBuildingPR(null);
       }
     });
 
-    return () => unsub();
+    // Subscribe to real-time build logs from LocalBuilder
+    const unsubLogs = apiBridge.onBuilderLog((logMsg) => {
+      setLogs((prev) => [...prev, logMsg]);
+    });
+
+    return () => {
+      unsubProgress();
+      unsubLogs();
+    };
   }, []);
+
+  // Auto-scroll terminal console
+  useEffect(() => {
+    if (autoScroll && terminalBottomRef.current) {
+      terminalBottomRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [logs, autoScroll]);
 
   const filteredPRs = useMemo(() => {
     return prs.filter((pr) => {
@@ -172,17 +209,29 @@ export const CommunityPRBuilds: React.FC<CommunityPRBuildsProps> = ({
     }
   };
 
-  const handleDownload = async (pr: CommunityPR, e?: React.MouseEvent) => {
+  const handleBuildPR = async (pr: CommunityPR, e?: React.MouseEvent) => {
     e?.stopPropagation();
+    if (buildingPR !== null) return;
+
     audioService.playNavTick();
+    setBuildingPR(pr.number);
+    setShowConsole(true);
+    setLogs([]);
+
     setDownloading((prev) => ({
       ...prev,
-      [pr.number]: { prNumber: pr.number, status: 'downloading', progress: 10 }
+      [pr.number]: {
+        prNumber: pr.number,
+        status: 'configuring',
+        progress: 5,
+        message: 'Initializing build environment...',
+      },
     }));
 
     try {
-      const res = await apiBridge.downloadPRBuild(pr.number, pr.artifactUrl);
+      const res = await apiBridge.buildPR(pr.number, pr.headSha, pr.title);
       if (res.success) {
+        audioService.playConfirm();
         setDownloading((prev) => {
           const next = { ...prev };
           delete next[pr.number];
@@ -192,14 +241,41 @@ export const CommunityPRBuilds: React.FC<CommunityPRBuildsProps> = ({
       } else {
         setDownloading((prev) => ({
           ...prev,
-          [pr.number]: { prNumber: pr.number, status: 'error', progress: 0, error: res.error }
+          [pr.number]: {
+            prNumber: pr.number,
+            status: 'error',
+            progress: 0,
+            error: res.error || 'Build process failed.',
+          },
         }));
       }
     } catch (err: any) {
       setDownloading((prev) => ({
         ...prev,
-        [pr.number]: { prNumber: pr.number, status: 'error', progress: 0, error: err?.message || 'Download failed' }
+        [pr.number]: {
+          prNumber: pr.number,
+          status: 'error',
+          progress: 0,
+          error: err?.message || 'Compilation failed.',
+        },
       }));
+    } finally {
+      setBuildingPR(null);
+      await loadData();
+    }
+  };
+
+  const handleCancelBuild = async (e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    audioService.playNavTick();
+    await apiBridge.cancelBuild();
+    setBuildingPR(null);
+    if (buildingPR) {
+      setDownloading((prev) => {
+        const next = { ...prev };
+        delete next[buildingPR];
+        return next;
+      });
     }
   };
 
@@ -285,9 +361,11 @@ export const CommunityPRBuilds: React.FC<CommunityPRBuildsProps> = ({
     setMergeError(null);
     setMergeProgress(15);
     setMergeStatusText(`Staging ${numbers.length} PR branches into combined workspace...`);
+    setShowConsole(true);
+    setLogs([]);
 
     try {
-      setMergeProgress(40);
+      setMergeProgress(35);
       setMergeStatusText(`Merging PRs #${numbers.join(', #')} sequentially...`);
       const res = await apiBridge.mergeAndBuildPRs(numbers);
 
@@ -319,7 +397,7 @@ export const CommunityPRBuilds: React.FC<CommunityPRBuildsProps> = ({
 
     try {
       const res = await fetch(`https://api.github.com/repos/${selectedRepo}/pulls/${num}`, {
-        headers: { 'Accept': 'application/vnd.github.v3+json' }
+        headers: { Accept: 'application/vnd.github.v3+json' },
       });
 
       if (res.ok) {
@@ -331,7 +409,7 @@ export const CommunityPRBuilds: React.FC<CommunityPRBuildsProps> = ({
           author: {
             login: item.user?.login || 'contributor',
             avatar_url: item.user?.avatar_url || '',
-            html_url: item.user?.html_url || ''
+            html_url: item.user?.html_url || '',
           },
           html_url: item.html_url,
           state: item.state,
@@ -341,10 +419,9 @@ export const CommunityPRBuilds: React.FC<CommunityPRBuildsProps> = ({
           headSha: item.head?.sha?.substring(0, 7) || 'HEAD',
           headBranch: item.head?.ref || 'main',
           labels: (item.labels || []).map((l: any) => ({ name: l.name, color: l.color })),
-          artifactAvailable: true,
-          artifactSizeMb: 15.0,
+          artifactAvailable: false,
           isInstalled: false,
-          isActive: false
+          isActive: false,
         };
 
         setPrs((prev) => {
@@ -370,7 +447,6 @@ export const CommunityPRBuilds: React.FC<CommunityPRBuildsProps> = ({
 
   return (
     <div className="relative w-full h-full flex flex-col pt-20 px-4 sm:px-6 md:px-8 lg:px-12 xl:px-16 pb-8 overflow-hidden select-none bg-[#07090e] text-white">
-      
       {/* Top Section: Breadcrumb & Title with Active Runtime Status */}
       <div className="w-full flex flex-col md:flex-row md:items-end justify-between pb-4 border-b border-white/5 gap-4">
         <div>
@@ -402,7 +478,7 @@ export const CommunityPRBuilds: React.FC<CommunityPRBuildsProps> = ({
                 ? activeMerged.name
                 : activePR
                 ? `PR #${activePR.number} (${activePR.headBranch})`
-                : 'Official Stable v1.0.0'}
+                : 'Official Bundled Stable'}
             </span>
 
             {(activePR || activeMerged) && (
@@ -415,6 +491,21 @@ export const CommunityPRBuilds: React.FC<CommunityPRBuildsProps> = ({
               </button>
             )}
           </div>
+
+          <button
+            type="button"
+            onClick={() => setShowConsole(!showConsole)}
+            className={`px-3 py-1.5 rounded-lg text-xs font-mono border transition-colors flex items-center space-x-1.5 ${
+              showConsole
+                ? 'bg-white/15 text-white border-white/30'
+                : 'bg-white/5 hover:bg-white/10 text-neutral-300 hover:text-white border-white/10'
+            }`}
+            title="Toggle Live Compiler Console"
+          >
+            <Terminal className="w-3.5 h-3.5" />
+            <span>Console</span>
+            {buildingPR && <Loader2 className="w-3 h-3 animate-spin text-amber-400 ml-1" />}
+          </button>
 
           <button
             type="button"
@@ -447,7 +538,6 @@ export const CommunityPRBuilds: React.FC<CommunityPRBuildsProps> = ({
 
       {/* Toolbar: Repository Source Switcher, Search Input, Direct PR Query, Filter Tabs */}
       <div className="w-full flex flex-wrap items-center justify-between gap-3 py-3 border-b border-white/5">
-        
         {/* Left: Search input & Direct PR Query */}
         <div className="flex items-center space-x-2 flex-1 min-w-[280px] max-w-lg">
           <div className="relative flex-1">
@@ -493,7 +583,6 @@ export const CommunityPRBuilds: React.FC<CommunityPRBuildsProps> = ({
 
         {/* Right: Repository Source & Filter Tabs */}
         <div className="flex flex-wrap items-center gap-3">
-          
           {/* Source Toggle */}
           <div className="flex items-center bg-black/60 p-0.5 rounded-lg border border-white/10 text-xs">
             <button
@@ -537,7 +626,7 @@ export const CommunityPRBuilds: React.FC<CommunityPRBuildsProps> = ({
                 }`}
               >
                 {tab === 'installed'
-                  ? `Installed (${installedCount})`
+                  ? `Built (${installedCount})`
                   : tab === 'merged-builds'
                   ? `Combined (${mergedBuilds.length})`
                   : tab}
@@ -549,10 +638,8 @@ export const CommunityPRBuilds: React.FC<CommunityPRBuildsProps> = ({
 
       {/* Main Content Area: Master List + Context Inspector Pane */}
       <div className="flex-1 flex overflow-hidden pt-3 gap-6">
-        
         {/* Left Column: Dense, Structured PR List Table */}
         <div className="flex-1 flex flex-col h-full overflow-hidden">
-          
           {/* Table Header Row */}
           {filter === 'merged-builds' ? (
             <div className="flex items-center justify-between px-4 py-1.5 text-[11px] font-mono text-neutral-500 border-b border-white/5 uppercase tracking-wider">
@@ -572,16 +659,15 @@ export const CommunityPRBuilds: React.FC<CommunityPRBuildsProps> = ({
                 </button>
                 <span>Pull Request</span>
               </div>
-              <div className="flex items-center pr-2">
-                <span className="w-40 text-right pr-10">Artifact</span>
-                <span className="w-32 text-right">Actions</span>
+              <div className="flex items-center pr-2 space-x-2 sm:space-x-4">
+                <span className="w-24 sm:w-36 text-right pr-2 sm:pr-8">Status</span>
+                <span className="min-w-[90px] sm:min-w-[120px] text-right">Actions</span>
               </div>
             </div>
           )}
 
           {/* Scrollable Rows */}
           <div className="flex-1 overflow-y-auto divide-y divide-white/5">
-            
             {/* VIEW 1: COMBINED BUILDS TAB */}
             {filter === 'merged-builds' ? (
               mergedBuilds.length === 0 ? (
@@ -622,20 +708,34 @@ export const CommunityPRBuilds: React.FC<CommunityPRBuildsProps> = ({
 
                     <div className="flex items-center space-x-2">
                       {mb.isActive ? (
-                        <button
-                          type="button"
-                          onClick={handleRevert}
-                          className="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-white text-xs font-medium transition-colors"
-                        >
-                          Deactivate
-                        </button>
+                        <>
+                          <button
+                            type="button"
+                            onClick={handleRevert}
+                            className="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-white text-xs font-medium transition-colors"
+                          >
+                            Deactivate
+                          </button>
+                          {onNavigateToRelinker && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                audioService.playNavTick();
+                                onNavigateToRelinker();
+                              }}
+                              className="px-3 py-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 text-xs font-medium border border-emerald-500/20 transition-colors"
+                            >
+                              Open in Relinker
+                            </button>
+                          )}
+                        </>
                       ) : (
                         <button
                           type="button"
                           onClick={(e) => handleActivateMerged(mb.id, e)}
                           className="px-3 py-1.5 rounded-lg bg-white text-black hover:bg-neutral-200 text-xs font-semibold transition-all shadow-sm"
                         >
-                          Activate
+                          Build
                         </button>
                       )}
                       <button
@@ -655,7 +755,7 @@ export const CommunityPRBuilds: React.FC<CommunityPRBuildsProps> = ({
               loading && prs.length === 0 ? (
                 <div className="h-64 flex flex-col items-center justify-center space-y-3">
                   <RefreshCw className="w-5 h-5 text-neutral-500 animate-spin" />
-                  <p className="text-xs text-neutral-400 font-mono">Querying GitHub Actions CI & pull requests...</p>
+                  <p className="text-xs text-neutral-400 font-mono">Querying GitHub pull requests...</p>
                 </div>
               ) : filteredPRs.length === 0 ? (
                 <div className="h-64 flex flex-col items-center justify-center space-y-2 text-center">
@@ -677,8 +777,8 @@ export const CommunityPRBuilds: React.FC<CommunityPRBuildsProps> = ({
                   const isActive = pr.isActive;
                   const isSelectedForMerge = selectedPRNumbers.has(pr.number);
                   const isInspected = selectedPRDetail?.number === pr.number;
+                  const isCompiling = buildingPR === pr.number;
                   const progressObj = downloading[pr.number];
-                  const isDownloading = progressObj && progressObj.status === 'downloading';
 
                   return (
                     <div
@@ -749,21 +849,62 @@ export const CommunityPRBuilds: React.FC<CommunityPRBuildsProps> = ({
                         </div>
                       </div>
 
-                      {/* Right: Branch Info, CI size, Actions */}
-                      <div className="flex items-center shrink-0 pr-2">
-                        <span className="hidden lg:inline text-[11px] font-mono text-neutral-500 w-40 text-right pr-10">
-                          {isInstalled ? `${pr.artifactSizeMb || 15} MB on disk` : `~${pr.artifactSizeMb || 15} MB`}
-                        </span>
+                      {/* Right: Status column + Actions */}
+                      <div className="flex items-center shrink-0 pr-2 space-x-2 sm:space-x-4">
+                        {/* Status Column */}
+                        <div className="w-24 sm:w-36 text-right pr-2 sm:pr-8 flex justify-end items-center">
+                          {isCompiling ? (
+                            <span className="text-amber-400 font-mono text-[11px] flex items-center space-x-1.5 whitespace-nowrap">
+                              <Loader2 className="w-3 h-3 animate-spin shrink-0" />
+                              <span className="hidden sm:inline">Compiling</span>
+                              <span>({progressObj?.progress || 0}%)</span>
+                            </span>
+                          ) : isActive ? (
+                            <span className="text-emerald-400 font-mono text-[11px] font-semibold flex items-center space-x-1 whitespace-nowrap">
+                              <Check className="w-3 h-3 shrink-0" />
+                              <span>Active</span>
+                            </span>
+                          ) : isInstalled ? (
+                            <span className="text-neutral-300 font-mono text-[11px] whitespace-nowrap">
+                              Ready
+                            </span>
+                          ) : (
+                            <span className="text-neutral-500 font-mono text-[11px] whitespace-nowrap">
+                              Not Built
+                            </span>
+                          )}
+                        </div>
 
-                        <div className="flex items-center space-x-1.5 w-32 justify-end" onClick={(e) => e.stopPropagation()}>
-                          {isInstalled ? (
+                        {/* Action Buttons */}
+                        <div
+                          className="flex items-center space-x-1 sm:space-x-1.5 min-w-[90px] sm:min-w-[120px] justify-end shrink-0"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {isCompiling ? (
+                            <button
+                              type="button"
+                              onClick={handleCancelBuild}
+                              className="px-2 sm:px-2.5 py-1 rounded bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 text-xs font-medium border border-rose-500/20 transition-colors whitespace-nowrap"
+                            >
+                              Cancel
+                            </button>
+                          ) : isInstalled ? (
                             <>
                               {isActive ? (
                                 <button
                                   type="button"
                                   onClick={handleRevert}
-                                  className="px-2.5 py-1 rounded bg-white/10 hover:bg-white/15 text-neutral-300 hover:text-white text-xs font-medium transition-colors"
-                                  title="Revert to official default relinker"
+                                  disabled={buildingPR !== null}
+                                  className={`px-2 sm:px-2.5 py-1 rounded text-xs font-medium transition-colors whitespace-nowrap ${
+                                    buildingPR !== null
+                                      ? 'bg-white/5 text-neutral-500 cursor-not-allowed opacity-40'
+                                      : 'bg-white/10 hover:bg-white/15 text-neutral-300 hover:text-white cursor-pointer'
+                                  }`}
+                                  title={
+                                    buildingPR !== null
+                                      ? `Build in progress (PR #${buildingPR})`
+                                      : 'Revert to official default relinker'
+                                  }
                                 >
                                   Revert
                                 </button>
@@ -771,18 +912,32 @@ export const CommunityPRBuilds: React.FC<CommunityPRBuildsProps> = ({
                                 <button
                                   type="button"
                                   onClick={(e) => handleActivatePR(pr.number, e)}
-                                  className="px-2.5 py-1 rounded bg-white text-black hover:bg-neutral-200 text-xs font-semibold transition-all shadow-sm"
-                                  title="Activate this build as current relinker"
+                                  disabled={buildingPR !== null}
+                                  className={`px-2.5 py-1 rounded text-xs font-semibold transition-all shadow-sm whitespace-nowrap ${
+                                    buildingPR !== null
+                                      ? 'bg-white/10 text-neutral-500 cursor-not-allowed opacity-40'
+                                      : 'bg-white text-black hover:bg-neutral-200 cursor-pointer'
+                                  }`}
+                                  title={
+                                    buildingPR !== null
+                                      ? `Build in progress (PR #${buildingPR})`
+                                      : 'Activate this build as current relinker'
+                                  }
                                 >
-                                  Activate
+                                  Build
                                 </button>
                               )}
 
                               <button
                                 type="button"
                                 onClick={(e) => handleDeletePR(pr.number, e)}
-                                className="p-1.5 rounded text-neutral-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
-                                title="Delete downloaded build from disk"
+                                disabled={buildingPR !== null}
+                                className={`p-1 sm:p-1.5 rounded transition-colors shrink-0 ${
+                                  buildingPR !== null
+                                    ? 'text-neutral-600 cursor-not-allowed opacity-40'
+                                    : 'text-neutral-500 hover:text-rose-400 hover:bg-rose-500/10 cursor-pointer'
+                                }`}
+                                title="Delete compiled build from disk"
                               >
                                 <Trash2 className="w-3.5 h-3.5" />
                               </button>
@@ -790,19 +945,33 @@ export const CommunityPRBuilds: React.FC<CommunityPRBuildsProps> = ({
                           ) : (
                             <button
                               type="button"
-                              onClick={(e) => handleDownload(pr, e)}
-                              disabled={isDownloading}
-                              className="px-2.5 py-1 rounded bg-white/5 hover:bg-white/10 text-neutral-300 hover:text-white text-xs font-medium border border-white/10 transition-colors flex items-center space-x-1.5 disabled:opacity-50"
+                              onClick={(e) => handleBuildPR(pr, e)}
+                              disabled={buildingPR !== null}
+                              className={`px-2 sm:px-2.5 py-1 rounded text-xs font-medium border transition-colors flex items-center space-x-1 sm:space-x-1.5 whitespace-nowrap ${
+                                buildingPR === pr.number
+                                  ? 'bg-blue-500/20 border-blue-500/40 text-blue-300 cursor-not-allowed shadow-sm'
+                                  : buildingPR !== null
+                                  ? 'bg-white/5 border-white/5 text-neutral-500 cursor-not-allowed opacity-40'
+                                  : 'bg-white/5 hover:bg-white/10 text-neutral-300 hover:text-white border-white/10 cursor-pointer'
+                              }`}
+                              title={
+                                buildingPR === pr.number
+                                  ? `Compiling PR #${pr.number}...`
+                                  : buildingPR !== null
+                                  ? `Build in progress (PR #${buildingPR})`
+                                  : 'Compile this PR locally using CMake + Ninja'
+                              }
                             >
-                              {isDownloading ? (
+                              {buildingPR === pr.number ? (
                                 <>
-                                  <RefreshCw className="w-3 h-3 animate-spin" />
-                                  <span>{progressObj.progress}%</span>
+                                  <Loader2 className="w-3 h-3 animate-spin text-blue-400 shrink-0" />
+                                  <span>Compiling...</span>
                                 </>
                               ) : (
                                 <>
-                                  <Download className="w-3 h-3 text-neutral-400" />
-                                  <span>Download</span>
+                                  <Hammer className="w-3 h-3 text-neutral-400 shrink-0" />
+                                  <span className="hidden sm:inline">Build PR</span>
+                                  <span className="sm:hidden">Build</span>
                                 </>
                               )}
                             </button>
@@ -832,7 +1001,6 @@ export const CommunityPRBuilds: React.FC<CommunityPRBuildsProps> = ({
         {/* Right Column: Contextual PR Inspector Drawer */}
         {selectedPRDetail && (
           <div className="w-80 lg:w-96 shrink-0 flex flex-col h-full bg-[#0b0e14] border border-white/10 rounded-xl p-4 overflow-y-auto animate-fade-in text-xs space-y-4">
-            
             {/* Header: PR # & Close */}
             <div className="flex items-center justify-between pb-3 border-b border-white/5">
               <div className="flex items-center space-x-2">
@@ -876,17 +1044,25 @@ export const CommunityPRBuilds: React.FC<CommunityPRBuildsProps> = ({
                 <span className="text-neutral-300">{selectedPRDetail.headSha}</span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-neutral-500">Artifact Size</span>
-                <span className="text-neutral-300">
-                  {selectedPRDetail.isInstalled
-                    ? `${selectedPRDetail.artifactSizeMb || 15} MB (local binary)`
-                    : `~${selectedPRDetail.artifactSizeMb || 15} MB (estimate)`}
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
                 <span className="text-neutral-500">Status</span>
-                <span className={selectedPRDetail.isInstalled ? (selectedPRDetail.isActive ? 'text-emerald-400 font-semibold' : 'text-neutral-300') : 'text-neutral-500'}>
-                  {selectedPRDetail.isActive ? 'Active Runtime' : selectedPRDetail.isInstalled ? 'Installed Locally' : 'Not Installed'}
+                <span
+                  className={
+                    selectedPRDetail.isInstalled
+                      ? selectedPRDetail.isActive
+                        ? 'text-emerald-400 font-semibold'
+                        : 'text-neutral-300'
+                      : buildingPR === selectedPRDetail.number
+                      ? 'text-amber-400'
+                      : 'text-neutral-500'
+                  }
+                >
+                  {selectedPRDetail.isActive
+                    ? 'Active Engine'
+                    : selectedPRDetail.isInstalled
+                    ? 'Ready (Built)'
+                    : buildingPR === selectedPRDetail.number
+                    ? 'Compiling...'
+                    : 'Not Built'}
                 </span>
               </div>
             </div>
@@ -906,42 +1082,92 @@ export const CommunityPRBuilds: React.FC<CommunityPRBuildsProps> = ({
               {selectedPRDetail.isInstalled ? (
                 <div className="space-y-2">
                   {selectedPRDetail.isActive ? (
-                    <button
-                      type="button"
-                      onClick={handleRevert}
-                      className="w-full py-2 rounded-lg bg-white/10 hover:bg-white/15 text-white font-medium text-xs transition-colors"
-                    >
-                      Revert Runtime (Back to Default)
-                    </button>
+                    <>
+                      <button
+                        type="button"
+                        onClick={handleRevert}
+                        className="w-full py-2 rounded-lg bg-white/10 hover:bg-white/15 text-white font-medium text-xs transition-colors"
+                      >
+                        Revert to Default Runtime
+                      </button>
+                      {onNavigateToRelinker && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            audioService.playNavTick();
+                            onNavigateToRelinker();
+                          }}
+                          className="w-full py-2 rounded-lg bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 font-semibold text-xs border border-emerald-500/30 transition-colors"
+                        >
+                          Open in Relinker Studio
+                        </button>
+                      )}
+                    </>
                   ) : (
                     <button
                       type="button"
                       onClick={() => handleActivatePR(selectedPRDetail.number)}
-                      className="w-full py-2 rounded-lg bg-white text-black hover:bg-neutral-200 font-semibold text-xs transition-all shadow-sm"
+                      disabled={buildingPR !== null}
+                      className={`w-full py-2 rounded-lg font-semibold text-xs transition-all shadow-sm ${
+                        buildingPR !== null
+                          ? 'bg-white/10 text-neutral-500 cursor-not-allowed opacity-40'
+                          : 'bg-white text-black hover:bg-neutral-200 cursor-pointer'
+                      }`}
+                      title={
+                        buildingPR !== null
+                          ? `Build in progress (PR #${buildingPR})`
+                          : 'Use Build as Active Engine'
+                      }
                     >
-                      Activate This Build
+                      Use Build as Active Engine
                     </button>
                   )}
 
                   <button
                     type="button"
                     onClick={() => handleDeletePR(selectedPRDetail.number)}
-                    className="w-full py-1.5 rounded-lg border border-rose-500/20 bg-rose-500/5 hover:bg-rose-500/15 text-rose-400 hover:text-rose-300 font-medium text-xs transition-colors flex items-center justify-center space-x-1.5"
+                    disabled={buildingPR !== null}
+                    className={`w-full py-1.5 rounded-lg border font-medium text-xs transition-colors flex items-center justify-center space-x-1.5 ${
+                      buildingPR !== null
+                        ? 'border-white/5 bg-white/[0.02] text-neutral-600 cursor-not-allowed opacity-40'
+                        : 'border-rose-500/20 bg-rose-500/5 hover:bg-rose-500/15 text-rose-400 hover:text-rose-300 cursor-pointer'
+                    }`}
                   >
                     <Trash2 className="w-3.5 h-3.5" />
-                    <span>Delete Downloaded Build from Disk</span>
+                    <span>Delete Compiled Build from Disk</span>
                   </button>
                 </div>
               ) : (
                 <button
                   type="button"
-                  onClick={() => handleDownload(selectedPRDetail)}
-                  disabled={downloading[selectedPRDetail.number]?.status === 'downloading'}
-                  className="w-full py-2 rounded-lg bg-white text-black hover:bg-neutral-200 font-semibold text-xs transition-all shadow-sm disabled:opacity-50"
+                  onClick={() => handleBuildPR(selectedPRDetail)}
+                  disabled={buildingPR !== null}
+                  className={`w-full py-2 rounded-lg font-semibold text-xs transition-all shadow-sm flex items-center justify-center space-x-1.5 ${
+                    buildingPR === selectedPRDetail.number
+                      ? 'bg-blue-500/20 border border-blue-500/40 text-blue-300 cursor-not-allowed opacity-90'
+                      : buildingPR !== null
+                      ? 'bg-white/5 border border-white/5 text-neutral-500 cursor-not-allowed opacity-40'
+                      : 'bg-white text-black hover:bg-neutral-200 cursor-pointer'
+                  }`}
+                  title={
+                    buildingPR === selectedPRDetail.number
+                      ? `Compiling PR #${selectedPRDetail.number}...`
+                      : buildingPR !== null
+                      ? `Another build is currently in progress (PR #${buildingPR})`
+                      : 'Build PR with Local Builder'
+                  }
                 >
-                  {downloading[selectedPRDetail.number]?.status === 'downloading'
-                    ? `Downloading (${downloading[selectedPRDetail.number]?.progress || 0}%)...`
-                    : 'Download CI Binary'}
+                  {buildingPR === selectedPRDetail.number ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-400" />
+                      <span>Compiling...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Hammer className="w-3.5 h-3.5" />
+                      <span>Build PR with Local Builder</span>
+                    </>
+                  )}
                 </button>
               )}
 
@@ -955,7 +1181,9 @@ export const CommunityPRBuilds: React.FC<CommunityPRBuildsProps> = ({
                       : 'bg-white/[0.03] border-white/10 text-neutral-400 hover:text-white'
                   }`}
                 >
-                  {selectedPRNumbers.has(selectedPRDetail.number) ? 'Deselect from Multi-Build' : 'Select for Multi-Build'}
+                  {selectedPRNumbers.has(selectedPRDetail.number)
+                    ? 'Deselect from Multi-Build'
+                    : 'Select for Multi-Build'}
                 </button>
 
                 <button
@@ -975,6 +1203,85 @@ export const CommunityPRBuilds: React.FC<CommunityPRBuildsProps> = ({
         )}
       </div>
 
+      {/* Embedded Live Compiler Console Drawer */}
+      {showConsole && (
+        <div className="w-full mt-4 h-52 bg-[#090c10] border border-white/10 rounded-xl flex flex-col overflow-hidden text-xs font-mono animate-fade-in shadow-2xl">
+          {/* Console Header */}
+          <div className="flex items-center justify-between px-3 py-2 bg-neutral-900 border-b border-white/5">
+            <div className="flex items-center space-x-2">
+              <Terminal className="w-3.5 h-3.5 text-neutral-400" />
+              <span className="text-xs text-neutral-300 font-semibold">
+                Native Compiler Console
+                {buildingPR ? ` (PR #${buildingPR}: CMake / Ninja)` : ''}
+              </span>
+              {buildingPR && (
+                <span className="px-1.5 py-0.5 rounded text-[10px] bg-amber-500/20 text-amber-400 flex items-center space-x-1">
+                  <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                  <span>Compiling</span>
+                </span>
+              )}
+            </div>
+
+            <div className="flex items-center space-x-2">
+              {buildingPR && (
+                <button
+                  type="button"
+                  onClick={handleCancelBuild}
+                  className="px-2 py-0.5 rounded bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 text-[11px] font-sans border border-rose-500/20 transition-colors"
+                >
+                  Cancel Build
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setLogs([])}
+                className="px-2 py-0.5 rounded bg-white/5 hover:bg-white/10 text-neutral-400 hover:text-white text-[11px] font-sans transition-colors"
+              >
+                Clear
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowConsole(false)}
+                className="p-1 rounded hover:bg-white/10 text-neutral-400 hover:text-white"
+                title="Hide Console"
+              >
+                <ChevronDown className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+
+          {/* Console Output */}
+          <div className="flex-1 overflow-y-auto p-3 space-y-1 text-[11px] leading-relaxed bg-[#05070a]">
+            {logs.length === 0 ? (
+              <div className="text-neutral-600 italic">
+                {buildingPR
+                  ? 'Initializing build process and fetching PR ref from Git...'
+                  : 'Ready. Click "Build PR" on any pull request to begin local compilation.'}
+              </div>
+            ) : (
+              logs.map((msg, i) => (
+                <div
+                  key={i}
+                  className={
+                    msg.type === 'error'
+                      ? 'text-rose-400'
+                      : msg.type === 'info'
+                      ? 'text-neutral-300 font-semibold'
+                      : msg.type === 'stderr'
+                      ? 'text-amber-300/80'
+                      : 'text-neutral-400'
+                  }
+                >
+                  <span className="text-neutral-600 mr-2">[{msg.timestamp}]</span>
+                  <span>{msg.text}</span>
+                </div>
+              ))
+            )}
+            <div ref={terminalBottomRef} />
+          </div>
+        </div>
+      )}
+
       {/* Contextual Floating Dock: Multi-PR Merge Operations */}
       {selectedPRNumbers.size > 0 && filter !== 'merged-builds' && (
         <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-40 bg-[#0e121a] border border-white/15 shadow-2xl rounded-2xl px-5 py-3 flex items-center space-x-4 animate-fade-in backdrop-blur-md">
@@ -992,7 +1299,7 @@ export const CommunityPRBuilds: React.FC<CommunityPRBuildsProps> = ({
 
           {isMerging ? (
             <div className="flex items-center space-x-3 text-xs text-neutral-300 font-mono">
-              <RefreshCw className="w-3.5 h-3.5 animate-spin text-white" />
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-white" />
               <span>{mergeStatusText || 'Merging...'}</span>
               <span className="text-white font-semibold">{mergeProgress}%</span>
             </div>
@@ -1011,7 +1318,17 @@ export const CommunityPRBuilds: React.FC<CommunityPRBuildsProps> = ({
               <button
                 type="button"
                 onClick={handleMergeAndBuild}
-                className="px-4 py-1.5 rounded-lg bg-white text-black hover:bg-neutral-200 text-xs font-bold transition-all shadow-md flex items-center space-x-1.5"
+                disabled={isMerging || buildingPR !== null}
+                className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all shadow-md flex items-center space-x-1.5 ${
+                  isMerging || buildingPR !== null
+                    ? 'bg-white/10 text-neutral-500 cursor-not-allowed opacity-40'
+                    : 'bg-white text-black hover:bg-neutral-200 cursor-pointer'
+                }`}
+                title={
+                  buildingPR !== null
+                    ? `Build in progress (PR #${buildingPR})`
+                    : 'Merge & Build Combined Binary'
+                }
               >
                 <GitMerge className="w-3.5 h-3.5" />
                 <span>Merge & Build Combined Binary</span>

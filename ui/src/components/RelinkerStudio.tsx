@@ -10,7 +10,7 @@ import {
   ChevronDown,
   ChevronUp
 } from 'lucide-react';
-import { GameItem, RelinkerOptions, ConversionStage, ConversionLog, SystemTelemetry } from '../types';
+import { GameItem, RelinkerOptions, ConversionStage, ConversionLog, SystemTelemetry, RuntimeProfile } from '../types';
 import { apiBridge } from '../services/apiBridge';
 import { audioService } from '../services/audioService';
 
@@ -63,6 +63,13 @@ export const RelinkerStudio: React.FC<RelinkerStudioProps> = ({
 
   // System Telemetry State
   const [telemetry, setTelemetry] = useState<SystemTelemetry | null>(null);
+  const [availableRuntimes, setAvailableRuntimes] = useState<RuntimeProfile[]>([]);
+
+  useEffect(() => {
+    apiBridge.getRuntimesManifest().then((m) => {
+      setAvailableRuntimes(m.runtimes);
+    }).catch(() => {});
+  }, []);
 
   const isLinuxHost = (typeof navigator !== 'undefined' && navigator.userAgent.includes('Linux'));
 
@@ -152,11 +159,15 @@ export const RelinkerStudio: React.FC<RelinkerStudioProps> = ({
   }, []);
 
   // Update game when prop changes
+  const prevGameIdRef = useRef<string>(initialGame.id);
   useEffect(() => {
-    setSelectedGame(initialGame);
-    setExecutionState('idle');
-    setErrorMessage(null);
-  }, [initialGame]);
+    if (initialGame.id !== prevGameIdRef.current) {
+      prevGameIdRef.current = initialGame.id;
+      setSelectedGame(initialGame);
+      setExecutionState('idle');
+      setErrorMessage(null);
+    }
+  }, [initialGame.id]);
 
   // Scroll logs when updated
   useEffect(() => {
@@ -469,6 +480,16 @@ export const RelinkerStudio: React.FC<RelinkerStudioProps> = ({
                             <span className="text-neutral-200">Clean Window (GUI)</span>
                           </div>
                         )}
+                        <div className="flex justify-between border-b border-white/5 pb-1">
+                          <span className="text-neutral-500">Runtime Engine:</span>
+                          <span className="text-neutral-200">
+                            {options.runtimeId
+                              ? (availableRuntimes.find(r => r.id === options.runtimeId)?.name || options.runtimeId)
+                              : selectedGame.runtimeId
+                              ? (availableRuntimes.find(r => r.id === selectedGame.runtimeId)?.name || selectedGame.runtimeId)
+                              : 'Inherit Global Default'}
+                          </span>
+                        </div>
                         <div className="flex justify-between border-b border-white/5 pb-1">
                           <span className="text-neutral-500">CPU Translation:</span>
                           <span className="text-neutral-200">
@@ -940,6 +961,32 @@ export const RelinkerStudio: React.FC<RelinkerStudioProps> = ({
                     </button>
                   ))}
                 </div>
+              </div>
+
+              {/* Runtime Engine Selection */}
+              <div>
+                <label className="block text-xs font-medium text-neutral-300 mb-1">
+                  Runtime Engine / Relinker Version
+                  <span className="text-[10px] text-neutral-500 font-mono ml-2">(runtime-engine)</span>
+                </label>
+                <select
+                  value={options.runtimeId || selectedGame.runtimeId || 'inherit'}
+                  onChange={(e) => {
+                    audioService.playNavTick();
+                    const val = e.target.value;
+                    setOptions(o => ({ ...o, runtimeId: val === 'inherit' ? undefined : val }));
+                  }}
+                  className="w-full px-3 py-2 bg-black/40 border border-white/10 rounded-xl text-xs text-white focus:outline-none focus:border-white/30"
+                >
+                  <option value="inherit" className="bg-[#080b11] text-white">
+                    Inherit Global Default
+                  </option>
+                  {availableRuntimes.map(rt => (
+                    <option key={rt.id} value={rt.id} className="bg-[#080b11] text-white">
+                      {rt.name} ({rt.type})
+                    </option>
+                  ))}
+                </select>
               </div>
 
               {/* Diagnostics & Call Tracing */}

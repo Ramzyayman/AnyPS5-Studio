@@ -9,6 +9,7 @@ import { GameLauncherModal } from './components/GameLauncherModal';
 import { AddGameModal } from './components/AddGameModal';
 import { SettingsPage } from './components/SettingsPage';
 import { CommunityPRBuilds } from './components/CommunityPRBuilds';
+import { RuntimeManager } from './components/RuntimeManager';
 import { GameItem } from './types';
 import { apiBridge } from './services/apiBridge';
 import { audioService } from './services/audioService';
@@ -16,7 +17,7 @@ import { CheckCircle2, X } from 'lucide-react';
 
 import { INITIAL_GAMES } from './services/sampleData';
 
-export type ActiveTab = 'games' | 'relinker' | 'community' | 'nid' | 'prx' | 'telemetry' | 'settings';
+export type ActiveTab = 'games' | 'relinker' | 'runtimes' | 'community' | 'nid' | 'prx' | 'telemetry' | 'settings';
 
 export const App: React.FC = () => {
   const [games, setGames] = useState<GameItem[]>([]);
@@ -48,7 +49,7 @@ export const App: React.FC = () => {
     }
     apiBridge.saveSettings({ advanced: enabled }).catch(() => {});
     // If user is currently viewing an advanced section and disables Advanced, navigate safely to Games
-    if (!enabled && ['nid', 'prx', 'telemetry', 'community'].includes(activeTab)) {
+    if (!enabled && ['nid', 'prx', 'telemetry', 'community', 'runtimes'].includes(activeTab)) {
       setActiveTab('games');
     }
   };
@@ -77,8 +78,8 @@ export const App: React.FC = () => {
     return () => unsub();
   }, []);
 
-  const availableTabs: ('games' | 'relinker' | 'community' | 'nid' | 'prx' | 'telemetry')[] = showAdvancedNav
-    ? ['games', 'relinker', 'community', 'nid', 'prx', 'telemetry']
+  const availableTabs: ('games' | 'relinker' | 'runtimes' | 'community' | 'nid' | 'prx' | 'telemetry')[] = showAdvancedNav
+    ? ['games', 'relinker', 'runtimes', 'community', 'nid', 'prx', 'telemetry']
     : ['games', 'relinker'];
 
   // Keyboard navigation for authentic console feel
@@ -283,7 +284,7 @@ export const App: React.FC = () => {
   return (
     <div className="relative w-screen h-screen bg-[#04060a] text-slate-100 overflow-hidden select-none">
       {/* Top PlayStation Header - Floats transparently over the artwork */}
-      <div className="absolute top-0 left-0 right-0 z-30 pointer-events-auto bg-transparent">
+      <div className="absolute top-0 left-0 right-0 z-50 pointer-events-auto bg-transparent">
         <TopBar
           activeTab={activeTab}
           onTabChange={setActiveTab}
@@ -294,9 +295,10 @@ export const App: React.FC = () => {
         />
       </div>
 
-      {/* Main Tab Screen - Extends full viewport from y = 0 */}
-      <main className="w-full h-full min-h-0 overflow-hidden">
-        {activeTab === 'games' && (
+      {/* Main Tab Screen - Extends full viewport from y = 0 */}
+      <main className="w-full h-full min-h-0 overflow-hidden">
+        {/* Tab Views - Kept alive in memory, visibility toggled via CSS */}
+        <div className={`w-full h-full ${activeTab === 'games' ? 'block' : 'hidden'}`}>
           <HomeScreen
             games={games}
             selectedGameIndex={selectedGameIndex}
@@ -309,10 +311,10 @@ export const App: React.FC = () => {
             onClearDemoGames={handleClearDemoGames}
             onResetDemoGames={handleResetDemoGames}
           />
-        )}
+        </div>
 
-        {activeTab === 'relinker' && (
-          selectedGame ? (
+        <div className={`w-full h-full ${activeTab === 'relinker' ? 'block' : 'hidden'}`}>
+          {selectedGame ? (
             <RelinkerStudio
               games={games}
               selectedGame={selectedGame}
@@ -330,20 +332,27 @@ export const App: React.FC = () => {
                 Import PS5 Title
               </button>
             </div>
-          )
-        )}
+          )}
+        </div>
 
-        {activeTab === 'community' && (
+        <div className={`w-full h-full ${activeTab === 'runtimes' ? 'block' : 'hidden'}`}>
+          <RuntimeManager
+            onNavigateToGames={() => setActiveTab('games')}
+            onNavigateToRelinker={() => setActiveTab('relinker')}
+          />
+        </div>
+
+        <div className={`w-full h-full ${activeTab === 'community' ? 'block' : 'hidden'}`}>
           <CommunityPRBuilds
             initialSearch={communitySearchKeyword}
             onClearInitialSearch={() => setCommunitySearchKeyword('')}
             onNavigateToGames={() => setActiveTab('games')}
             onNavigateToRelinker={() => setActiveTab('relinker')}
           />
-        )}
+        </div>
 
-        {activeTab === 'nid' && (
-          selectedGame ? (
+        <div className={`w-full h-full ${activeTab === 'nid' ? 'block' : 'hidden'}`}>
+          {selectedGame ? (
             <NidInspector game={selectedGame} />
           ) : (
             <div className="flex-1 h-full flex flex-col items-center justify-center p-8 pt-20 text-center animate-fade-in">
@@ -355,20 +364,30 @@ export const App: React.FC = () => {
                 Import PS5 Title
               </button>
             </div>
-          )
-        )}
+          )}
+        </div>
 
-        {activeTab === 'prx' && <PrxManager />}
+        <div className={`w-full h-full ${activeTab === 'prx' ? 'block' : 'hidden'}`}>
+          <PrxManager />
+        </div>
 
-        {activeTab === 'telemetry' && <TelemetryPanel />}
+        <div className={`w-full h-full ${activeTab === 'telemetry' ? 'block' : 'hidden'}`}>
+          <TelemetryPanel />
+        </div>
 
-        {activeTab === 'settings' && (
+        <div className={`w-full h-full ${activeTab === 'settings' ? 'block' : 'hidden'}`}>
           <SettingsPage
             onNavigateBack={() => setActiveTab('games')}
             showAdvancedNav={showAdvancedNav}
             onToggleAdvancedNav={handleToggleAdvancedNav}
+            onNavigateToRuntimes={() => {
+              if (!showAdvancedNav) {
+                handleToggleAdvancedNav(true);
+              }
+              setActiveTab('runtimes');
+            }}
           />
-        )}
+        </div>
       </main>
 
       {/* Game Running Modal */}

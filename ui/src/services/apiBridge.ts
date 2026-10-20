@@ -10,7 +10,22 @@ import {
   CommunityPR,
   PRBuildDownloadProgress,
   MultiPRBuildResult,
-  MergedBuildInfo
+  MergedBuildInfo,
+  RuntimeProfile,
+  RuntimesManifest,
+  ResolvedRuntime,
+  GitHubAuthStatus,
+  GitHubDeviceCodeResponse,
+  UpstreamCommit,
+  UpstreamComparison,
+  CommitsPageResult,
+  ToolchainStatus,
+  ToolchainInspectionResult,
+  ToolchainInstallProgress,
+  SourceSyncStatus,
+  BuilderLogMessage,
+  BuildProgressStatus,
+  BuildResult
 } from '../types';
 import { INITIAL_GAMES } from './sampleData';
 
@@ -39,7 +54,8 @@ declare global {
       openExternal?: (url: string) => Promise<boolean>;
       onUpdateStatus?: (callback: (status: UpdateStatus) => void) => () => void;
       getCommunityPRs?: (repo?: string, forceRefresh?: boolean) => Promise<CommunityPR[]>;
-      downloadPRBuild?: (args: { prNumber: number; artifactUrl?: string }) => Promise<{ success: boolean; path?: string; error?: string }>;
+      downloadPRBuild?: (args: { prNumber: number; artifactUrl?: string; headSha?: string; title?: string }) => Promise<{ success: boolean; path?: string; error?: string }>;
+      buildPR?: (args: { prNumber: number; headSha: string; title: string }) => Promise<BuildResult>;
       setActivePRBuild?: (prNumber: number) => Promise<boolean>;
       revertToDefaultBuild?: () => Promise<boolean>;
       deletePRBuild?: (prNumber: number) => Promise<boolean>;
@@ -71,6 +87,33 @@ declare global {
       closeWindow?: () => Promise<void>;
       isWindowMaximized?: () => Promise<boolean>;
       onWindowMaximizedChange?: (callback: (isMax: boolean) => void) => () => void;
+      getRuntimesManifest?: () => Promise<RuntimesManifest>;
+      listRuntimes?: () => Promise<ResolvedRuntime[]>;
+      resolveRuntime?: (runtimeId?: string) => Promise<ResolvedRuntime>;
+      setActiveGlobalRuntime?: (runtimeId: string) => Promise<boolean>;
+      registerCustomRuntime?: (args: { name: string; customPath: string; relinkerOverride?: string; libsOverride?: string }) => Promise<RuntimeProfile>;
+      removeRuntime?: (runtimeId: string) => Promise<boolean>;
+      setGameRuntime?: (titleId: string, runtimeId: string) => Promise<boolean>;
+      getGameRuntime?: (titleId: string) => Promise<string | undefined>;
+      getGitHubAuthStatus?: () => Promise<GitHubAuthStatus>;
+      requestGitHubDeviceCode?: () => Promise<GitHubDeviceCodeResponse>;
+      checkGitHubDeviceCode?: (deviceCode: string) => Promise<{ status: 'pending' | 'slow_down' | 'approved' | 'expired' | 'error'; accessToken?: string; interval?: number; error?: string }>;
+      setGitHubPersonalAccessToken?: (token: string) => Promise<{ success: boolean; username?: string; error?: string }>;
+      disconnectGitHub?: () => Promise<boolean>;
+      fetchUpstreamCommits?: (args?: { repo?: string; page?: number; perPage?: number }) => Promise<CommitsPageResult>;
+      compareUpstreamCommits?: (args?: { baseSha?: string; headRef?: string; repo?: string }) => Promise<UpstreamComparison>;
+      downloadCommitArtifact?: (commit: { sha: string; shortSha: string; message: string; date?: string }) => Promise<{ success: boolean; runtimeId?: string; error?: string }>;
+      onCommitDownloadProgress?: (callback: (data: { shortSha: string; status: string; progress: number; error?: string }) => void) => () => void;
+      inspectToolchain?: () => Promise<ToolchainInspectionResult>;
+      installManagedToolchain?: () => Promise<{ success: boolean; error?: string }>;
+      onToolchainInstallProgress?: (callback: (data: ToolchainInstallProgress) => void) => () => void;
+      getSourceStatus?: () => Promise<SourceSyncStatus>;
+      syncSource?: () => Promise<{ success: boolean; commit?: string; error?: string }>;
+      startBuild?: () => Promise<BuildResult>;
+      cancelBuild?: () => Promise<{ success: boolean }>;
+      getActiveBuild?: () => Promise<{ isBuilding: boolean; buildingPR: number | null; recentLogs?: BuilderLogMessage[] }>;
+      onBuilderLog?: (callback: (data: BuilderLogMessage) => void) => () => void;
+      onBuildStatus?: (callback: (data: BuildProgressStatus) => void) => () => void;
     };
   }
 }
@@ -112,6 +155,10 @@ class ApiBridge {
     // Browser simulated file/folder dialog
     const simulatedPath = prompt("Enter the path to your decrypted PS5 game folder or ELF:\n(e.g., C:/Games/PS5/MyGame)", "C:/Games/PS5/NewTitle");
     return simulatedPath;
+  }
+
+  public async selectFolder(): Promise<string | null> {
+    return this.selectGameFolder();
   }
 
   public async inspectGameFolder(folderPath: string): Promise<{
@@ -361,9 +408,16 @@ class ApiBridge {
     return [];
   }
 
-  public async downloadPRBuild(prNumber: number, artifactUrl?: string): Promise<{ success: boolean; path?: string; error?: string }> {
-    if (window.anyps5?.downloadPRBuild) {
-      return await window.anyps5.downloadPRBuild({ prNumber, artifactUrl });
+  public async buildPR(prNumber: number, headSha: string, title: string): Promise<BuildResult> {
+    if (window.anyps5?.buildPR) {
+      return await window.anyps5.buildPR({ prNumber, headSha, title });
+    }
+    return { success: false, error: 'Local Builder is not available in browser mode.' };
+  }
+
+  public async downloadPRBuild(prNumber: number, artifactUrl?: string, headSha?: string, title?: string): Promise<{ success: boolean; path?: string; error?: string }> {
+    if (window.anyps5?.buildPR) {
+      return await window.anyps5.buildPR({ prNumber, headSha: headSha || 'HEAD', title: title || ('PR #' + prNumber) });
     }
     const set = this.getSimulatedInstalledPRs();
     set.add(prNumber);
@@ -450,6 +504,331 @@ class ApiBridge {
     }
     return () => {};
   }
+
+  public async getRuntimesManifest(): Promise<RuntimesManifest> {
+    if (window.anyps5?.getRuntimesManifest) {
+      return await window.anyps5.getRuntimesManifest();
+    }
+    return {
+      activeGlobalRuntimeId: 'bundled',
+      runtimes: [
+        {
+          id: 'bundled',
+          name: 'Bundled Stable (v0.1.2)',
+          type: 'bundled',
+          commitHash: 'v0.1.2',
+          date: '2026-10-14T08:56:52Z',
+          path: 'bundled',
+          isRemovable: false,
+        },
+      ],
+    };
+  }
+
+  public async listRuntimes(): Promise<ResolvedRuntime[]> {
+    if (window.anyps5?.listRuntimes) {
+      return await window.anyps5.listRuntimes();
+    }
+    return [
+      {
+        id: 'bundled',
+        name: 'Bundled Stable (v0.1.2)',
+        type: 'bundled',
+        commitHash: 'v0.1.2',
+        date: '2026-10-14T08:56:52Z',
+        relinkerPath: 'bundled/relinker.exe',
+        libsPath: 'bundled/libs',
+        isRemovable: false,
+        isValid: true,
+      },
+    ];
+  }
+
+  public async resolveRuntime(runtimeId?: string): Promise<ResolvedRuntime> {
+    if (window.anyps5?.resolveRuntime) {
+      return await window.anyps5.resolveRuntime(runtimeId);
+    }
+    return {
+      id: runtimeId || 'bundled',
+      name: 'Bundled Stable (v0.1.2)',
+      type: 'bundled',
+      commitHash: 'v0.1.2',
+      date: '2026-10-14T08:56:52Z',
+      relinkerPath: 'bundled/relinker.exe',
+      libsPath: 'bundled/libs',
+      isRemovable: false,
+      isValid: true,
+    };
+  }
+
+  public async setActiveGlobalRuntime(runtimeId: string): Promise<boolean> {
+    if (window.anyps5?.setActiveGlobalRuntime) {
+      return await window.anyps5.setActiveGlobalRuntime(runtimeId);
+    }
+    return true;
+  }
+
+  public async registerCustomRuntime(args: {
+    name: string;
+    customPath: string;
+    relinkerOverride?: string;
+    libsOverride?: string;
+  }): Promise<RuntimeProfile> {
+    if (window.anyps5?.registerCustomRuntime) {
+      return await window.anyps5.registerCustomRuntime(args);
+    }
+    return {
+      id: `custom-${Date.now()}`,
+      name: args.name,
+      type: 'custom',
+      date: new Date().toISOString(),
+      path: args.customPath,
+      relinkerPath: args.relinkerOverride,
+      libsPath: args.libsOverride,
+      isRemovable: true,
+    };
+  }
+
+  public async removeRuntime(runtimeId: string): Promise<boolean> {
+    if (window.anyps5?.removeRuntime) {
+      return await window.anyps5.removeRuntime(runtimeId);
+    }
+    return true;
+  }
+
+  public async setGameRuntime(titleId: string, runtimeId: string): Promise<boolean> {
+    if (window.anyps5?.setGameRuntime) {
+      return await window.anyps5.setGameRuntime(titleId, runtimeId);
+    }
+    try {
+      const stored = localStorage.getItem('anyps5_game_runtimes');
+      const map = stored ? JSON.parse(stored) : {};
+      map[titleId] = runtimeId;
+      localStorage.setItem('anyps5_game_runtimes', JSON.stringify(map));
+    } catch {}
+    return true;
+  }
+
+  public async getGameRuntime(titleId: string): Promise<string | undefined> {
+    if (window.anyps5?.getGameRuntime) {
+      return await window.anyps5.getGameRuntime(titleId);
+    }
+    try {
+      const stored = localStorage.getItem('anyps5_game_runtimes');
+      const map = stored ? JSON.parse(stored) : {};
+      return map[titleId];
+    } catch {
+      return undefined;
+    }
+  }
+
+  public async getGitHubAuthStatus(): Promise<GitHubAuthStatus> {
+    if (window.anyps5?.getGitHubAuthStatus) {
+      return await window.anyps5.getGitHubAuthStatus();
+    }
+    return { isConnected: false };
+  }
+
+  public async requestGitHubDeviceCode(): Promise<GitHubDeviceCodeResponse> {
+    if (window.anyps5?.requestGitHubDeviceCode) {
+      return await window.anyps5.requestGitHubDeviceCode();
+    }
+    return {
+      device_code: 'simulated_device_code',
+      user_code: 'ABCD-1234',
+      verification_uri: 'https://github.com/login/device',
+      expires_in: 900,
+      interval: 5,
+    };
+  }
+
+  public async checkGitHubDeviceCode(deviceCode: string): Promise<{
+    status: 'pending' | 'slow_down' | 'approved' | 'expired' | 'error';
+    accessToken?: string;
+    interval?: number;
+    error?: string;
+  }> {
+    if (window.anyps5?.checkGitHubDeviceCode) {
+      return await window.anyps5.checkGitHubDeviceCode(deviceCode);
+    }
+    return { status: 'approved', accessToken: 'gho_simulated_token' };
+  }
+
+  public async setGitHubPersonalAccessToken(token: string): Promise<{ success: boolean; username?: string; error?: string }> {
+    if (window.anyps5?.setGitHubPersonalAccessToken) {
+      return await window.anyps5.setGitHubPersonalAccessToken(token);
+    }
+    return { success: true, username: 'demo-user' };
+  }
+
+  public async disconnectGitHub(): Promise<boolean> {
+    if (window.anyps5?.disconnectGitHub) {
+      return await window.anyps5.disconnectGitHub();
+    }
+    return true;
+  }
+
+  public async fetchUpstreamCommits(args?: { repo?: string; page?: number; perPage?: number }): Promise<CommitsPageResult> {
+    if (window.anyps5?.fetchUpstreamCommits) {
+      return await window.anyps5.fetchUpstreamCommits(args);
+    }
+    return {
+      commits: [
+        {
+          sha: 'a4f912c49921b0e2f5c1d9b3a7e8f01234567890',
+          shortSha: 'a4f912c',
+          message: 'Fix AGC texture swizzling for tiled surfaces',
+          author: 'boykopovar',
+          date: '2026-10-18T18:42:10Z',
+          htmlUrl: 'https://github.com/boykopovar/AnyPS5/commit/a4f912c',
+          isInstalled: false,
+          isActive: false,
+          artifactAvailable: true,
+        },
+        {
+          sha: '8c3e091b617290a1f2e3d4c5b6a7890123456789',
+          shortSha: '8c3e091',
+          message: 'Implement ScePfs path canonicalization for app0 guest root',
+          author: 'contributor',
+          date: '2026-10-18T14:15:00Z',
+          htmlUrl: 'https://github.com/boykopovar/AnyPS5/commit/8c3e091',
+          isInstalled: false,
+          isActive: false,
+          artifactAvailable: true,
+        },
+      ],
+      hasMore: false,
+      page: args?.page || 1,
+    };
+  }
+
+  public async compareUpstreamCommits(args?: { baseSha?: string; headRef?: string; repo?: string }): Promise<UpstreamComparison> {
+    if (window.anyps5?.compareUpstreamCommits) {
+      return await window.anyps5.compareUpstreamCommits(args);
+    }
+    return {
+      status: 'ahead',
+      aheadBy: 14,
+      behindBy: 0,
+      headSha: 'a4f912c49921b0e2f5c1d9b3a7e8f01234567890',
+      headShortSha: 'a4f912c',
+      headCommitMessage: 'Fix AGC texture swizzling for tiled surfaces',
+      headCommitDate: '2026-10-18T18:42:10Z',
+      headCommitAuthor: 'boykopovar',
+      isUpToDate: false,
+    };
+  }
+
+  public async downloadCommitArtifact(commit: {
+    sha: string;
+    shortSha: string;
+    message: string;
+    date?: string;
+  }): Promise<{ success: boolean; runtimeId?: string; error?: string }> {
+    if (window.anyps5?.downloadCommitArtifact) {
+      return await window.anyps5.downloadCommitArtifact(commit);
+    }
+    return { success: true, runtimeId: `commit-${commit.shortSha}` };
+  }
+
+  public onCommitDownloadProgress(
+    callback: (data: { shortSha: string; status: string; progress: number; error?: string }) => void
+  ): () => void {
+    if (window.anyps5?.onCommitDownloadProgress) {
+      return window.anyps5.onCommitDownloadProgress(callback);
+    }
+    return () => {};
+  }
+
+  public async inspectToolchain(): Promise<ToolchainInspectionResult> {
+    if (window.anyps5?.inspectToolchain) {
+      return await window.anyps5.inspectToolchain();
+    }
+    return {
+      tools: [
+        { name: 'Git', command: 'git', version: 'git version 2.54.0.windows.1', isManaged: false, isAvailable: true },
+        { name: 'Python 3', command: 'python', version: 'Python 3.14.5', isManaged: false, isAvailable: true },
+        { name: 'CMake', command: 'cmake', version: 'cmake version 4.4.4', isManaged: false, isAvailable: true },
+        { name: 'Ninja', command: 'ninja', version: '1.13.2', isManaged: false, isAvailable: true },
+        { name: 'C++ Compiler', command: 'g++', version: 'g++ (MinGW-W64) 15.2.0', isManaged: false, isAvailable: true },
+      ],
+      allRequiredAvailable: true,
+    };
+  }
+
+  public async installManagedToolchain(): Promise<{ success: boolean; error?: string }> {
+    if (window.anyps5?.installManagedToolchain) {
+      return await window.anyps5.installManagedToolchain();
+    }
+    return { success: true };
+  }
+
+  public onToolchainInstallProgress(callback: (data: ToolchainInstallProgress) => void): () => void {
+    if (window.anyps5?.onToolchainInstallProgress) {
+      return window.anyps5.onToolchainInstallProgress(callback);
+    }
+    return () => {};
+  }
+
+  public async getSourceStatus(): Promise<SourceSyncStatus> {
+    if (window.anyps5?.getSourceStatus) {
+      return await window.anyps5.getSourceStatus();
+    }
+    return {
+      exists: true,
+      repoUrl: 'https://github.com/boykopovar/AnyPS5.git',
+      currentCommit: '4ffb0cd04746f32e92cfa717fe1d78cb1ae77c61',
+      shortCommit: '4ffb0cd',
+      commitMessage: 'Merge pull request #7377 from EagleBearerYS/fix/shader-pixel-bda-single-exit',
+      branch: 'main',
+      isSyncing: false,
+    };
+  }
+
+  public async syncSource(): Promise<{ success: boolean; commit?: string; error?: string }> {
+    if (window.anyps5?.syncSource) {
+      return await window.anyps5.syncSource();
+    }
+    return { success: true, commit: '4ffb0cd' };
+  }
+
+  public async startBuild(): Promise<BuildResult> {
+    if (window.anyps5?.startBuild) {
+      return await window.anyps5.startBuild();
+    }
+    return { success: true, runtimeId: 'commit-4ffb0cd' };
+  }
+
+  public async cancelBuild(): Promise<{ success: boolean }> {
+    if (window.anyps5?.cancelBuild) {
+      return await window.anyps5.cancelBuild();
+    }
+    return { success: true };
+  }
+
+  public async getActiveBuild(): Promise<{ isBuilding: boolean; buildingPR: number | null; recentLogs?: BuilderLogMessage[] }> {
+    if (window.anyps5?.getActiveBuild) {
+      return await window.anyps5.getActiveBuild();
+    }
+    return { isBuilding: false, buildingPR: null, recentLogs: [] };
+  }
+
+  public onBuilderLog(callback: (data: BuilderLogMessage) => void): () => void {
+    if (window.anyps5?.onBuilderLog) {
+      return window.anyps5.onBuilderLog(callback);
+    }
+    return () => {};
+  }
+
+  public onBuildStatus(callback: (data: BuildProgressStatus) => void): () => void {
+    if (window.anyps5?.onBuildStatus) {
+      return window.anyps5.onBuildStatus(callback);
+    }
+    return () => {};
+  }
+
+
+
 
 
   /**

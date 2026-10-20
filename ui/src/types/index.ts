@@ -19,6 +19,7 @@ export interface GameItem {
   sizeBytes: number;
   sdkVersion: string;
   minHostCpu: string;
+  runtimeId?: string;
   compatibility: {
     status: 'playable' | 'ingame' | 'intro' | 'untested';
     score: number; // percentage
@@ -41,6 +42,40 @@ export interface RelinkerOptions {
   fixedBaseAddress: string;
   autorun: boolean;
   sceModulePath: string;
+  runtimeId?: string;
+}
+
+export type RuntimeType = 'bundled' | 'ci-artifact' | 'custom' | 'local-build';
+
+export interface RuntimeProfile {
+  id: string;
+  name: string;
+  type: RuntimeType;
+  commitHash?: string;
+  commitMessage?: string;
+  date?: string;
+  path: string;
+  isRemovable: boolean;
+  relinkerPath?: string;
+  libsPath?: string;
+}
+
+export interface RuntimesManifest {
+  activeGlobalRuntimeId: string;
+  runtimes: RuntimeProfile[];
+}
+
+export interface ResolvedRuntime {
+  id: string;
+  name: string;
+  type: RuntimeType;
+  commitHash?: string;
+  commitMessage?: string;
+  date?: string;
+  relinkerPath: string;
+  libsPath: string;
+  isRemovable: boolean;
+  isValid: boolean;
 }
 
 export interface ConversionStage {
@@ -94,6 +129,58 @@ export interface AppSettings {
   preferredGpu?: string;
   defaultRelinkerPath?: string;
   defaultPrxPath?: string;
+  gameRuntimes?: Record<string, string>;
+  defaultRuntimeId?: string;
+}
+
+export interface GitHubAuthStatus {
+  isConnected: boolean;
+  username?: string;
+  avatarUrl?: string;
+  rateLimit?: {
+    limit: number;
+    remaining: number;
+    reset: number;
+  };
+}
+
+export interface GitHubDeviceCodeResponse {
+  device_code: string;
+  user_code: string;
+  verification_uri: string;
+  expires_in: number;
+  interval: number;
+}
+
+export interface UpstreamCommit {
+  sha: string;
+  shortSha: string;
+  message: string;
+  author: string;
+  authorAvatar?: string;
+  date: string;
+  htmlUrl: string;
+  isInstalled: boolean;
+  isActive: boolean;
+  artifactAvailable?: boolean;
+}
+
+export interface UpstreamComparison {
+  status: 'ahead' | 'identical' | 'behind' | 'diverged' | 'unknown';
+  aheadBy: number;
+  behindBy: number;
+  headSha: string;
+  headShortSha: string;
+  headCommitMessage: string;
+  headCommitDate: string;
+  headCommitAuthor: string;
+  isUpToDate: boolean;
+}
+
+export interface CommitsPageResult {
+  commits: UpstreamCommit[];
+  hasMore: boolean;
+  page: number;
 }
 
 export interface UpdateStatus {
@@ -132,8 +219,9 @@ export interface CommunityPR {
 
 export interface PRBuildDownloadProgress {
   prNumber: number;
-  status: 'idle' | 'downloading' | 'extracting' | 'ready' | 'error';
+  status: 'idle' | 'downloading' | 'extracting' | 'configuring' | 'building' | 'staging' | 'ready' | 'error';
   progress: number;
+  message?: string;
   error?: string;
 }
 
@@ -154,3 +242,61 @@ export interface MergedBuildInfo {
   relinkerPath: string;
   isActive: boolean;
 }
+
+export interface ToolchainStatus {
+  name: string;
+  command: string;
+  version?: string;
+  path?: string;
+  isManaged: boolean;
+  isAvailable: boolean;
+}
+
+export interface ToolchainInspectionResult {
+  tools: ToolchainStatus[];
+  allRequiredAvailable: boolean;
+}
+
+export interface ToolchainInstallProgress {
+  status: 'idle' | 'downloading' | 'extracting' | 'ready' | 'error';
+  toolName?: string;
+  progress: number;
+  transferredBytes?: number;
+  totalBytes?: number;
+  message?: string;
+  error?: string;
+}
+
+export interface SourceSyncStatus {
+  exists: boolean;
+  repoUrl: string;
+  currentCommit?: string;
+  shortCommit?: string;
+  commitMessage?: string;
+  branch?: string;
+  isSyncing: boolean;
+  submodulesReady?: boolean;
+  lastSyncedAt?: string;
+}
+
+export interface BuilderLogMessage {
+  text: string;
+  type: 'stdout' | 'stderr' | 'info' | 'error';
+  timestamp: string;
+}
+
+export interface BuildProgressStatus {
+  status: 'idle' | 'configuring' | 'building' | 'staging' | 'completed' | 'error';
+  progress: number;
+  message?: string;
+  error?: string;
+}
+
+export interface BuildResult {
+  success: boolean;
+  runtimeId?: string;
+  relinkerPath?: string;
+  libsPath?: string;
+  error?: string;
+}
+
