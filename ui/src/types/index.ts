@@ -42,6 +42,30 @@ export interface DiscoveredGameCandidate {
   hasEboot: boolean;
 }
 
+export type NidImportStatus = 'implemented' | 'stub' | 'missing';
+
+export interface NidImportItem {
+  nid: string;
+  symbol: string;
+  module: string;
+  status: NidImportStatus;
+  implementationNotes?: string;
+}
+
+export interface NidAuditSummary {
+  totalImports: number;
+  resolvedCount: number;
+  stubCount: number;
+  missingCount: number;
+  coveragePercentage: number;
+}
+
+export interface NidAuditResult {
+  summary: NidAuditSummary;
+  imports: NidImportItem[];
+  error?: string;
+}
+
 export interface RelinkerOptions {
   target: 'windows' | 'linux' | 'macos';
   subsystem: 'gui' | 'console';

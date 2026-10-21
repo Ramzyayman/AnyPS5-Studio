@@ -26,7 +26,8 @@ import {
   BuilderLogMessage,
   BuildProgressStatus,
   BuildResult,
-  DiscoveredGameCandidate
+  DiscoveredGameCandidate,
+  NidAuditResult
 } from '../types';
 import { INITIAL_GAMES } from './sampleData';
 
@@ -45,6 +46,7 @@ declare global {
         sizeBytes?: number;
       } | null>;
       scanDirectory?: (rootPath: string) => Promise<DiscoveredGameCandidate[]>;
+      auditGameNids?: (game: any, forceRefresh?: boolean) => Promise<NidAuditResult>;
       getGames: () => Promise<GameItem[]>;
       saveGames: (games: GameItem[]) => Promise<void>;
       getSettings?: () => Promise<AppSettings>;
@@ -176,6 +178,40 @@ class ApiBridge {
       return await window.anyps5.inspectFolder(folderPath);
     }
     return null;
+  }
+
+  public async auditGameNids(game: GameItem, forceRefresh = false): Promise<NidAuditResult> {
+    if (window.anyps5?.auditGameNids) {
+      return await window.anyps5.auditGameNids(game, forceRefresh);
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 400));
+
+    const sampleImports = [
+      { nid: '0x1A2B3C4D5E6F7001', module: 'libkernel.prx', symbol: 'sceKernelCreateEqueue', status: 'implemented' as const, implementationNotes: 'Native IOCP/kqueue wait queue translation' },
+      { nid: '0x1A2B3C4D5E6F7002', module: 'libkernel.prx', symbol: 'sceKernelWaitEqueue', status: 'implemented' as const, implementationNotes: 'Event queue poll loop' },
+      { nid: '0x2F3A4B5C6D7E8001', module: 'libkernel.prx', symbol: 'scePthreadCreate', status: 'implemented' as const, implementationNotes: 'FreeBSD pthread cancellation semantics' },
+      { nid: '0x2F3A4B5C6D7E8002', module: 'libkernel.prx', symbol: 'scePthreadJoin', status: 'implemented' as const, implementationNotes: 'Maps directly to host Win32 thread' },
+      { nid: '0x3A4B5C6D7E8F9001', module: 'libSceAgcDriver.prx', symbol: 'sceAgcDriverSubmitDcb', status: 'implemented' as const, implementationNotes: 'Direct Vulkan queue submission' },
+      { nid: '0x3A4B5C6D7E8F9002', module: 'libSceAgcDriver.prx', symbol: 'sceAgcDriverRegisterShader', status: 'implemented' as const, implementationNotes: 'RDNA ISA to SPIR-V JIT compiler' },
+      { nid: '0x4A5B6C7D8E9F0001', module: 'libScePad.prx', symbol: 'scePadOpen', status: 'implemented' as const, implementationNotes: 'DirectInput / XInput DualSense HID layer' },
+      { nid: '0x4A5B6C7D8E9F0002', module: 'libScePad.prx', symbol: 'scePadReadState', status: 'implemented' as const, implementationNotes: 'High precision state polling' },
+      { nid: '0x5A6B7C8D9E0F1001', module: 'libSceAudioOut.prx', symbol: 'sceAudioOutOpen', status: 'implemented' as const, implementationNotes: 'WASAPI 48kHz float multichannel stream' },
+      { nid: '0xAA88442200000001', module: 'libSceSaveData.prx', symbol: 'sceSaveDataMountCloud', status: 'stub' as const, implementationNotes: 'Redirected to local host folder app0/savedata' },
+      { nid: '0x99A3F12D00000001', module: 'libSceHaptic.prx', symbol: 'sceHapticTriggerFeedback', status: 'stub' as const, implementationNotes: 'Stubbed return SCE_OK (no motor passthrough)' },
+      { nid: '0xE8912C0400000001', module: 'libSceNpMatching2.prx', symbol: 'sceNpMatching2CreateRoom', status: 'missing' as const, implementationNotes: 'Network matchmaking unsupported' },
+    ];
+
+    return {
+      summary: {
+        totalImports: 12,
+        resolvedCount: 9,
+        stubCount: 2,
+        missingCount: 1,
+        coveragePercentage: 75.0,
+      },
+      imports: sampleImports,
+    };
   }
 
   public async scanDirectoryForGames(rootPath: string): Promise<DiscoveredGameCandidate[]> {

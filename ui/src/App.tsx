@@ -402,7 +402,14 @@ export const App: React.FC = () => {
 
         <div className={`w-full h-full ${activeTab === 'nid' ? 'block' : 'hidden'}`}>
           {selectedGame ? (
-            <NidInspector game={selectedGame} />
+            <NidInspector
+              game={selectedGame}
+              games={games}
+              onSelectGame={(g) => {
+                const idx = games.findIndex((x) => x.id === g.id);
+                if (idx !== -1) setSelectedGameIndex(idx);
+              }}
+            />
           ) : (
             <div className="flex-1 h-full flex flex-col items-center justify-center p-8 pt-20 text-center animate-fade-in">
               <p className="text-neutral-400 text-sm mb-4">No title selected for NID audit.</p>
