@@ -3,6 +3,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 contextBridge.exposeInMainWorld('anyps5', {
   selectFolder: () => ipcRenderer.invoke('anyps5:select-folder'),
   inspectFolder: (folderPath: string) => ipcRenderer.invoke('anyps5:inspect-folder', folderPath),
+  scanDirectory: (rootPath: string) => ipcRenderer.invoke('anyps5:scan-directory', rootPath),
   getGames: () => ipcRenderer.invoke('anyps5:get-games'),
   saveGames: (games: unknown) => ipcRenderer.invoke('anyps5:save-games', games),
   runRelinker: (game: unknown, options: unknown, callbackId: string) => 

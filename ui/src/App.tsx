@@ -275,6 +275,16 @@ export const App: React.FC = () => {
     setSelectedGameIndex(0);
   };
 
+  const handleAddGamesBulk = (newGames: GameItem[]) => {
+    if (!newGames || newGames.length === 0) return;
+    setGames((prev) => {
+      const updated = [...newGames, ...prev];
+      apiBridge.saveGames(updated);
+      return updated;
+    });
+    setSelectedGameIndex(0);
+  };
+
   const handleDeleteGame = (gameId: string) => {
     audioService.playCancel();
     setGames((prev) => {
@@ -454,6 +464,8 @@ export const App: React.FC = () => {
         isOpen={isAddGameOpen}
         onClose={() => setIsAddGameOpen(false)}
         onAddGame={handleAddGame}
+        onAddGamesBulk={handleAddGamesBulk}
+        existingGames={games}
       />
 
       {/* PS5 Notification Toast: Update Ready */}
