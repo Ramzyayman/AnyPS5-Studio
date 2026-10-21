@@ -473,19 +473,23 @@ function auditGameNids(game: any, forceRefresh = false) {
         return cached;
       }
     } catch {}
+  } else if (forceRefresh && fs.existsSync(cacheFile)) {
+    try {
+      fs.unlinkSync(cacheFile);
+    } catch {}
   }
 
   let candidateBinary = '';
   if (folderPath && fs.existsSync(folderPath)) {
     const candidates = [
+      path.join(folderPath, 'eboot.elf'),
+      path.join(folderPath, 'eboot.bin'),
+      path.join(folderPath, 'app0', 'eboot.elf'),
+      path.join(folderPath, 'app0', 'eboot.bin'),
       path.join(folderPath, 'app.exe'),
       path.join(folderPath, 'app.elf'),
-      path.join(folderPath, 'eboot.bin'),
-      path.join(folderPath, 'eboot.elf'),
       path.join(folderPath, 'app0', 'app.exe'),
       path.join(folderPath, 'app0', 'app.elf'),
-      path.join(folderPath, 'app0', 'eboot.bin'),
-      path.join(folderPath, 'app0', 'eboot.elf'),
     ];
     for (const c of candidates) {
       if (fs.existsSync(c)) {
@@ -503,6 +507,15 @@ function auditGameNids(game: any, forceRefresh = false) {
       libsPath = activeRuntime.libsPath;
     }
   } catch {}
+  if (!libsPath && folderPath) {
+    const gameLibs = path.join(folderPath, 'libs');
+    const app0Libs = path.join(folderPath, 'app0', 'libs');
+    if (fs.existsSync(gameLibs)) {
+      libsPath = gameLibs;
+    } else if (fs.existsSync(app0Libs)) {
+      libsPath = app0Libs;
+    }
+  }
   if (!libsPath) {
     const fallbackLibs = path.resolve(app.getAppPath(), '..', 'core', 'libs', 'prx');
     if (fs.existsSync(fallbackLibs)) libsPath = fallbackLibs;

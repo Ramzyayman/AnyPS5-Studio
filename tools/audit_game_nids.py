@@ -12,6 +12,47 @@ import import_audit
 import nid_names
 
 
+HOST_DLL_NAMES = {
+    "advapi32.dll",
+    "comctl32.dll",
+    "comdlg32.dll",
+    "d3d11.dll",
+    "d3d12.dll",
+    "dxgi.dll",
+    "gdi32.dll",
+    "imm32.dll",
+    "kernel32.dll",
+    "libgcc_s_seh-1.dll",
+    "libstdc++-6.dll",
+    "libwinpthread-1.dll",
+    "msvcrt.dll",
+    "ntdll.dll",
+    "ole32.dll",
+    "oleaut32.dll",
+    "setupapi.dll",
+    "shell32.dll",
+    "shlwapi.dll",
+    "ucrtbase.dll",
+    "user32.dll",
+    "version.dll",
+    "winmm.dll",
+    "ws2_32.dll",
+}
+
+
+def is_host_library(name):
+    if not name:
+        return False
+    lower = name.lower().strip()
+    if lower in HOST_DLL_NAMES:
+        return True
+    if lower.startswith("api-ms-win-") or lower.startswith("ext-ms-win-"):
+        return True
+    if lower.startswith("vcruntime") or lower.startswith("msvcp") or lower.startswith("msvcr"):
+        return True
+    return False
+
+
 def pe_symbol_imports(path, data):
     try:
         to_offset, directory, count = import_audit.pe_headers(path, data)
@@ -30,6 +71,9 @@ def pe_symbol_imports(path, data):
                 continue
             lib_offset, lib_limit = to_offset(name_rva, 1)
             lib_name = import_audit.cstring(data, lib_offset, lib_limit, path, "import library name", "ASCII", "strict")
+
+            if is_host_library(lib_name):
+                continue
 
             thunk_rva = orig_thunk if orig_thunk else first_thunk
             if not thunk_rva:
@@ -55,42 +99,16 @@ def pe_symbol_imports(path, data):
 
 
 def elf_symbol_imports(path, data):
-    try:
-        header = import_audit.unpack("<16sHHIQQQIHHHHHH", data, 0, path, "ELF header")
-        if not header[6] or header[6] >= len(data):
-            symbols, _ = import_audit.elf_program_dynamic_symbols(path, data)
-            results = []
-            for sym in symbols:
-                if "#" in sym:
-                    parts = sym.split("#")
-                    lib = parts[1] + ".prx" if not parts[1].endswith(".prx") else parts[1]
-                    results.append((parts[0], lib))
-                else:
-                    results.append((sym, None))
-            return results
-
-        sections = import_audit.elf_sections(path, data)
-        results = []
-        for section in sections:
-            kind, offset, size, link, entry = section[1], section[4], section[5], section[6], section[9]
-            if kind == 11:
-                if entry != 24 or size % 24 or link >= len(sections) or sections[link][1] != 3:
-                    continue
-                strings_offset, strings_size = sections[link][4], sections[link][5]
-                import_audit.take(data, strings_offset, strings_size, path, "dynamic string table")
-                for position in range(0, size, 24):
-                    name, _, _, index, _, _ = import_audit.unpack("<IBBHQQ", data, offset + position, path, "dynamic symbol")
-                    if name and index == 0:
-                        symbol = import_audit.cstring(data, strings_offset + name, strings_offset + strings_size, path, "import name")
-                        if "#" in symbol:
-                            parts = symbol.split("#")
-                            lib = parts[1] + ".prx" if not parts[1].endswith(".prx") else parts[1]
-                            results.append((parts[0], lib))
-                        else:
-                            results.append((symbol, None))
-        return results
-    except Exception:
-        return []
+    symbols, needed = import_audit.elf_imports(path, data)
+    results = []
+    for sym in symbols:
+        if "#" in sym:
+            parts = sym.split("#")
+            lib = parts[1] + ".prx" if not parts[1].endswith(".prx") else parts[1]
+            results.append((parts[0], lib))
+        else:
+            results.append((sym, None))
+    return results, needed
 
 
 def guess_module(name):
@@ -125,6 +143,25 @@ def guess_module(name):
         return "libSceFiber.prx"
     if lower.startswith("scerandom"):
         return "libSceRandom.prx"
+    if lower.startswith("sceime"):
+        return "libSceIme.prx"
+    if lower.startswith("scenp"):
+        return "libSceNp.prx"
+    if lower.startswith("sceult"):
+        return "libSceUlt.prx"
+    if lower.startswith("sceplaygo"):
+        return "libScePlayGo.prx"
+    if lower.startswith("scevoice"):
+        return "libSceVoice.prx"
+    if (
+        lower.startswith("libc")
+        or lower.startswith("_zn")
+        or lower.startswith("_zs")
+        or lower.startswith("__cxa")
+        or lower.startswith("std::")
+        or lower in ("malloc", "free", "realloc", "calloc", "abort", "exit", "memcpy", "memset", "memmove", "memcmp", "strlen", "strcpy", "strncpy", "strcmp", "strncmp")
+    ):
+        return "libc.prx"
     return "libkernel.prx"
 
 
@@ -173,18 +210,39 @@ def audit_binary(binary_path, libs_dir=None):
             pass
 
     raw_imports = []
+    needed_libs = set()
     if data[:4] == b"\x7fELF":
-        raw_imports = elf_symbol_imports(bpath, data)
+        try:
+            raw_imports, needed_libs = elf_symbol_imports(bpath, data)
+        except import_audit.AuditError as err:
+            return {"error": f"ELF import parsing error: {err}"}
+        except Exception as err:
+            return {"error": f"Failed to inspect ELF binary: {err}"}
     elif data[:2] == b"MZ":
-        raw_imports = pe_symbol_imports(bpath, data)
+        try:
+            raw_imports = pe_symbol_imports(bpath, data)
+        except Exception as err:
+            return {"error": f"PE import parsing error: {err}"}
     elif bpath.name.endswith(".registry.json"):
         try:
             entries = import_audit.read_registry(bpath)
             raw_imports = [(nid, lib) for nid, lib, _ in entries]
-        except Exception:
-            pass
+        except Exception as err:
+            return {"error": f"Registry read error: {err}"}
 
     if not raw_imports:
+        if data[:2] == b"MZ":
+            return {
+                "error": "The audited Windows executable contains only host operating system libraries. No PlayStation 5 PRX imports were found. Ensure an authentic PlayStation 5 executable (eboot.elf or eboot.bin) is present.",
+                "summary": {
+                    "totalImports": 0,
+                    "resolvedCount": 0,
+                    "stubCount": 0,
+                    "missingCount": 0,
+                    "coveragePercentage": 100.0,
+                },
+                "imports": [],
+            }
         return {
             "summary": {
                 "totalImports": 0,
@@ -203,6 +261,9 @@ def audit_binary(binary_path, libs_dir=None):
     missing_count = 0
 
     for raw_sym, target_lib in raw_imports:
+        if target_lib and is_host_library(target_lib):
+            continue
+
         if raw_sym in seen:
             continue
         seen.add(raw_sym)
@@ -218,20 +279,31 @@ def audit_binary(binary_path, libs_dir=None):
             symbol = aerolib_db.get(raw_sym, raw_sym)
 
         module = target_lib
+        providers = exports.get(nid, [])
+        if not providers and symbol in exports:
+            providers = exports[symbol]
+        if not providers:
+            comp_nid = nid_names.compute_nid(symbol)
+            if comp_nid in exports:
+                providers = exports[comp_nid]
+
         if not module:
-            if nid in exports and exports[nid]:
-                module = exports[nid][0]
-            elif symbol in exports and exports[symbol]:
-                module = exports[symbol][0]
+            if providers:
+                matching = [p for p in providers if p in needed_libs]
+                module = matching[0] if matching else providers[0]
             else:
                 module = guess_module(symbol)
 
         is_exported = False
         if exports:
-            if nid in exports or symbol in exports:
+            if providers:
                 is_exported = True
-            elif module and any(nid in import_audit.read_exports(p) for p in Path(libs_dir).glob("*.prx") if p.name.lower() == module.lower()):
-                is_exported = True
+            elif target_lib:
+                is_exported = any(
+                    nid in import_audit.read_exports(p) or symbol in import_audit.read_exports(p)
+                    for p in Path(libs_dir).glob("*.prx")
+                    if p.name.lower() == target_lib.lower()
+                )
         else:
             is_exported = True
 
@@ -240,7 +312,7 @@ def audit_binary(binary_path, libs_dir=None):
             status = "missing"
             missing_count += 1
             notes = "Symbol not exported by active clean-room runtime"
-        elif stub_key in stubs:
+        elif stub_key in stubs or f"{module}:{symbol}" in stubs:
             status = "stub"
             stub_count += 1
             notes = "Stubbed export; returns NotImplemented or dummy value"
