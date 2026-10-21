@@ -1,0 +1,77 @@
+export interface ReleaseHighlight {
+  title: string;
+  description: string;
+}
+
+export interface ReleaseInfo {
+  version: string;
+  highlights: ReleaseHighlight[];
+}
+
+export const RELEASE_HIGHLIGHTS_MAP: Record<string, ReleaseHighlight[]> = {
+  '1.2.0': [
+    {
+      title: 'Runtime Engine Manager',
+      description: 'Switch execution cores between bundled, upstream commits, and local custom builds.'
+    },
+    {
+      title: 'Local PR Builder',
+      description: 'Native CMake & Ninja compilation of community pull requests and multi-PR hybrid merges.'
+    },
+    {
+      title: 'Git Worktree Resilience',
+      description: 'Automated self-healing, stale lock removal, and conflict recovery.'
+    },
+    {
+      title: 'Keep-Alive Tab State',
+      description: 'Compilation and relink operations persist continuously across tab switches.'
+    },
+    {
+      title: 'Dual-Platform Parity',
+      description: 'Full support for Windows (app.exe) and Linux (app.elf) runtime targets.'
+    }
+  ],
+  '1.2.1': [
+    {
+      title: 'PS5 First-Run Setup (OOBE)',
+      description: 'Authentic PlayStation 5 first-run onboarding wizard with hardware detection and setup guide.'
+    },
+    {
+      title: '1-Click Silent Installer',
+      description: 'Streamlined zero-friction Windows setup without legacy wizard dialogs.'
+    },
+    {
+      title: 'Seamless Update Detection',
+      description: 'Automatically preserves existing user libraries and configuration without repeating setup.'
+    }
+  ]
+};
+
+export const DEFAULT_FALLBACK_HIGHLIGHTS: ReleaseHighlight[] = [
+  {
+    title: 'System Stability & Performance',
+    description: 'Internal performance optimizations, translation refinements, and security improvements.'
+  },
+  {
+    title: 'Routine Maintenance',
+    description: 'Upstream compatibility fixes and platform reliability enhancements.'
+  }
+];
+
+export function getReleaseHighlights(version: string): ReleaseHighlight[] {
+  if (!version) {
+    return DEFAULT_FALLBACK_HIGHLIGHTS;
+  }
+
+  const cleanVersion = version.replace(/^v/, '').trim();
+  if (RELEASE_HIGHLIGHTS_MAP[cleanVersion]) {
+    return RELEASE_HIGHLIGHTS_MAP[cleanVersion];
+  }
+
+  const baseVersion = cleanVersion.split('-')[0];
+  if (RELEASE_HIGHLIGHTS_MAP[baseVersion]) {
+    return RELEASE_HIGHLIGHTS_MAP[baseVersion];
+  }
+
+  return DEFAULT_FALLBACK_HIGHLIGHTS;
+}

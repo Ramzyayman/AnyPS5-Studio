@@ -32,3 +32,9 @@ When a user reports that a game crashed, failed silently, or is broken:
    - Explain that it is an upstream AnyPS5 core / system library limitation.
    - Check if any launcher settings can mitigate it (such as adjusting Unused Import Optimization level or CPU translation flags).
    - **Do not attempt to modify AnyPS5 C++ source files or patch the game binaries.**
+
+### 4. Release Protocol for Future Updates
+Whenever preparing a version bump or cutting a new release:
+1. Always ask the user: "What release highlights should be displayed in the System Software Updated screen for this release?"
+2. Insert those highlights into `RELEASE_HIGHLIGHTS_MAP` in `ui/src/data/releaseHighlights.ts` prior to building, committing, or tagging the release.
+3. Verify that `ui/src/data/releaseHighlights.ts` and `SystemUpdatedModal.tsx` compile cleanly via `npm.cmd --prefix ui run build:all`.

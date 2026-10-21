@@ -1,6 +1,7 @@
 import React from 'react';
 import { Sparkles, CheckCircle2, ArrowRight } from 'lucide-react';
 import { audioService } from '../services/audioService';
+import { getReleaseHighlights } from '../data/releaseHighlights';
 
 interface SystemUpdatedModalProps {
   isOpen: boolean;
@@ -14,6 +15,8 @@ export const SystemUpdatedModal: React.FC<SystemUpdatedModalProps> = ({
   onContinue,
 }) => {
   if (!isOpen) return null;
+
+  const highlights = getReleaseHighlights(currentVersion);
 
   const handleContinue = () => {
     audioService.playConfirm();
@@ -39,36 +42,14 @@ export const SystemUpdatedModal: React.FC<SystemUpdatedModalProps> = ({
           <h4 className="text-[11px] font-mono uppercase tracking-wider text-white/40 mb-2">
             Release Highlights
           </h4>
-          <div className="flex items-start space-x-2.5 text-xs text-white/80">
-            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0 mt-0.5" />
-            <span>
-              <strong>Runtime Engine Manager:</strong> Switch execution cores between bundled, upstream commits, and local custom builds.
-            </span>
-          </div>
-          <div className="flex items-start space-x-2.5 text-xs text-white/80">
-            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0 mt-0.5" />
-            <span>
-              <strong>Local PR Builder:</strong> Native CMake & Ninja compilation of community pull requests and multi-PR hybrid merges.
-            </span>
-          </div>
-          <div className="flex items-start space-x-2.5 text-xs text-white/80">
-            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0 mt-0.5" />
-            <span>
-              <strong>Git Worktree Resilience:</strong> Automated self-healing, stale lock removal, and conflict recovery.
-            </span>
-          </div>
-          <div className="flex items-start space-x-2.5 text-xs text-white/80">
-            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0 mt-0.5" />
-            <span>
-              <strong>Keep-Alive Tab State:</strong> Compilation and relink operations persist continuously across tab switches.
-            </span>
-          </div>
-          <div className="flex items-start space-x-2.5 text-xs text-white/80">
-            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0 mt-0.5" />
-            <span>
-              <strong>Dual-Platform Parity:</strong> Full support for Windows (app.exe) and Linux (app.elf) runtime targets.
-            </span>
-          </div>
+          {highlights.map((item, index) => (
+            <div key={index} className="flex items-start space-x-2.5 text-xs text-white/80">
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0 mt-0.5" />
+              <span>
+                <strong>{item.title}:</strong> {item.description}
+              </span>
+            </div>
+          ))}
         </div>
 
         {/* Single Continue Action */}
