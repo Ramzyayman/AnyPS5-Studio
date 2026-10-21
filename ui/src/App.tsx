@@ -3,7 +3,6 @@ import { TopBar } from './components/TopBar';
 import { HomeScreen } from './components/HomeScreen';
 import { RelinkerStudio } from './components/RelinkerStudio';
 import { NidInspector } from './components/NidInspector';
-import { PrxManager } from './components/PrxManager';
 import { TelemetryPanel } from './components/TelemetryPanel';
 import { GameLauncherModal } from './components/GameLauncherModal';
 import { AddGameModal } from './components/AddGameModal';
@@ -20,7 +19,7 @@ import { CheckCircle2, X } from 'lucide-react';
 
 import { INITIAL_GAMES } from './services/sampleData';
 
-export type ActiveTab = 'games' | 'relinker' | 'runtimes' | 'community' | 'nid' | 'prx' | 'telemetry' | 'settings';
+export type ActiveTab = 'games' | 'relinker' | 'runtimes' | 'community' | 'nid' | 'telemetry' | 'settings';
 
 export const App: React.FC = () => {
   const [games, setGames] = useState<GameItem[]>([]);
@@ -56,7 +55,7 @@ export const App: React.FC = () => {
     }
     apiBridge.saveSettings({ advanced: enabled }).catch(() => {});
     // If user is currently viewing an advanced section and disables Advanced, navigate safely to Games
-    if (!enabled && ['nid', 'prx', 'telemetry', 'community', 'runtimes'].includes(activeTab)) {
+    if (!enabled && ['nid', 'telemetry', 'community', 'runtimes'].includes(activeTab)) {
       setActiveTab('games');
     }
   };
@@ -101,8 +100,8 @@ export const App: React.FC = () => {
     return () => unsub();
   }, []);
 
-  const availableTabs: ('games' | 'relinker' | 'runtimes' | 'community' | 'nid' | 'prx' | 'telemetry')[] = showAdvancedNav
-    ? ['games', 'relinker', 'runtimes', 'community', 'nid', 'prx', 'telemetry']
+  const availableTabs: ('games' | 'relinker' | 'runtimes' | 'community' | 'nid' | 'telemetry')[] = showAdvancedNav
+    ? ['games', 'relinker', 'runtimes', 'community', 'nid', 'telemetry']
     : ['games', 'relinker'];
 
   // Keyboard navigation for authentic console feel
@@ -421,10 +420,6 @@ export const App: React.FC = () => {
               </button>
             </div>
           )}
-        </div>
-
-        <div className={`w-full h-full ${activeTab === 'prx' ? 'block' : 'hidden'}`}>
-          <PrxManager />
         </div>
 
         <div className={`w-full h-full ${activeTab === 'telemetry' ? 'block' : 'hidden'}`}>

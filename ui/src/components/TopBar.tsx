@@ -11,15 +11,14 @@ import {
   Wrench,
   GitPullRequest,
   Code2,
-  Layers,
   Activity
 } from 'lucide-react';
 import { audioService } from '../services/audioService';
 import { apiBridge } from '../services/apiBridge';
 
 interface TopBarProps {
-  activeTab: 'games' | 'relinker' | 'runtimes' | 'community' | 'nid' | 'prx' | 'telemetry' | 'settings';
-  onTabChange: (tab: 'games' | 'relinker' | 'runtimes' | 'community' | 'nid' | 'prx' | 'telemetry' | 'settings') => void;
+  activeTab: 'games' | 'relinker' | 'runtimes' | 'community' | 'nid' | 'telemetry' | 'settings';
+  onTabChange: (tab: 'games' | 'relinker' | 'runtimes' | 'community' | 'nid' | 'telemetry' | 'settings') => void;
   onOpenAddGame: () => void;
   onOpenSettings: () => void;
   gamepadConnected: boolean;
@@ -33,14 +32,13 @@ const PRIMARY_NAV_ITEMS: { key: 'games' | 'relinker' | 'runtimes'; label: string
 ];
 
 const DIAGNOSTIC_ITEMS: {
-  key: 'community' | 'nid' | 'prx' | 'telemetry';
+  key: 'community' | 'nid' | 'telemetry';
   label: string;
   desc: string;
   icon: React.ComponentType<{ className?: string }>;
 }[] = [
   { key: 'community', label: 'Community PR Builds', desc: 'Pull request testing & multi-PR merging', icon: GitPullRequest },
   { key: 'nid', label: 'NID Inspector', desc: 'Audit unresolved PS5 system calls', icon: Code2 },
-  { key: 'prx', label: 'PRX Libraries', desc: 'Clean-room system translation modules', icon: Layers },
   { key: 'telemetry', label: 'System Status', desc: 'Hardware & translation telemetry', icon: Activity },
 ];
 
@@ -103,7 +101,7 @@ export const TopBar: React.FC<TopBarProps> = ({
     };
   }, [isDiagOpen]);
 
-  const handleTabClick = (tab: 'games' | 'relinker' | 'runtimes' | 'community' | 'nid' | 'prx' | 'telemetry') => {
+  const handleTabClick = (tab: 'games' | 'relinker' | 'runtimes' | 'community' | 'nid' | 'telemetry') => {
     if (tab !== activeTab) {
       audioService.playNavTick();
       onTabChange(tab);
