@@ -34,7 +34,7 @@ export const App: React.FC = () => {
   const [communitySearchKeyword, setCommunitySearchKeyword] = useState<string>('');
   const [isSetupWizardOpen, setIsSetupWizardOpen] = useState<boolean>(false);
   const [isSystemUpdatedOpen, setIsSystemUpdatedOpen] = useState<boolean>(false);
-  const [currentAppVersion, setCurrentAppVersion] = useState<string>('1.2.1');
+  const [currentAppVersion, setCurrentAppVersion] = useState<string>('1.3.0');
 
 
   // Advanced navbar items setting (persisted in localStorage, default OFF)
@@ -68,7 +68,7 @@ export const App: React.FC = () => {
         const [loadedGames, settings, appVer] = await Promise.all([
           apiBridge.getGames(),
           apiBridge.getSettings(),
-          apiBridge.getAppVersion().catch(() => '1.2.1'),
+          apiBridge.getAppVersion().catch(() => '1.3.0'),
         ]);
         setGames(loadedGames);
         setCurrentAppVersion(appVer);

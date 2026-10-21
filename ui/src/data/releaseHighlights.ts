@@ -44,6 +44,12 @@ export const RELEASE_HIGHLIGHTS_MAP: Record<string, ReleaseHighlight[]> = {
       title: 'Seamless Update Detection',
       description: 'Automatically preserves existing user libraries and configuration without repeating setup.'
     }
+  ],
+  '1.3.0': [
+    {
+      title: 'Bulk Import',
+      description: 'Automatically discover and add multiple PlayStation 5 titles from any directory.'
+    }
   ]
 };
 
