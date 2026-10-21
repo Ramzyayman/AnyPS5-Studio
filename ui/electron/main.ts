@@ -394,6 +394,150 @@ function inspectGameFolder(folderPath: string) {
   }
 }
 
+ipcMain.handle('anyps5:scan-directory', async (_, rootPath: string) => {
+  return scanDirectoryForGames(rootPath);
+});
+
+interface DiscoveredGameCandidate {
+  path: string;
+  title: string;
+  titleId: string;
+  version: string;
+  iconUrl: string;
+  backdropUrl: string;
+  sizeBytes: number;
+  hasEboot: boolean;
+}
+
+function isGameRootFolder(folderPath: string): boolean {
+  try {
+    if (!folderPath || !fs.existsSync(folderPath)) return false;
+    const entries = fs.readdirSync(folderPath);
+    for (const entry of entries) {
+      const lower = entry.toLowerCase();
+      if (lower === 'eboot.bin' || lower === 'eboot.elf') {
+        return true;
+      }
+      if (lower === 'app0') {
+        const app0Path = path.join(folderPath, entry);
+        try {
+          if (fs.statSync(app0Path).isDirectory()) {
+            const subEntries = fs.readdirSync(app0Path);
+            if (subEntries.some((e) => {
+              const subLower = e.toLowerCase();
+              return subLower === 'eboot.bin' || subLower === 'eboot.elf';
+            })) {
+              return true;
+            }
+          }
+        } catch {}
+      }
+    }
+  } catch {}
+  return false;
+}
+
+function scanDirectoryForGames(rootDir: string, maxDepth = 5): DiscoveredGameCandidate[] {
+  const discovered: DiscoveredGameCandidate[] = [];
+  const visitedRoots = new Set<string>();
+
+  if (!rootDir || !fs.existsSync(rootDir)) {
+    return discovered;
+  }
+
+  const normalizedRoot = path.resolve(rootDir);
+
+  if (isGameRootFolder(normalizedRoot)) {
+    const inspected = inspectGameFolder(normalizedRoot);
+    if (inspected) {
+      discovered.push({
+        path: normalizedRoot,
+        title: inspected.title || path.basename(normalizedRoot).replace(/[_-]/g, ' '),
+        titleId: inspected.titleId || 'PPSA99999',
+        version: inspected.version || '01.00',
+        iconUrl: inspected.iconUrl || '',
+        backdropUrl: inspected.backdropUrl || '',
+        sizeBytes: inspected.sizeBytes || 0,
+        hasEboot: inspected.hasEboot,
+      });
+      return discovered;
+    }
+  }
+
+  const IGNORED_NAMES = new Set([
+    '.git',
+    '.svn',
+    '.hg',
+    '.vscode',
+    '.idea',
+    'node_modules',
+    '.bin',
+    'system volume information',
+    'windows',
+    'program files',
+    'program files (x86)',
+  ]);
+
+  function traverse(currentDir: string, currentDepth: number) {
+    if (currentDepth > maxDepth) return;
+
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(currentDir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      try {
+        if (entry.isSymbolicLink && entry.isSymbolicLink()) continue;
+      } catch {}
+
+      const name = entry.name;
+      const lowerName = name.toLowerCase();
+
+      if (name.startsWith('.') || IGNORED_NAMES.has(lowerName)) {
+        continue;
+      }
+
+      const fullPath = path.resolve(currentDir, name);
+      const normalizedPath = fullPath.toLowerCase();
+
+      if (visitedRoots.has(normalizedPath)) {
+        continue;
+      }
+
+      if (isGameRootFolder(fullPath)) {
+        visitedRoots.add(normalizedPath);
+        try {
+          const inspected = inspectGameFolder(fullPath);
+          if (inspected) {
+            discovered.push({
+              path: fullPath,
+              title: inspected.title || name.replace(/[_-]/g, ' '),
+              titleId: inspected.titleId || 'PPSA99999',
+              version: inspected.version || '01.00',
+              iconUrl: inspected.iconUrl || '',
+              backdropUrl: inspected.backdropUrl || '',
+              sizeBytes: inspected.sizeBytes || 0,
+              hasEboot: inspected.hasEboot,
+            });
+          }
+        } catch (err) {
+          console.error('Failed to inspect discovered game folder:', err);
+        }
+        continue;
+      }
+
+      traverse(fullPath, currentDepth + 1);
+    }
+  }
+
+  traverse(normalizedRoot, 1);
+  return discovered;
+}
+
 // Settings & Dynamic Installation Paths Management
 const settingsStorePath = path.join(app.getPath('userData'), 'anyps5_settings.json');
 

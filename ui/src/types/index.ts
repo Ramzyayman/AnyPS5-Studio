@@ -31,6 +31,17 @@ export interface GameItem {
   };
 }
 
+export interface DiscoveredGameCandidate {
+  path: string;
+  title: string;
+  titleId: string;
+  version: string;
+  iconUrl: string;
+  backdropUrl: string;
+  sizeBytes: number;
+  hasEboot: boolean;
+}
+
 export interface RelinkerOptions {
   target: 'windows' | 'linux' | 'macos';
   subsystem: 'gui' | 'console';

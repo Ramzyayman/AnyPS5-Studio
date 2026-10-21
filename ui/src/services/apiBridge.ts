@@ -25,7 +25,8 @@ import {
   SourceSyncStatus,
   BuilderLogMessage,
   BuildProgressStatus,
-  BuildResult
+  BuildResult,
+  DiscoveredGameCandidate
 } from '../types';
 import { INITIAL_GAMES } from './sampleData';
 
@@ -43,6 +44,7 @@ declare global {
         hasEboot?: boolean;
         sizeBytes?: number;
       } | null>;
+      scanDirectory?: (rootPath: string) => Promise<DiscoveredGameCandidate[]>;
       getGames: () => Promise<GameItem[]>;
       saveGames: (games: GameItem[]) => Promise<void>;
       getSettings?: () => Promise<AppSettings>;
@@ -174,6 +176,34 @@ class ApiBridge {
       return await window.anyps5.inspectFolder(folderPath);
     }
     return null;
+  }
+
+  public async scanDirectoryForGames(rootPath: string): Promise<DiscoveredGameCandidate[]> {
+    if (window.anyps5?.scanDirectory) {
+      return await window.anyps5.scanDirectory(rootPath);
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 600));
+
+    const simulatedTitles = [
+      { name: "Demon's Souls", id: 'PPSA01339', size: 52 * 1024 * 1024 * 1024 },
+      { name: 'Returnal', id: 'PPSA01285', size: 56 * 1024 * 1024 * 1024 },
+      { name: 'Ratchet and Clank: Rift Apart', id: 'PPSA01473', size: 42 * 1024 * 1024 * 1024 },
+      { name: "Marvel's Spider-Man 2", id: 'PPSA02188', size: 98 * 1024 * 1024 * 1024 },
+    ];
+
+    const cleanRoot = rootPath ? rootPath.replace(/\\/g, '/').replace(/\/+$/, '') : 'D:/Games/PS5';
+
+    return simulatedTitles.map((item, idx) => ({
+      path: cleanRoot + '/' + item.name.replace(/[^a-zA-Z0-9]/g, '_'),
+      title: item.name,
+      titleId: item.id,
+      version: '01.00',
+      iconUrl: INITIAL_GAMES[idx % INITIAL_GAMES.length]?.iconUrl || '',
+      backdropUrl: INITIAL_GAMES[idx % INITIAL_GAMES.length]?.backdropUrl || '',
+      sizeBytes: item.size,
+      hasEboot: true,
+    }));
   }
 
   public async selectFile(filters?: Array<{ name: string; extensions: string[] }>): Promise<string | null> {
