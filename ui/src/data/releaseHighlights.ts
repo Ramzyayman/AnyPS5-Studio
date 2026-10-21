@@ -50,6 +50,16 @@ export const RELEASE_HIGHLIGHTS_MAP: Record<string, ReleaseHighlight[]> = {
       title: 'Bulk Import',
       description: 'Automatically discover and add multiple PlayStation 5 titles from any directory.'
     }
+  ],
+  '1.3.1': [
+    {
+      title: 'Real-Time NID Inspector',
+      description: 'Live dynamic symbol extraction and coverage auditing directly from authentic PlayStation 5 binaries with an integrated title switcher.'
+    },
+    {
+      title: 'Streamlined Diagnostics',
+      description: 'Permanently retired the deprecated PRX mockup tab and optimized diagnostic navigation.'
+    }
   ]
 };
 
