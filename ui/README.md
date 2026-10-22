@@ -1,6 +1,6 @@
 # AnyPS5 UI · PlayStation 5 Studio & Launcher
 
-An all-in-one desktop game launcher and relinker studio for **[AnyPS5](https://github.com/Ramzyayman/AnyPS5)**, featuring an authentic **PlayStation 5 UI/UX aesthetic**, dynamic game hero shelf, live relinker execution, NID symbol auditing, and PRX library management.
+An all-in-one desktop game launcher and relinker studio for **[AnyPS5](https://github.com/ramsforge/AnyPS5)**, featuring an authentic **PlayStation 5 UI/UX aesthetic**, dynamic game hero shelf, live relinker execution, NID symbol auditing, and PRX library management.
 
 ![AnyPS5 UI Preview](https://images.unsplash.com/photo-1550745165-9bc0b252726f?auto=format&fit=crop&w=1200&q=80)
 

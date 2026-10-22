@@ -23,7 +23,7 @@
     },
     "publish": {
       "provider": "github",
-      "owner": "Ramzyayman",
+      "owner": "ramsforge",
       "repo": "AnyPS5-Studio"
     },
     "files": [

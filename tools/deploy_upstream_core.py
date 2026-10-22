@@ -43,7 +43,7 @@ def deploy(target_platform):
     downloaded = False
     candidate_run_id = None
 
-    res_api = run_cmd("gh api repos/Ramzyayman/AnyPS5-Studio/actions/artifacts", check=False)
+    res_api = run_cmd("gh api repos/ramsforge/AnyPS5-Studio/actions/artifacts", check=False)
     if res_api.returncode == 0:
         try:
             data = json.loads(res_api.stdout)
@@ -66,7 +66,7 @@ def deploy(target_platform):
 
     if candidate_run_id:
         print(f"Downloading {artifact_name} from run #{candidate_run_id}...")
-        cmd = f'gh run download {candidate_run_id} --name {artifact_name} --dir "{temp_dir}" --repo Ramzyayman/AnyPS5-Studio'
+        cmd = f'gh run download {candidate_run_id} --name {artifact_name} --dir "{temp_dir}" --repo ramsforge/AnyPS5-Studio'
         res = run_cmd(cmd, check=False)
         if res.returncode == 0:
             downloaded = True
@@ -75,7 +75,7 @@ def deploy(target_platform):
 
     if not downloaded:
         print(f"Attempting general artifact download for {artifact_name}...")
-        cmd = f'gh run download --name {artifact_name} --dir "{temp_dir}" --repo Ramzyayman/AnyPS5-Studio'
+        cmd = f'gh run download --name {artifact_name} --dir "{temp_dir}" --repo ramsforge/AnyPS5-Studio'
         res = run_cmd(cmd, check=False)
         if res.returncode == 0:
             downloaded = True

@@ -1,7 +1,7 @@
 # AnyPS5 Studio
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/Ramzyayman/AnyPS5-Studio/assets/01_HomeScreen_DreamingSarah.png" alt="AnyPS5 Studio Hero" width="950" />
+  <img src="https://raw.githubusercontent.com/ramsforge/AnyPS5-Studio/assets/01_HomeScreen_DreamingSarah.png" alt="AnyPS5 Studio Hero" width="950" />
 </p>
 
 <p align="center">
@@ -10,10 +10,10 @@
 
 
 <p align="center">
-  <a href="https://github.com/Ramzyayman/AnyPS5-Studio/releases"><img src="https://img.shields.io/github/v/release/Ramzyayman/AnyPS5-Studio?include_prereleases&color=0070d1&label=Release" alt="Release" /></a>
-  <a href="https://github.com/Ramzyayman/AnyPS5-Studio/actions"><img src="https://img.shields.io/badge/Platforms-Windows%20%7C%20Linux%20x64-34d399" alt="Platforms" /></a>
+  <a href="https://github.com/ramsforge/AnyPS5-Studio/releases"><img src="https://img.shields.io/github/v/release/ramsforge/AnyPS5-Studio?include_prereleases&color=0070d1&label=Release" alt="Release" /></a>
+  <a href="https://github.com/ramsforge/AnyPS5-Studio/actions"><img src="https://img.shields.io/badge/Platforms-Windows%20%7C%20Linux%20x64-34d399" alt="Platforms" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPL--2.0-blue.svg" alt="License" /></a>
-  <a href="https://github.com/Ramzyayman/AnyPS5-Studio"><img src="https://img.shields.io/badge/Architecture-Static%20Binary%20Relinking-purple" alt="Architecture" /></a>
+  <a href="https://github.com/ramsforge/AnyPS5-Studio"><img src="https://img.shields.io/badge/Architecture-Static%20Binary%20Relinking-purple" alt="Architecture" /></a>
 </p>
 
 ---
@@ -22,7 +22,7 @@ AnyPS5 Studio is an all-in-one desktop launcher, management interface, and stati
 
 Unlike traditional virtual-machine emulators, AnyPS5 operates via **static binary relinking**. The PlayStation 5 executable (ELF) is analyzed, translated at the machine instruction level, and converted directly into native host executables (`.exe` on Windows, native ELF `.elf` on Linux). Games execute directly on your host CPU and GPU through clean-room high-level emulation (HLE) system libraries and native Vulkan / DirectX 12 rendering pipelines.
 
-[Latest Releases](https://github.com/Ramzyayman/AnyPS5-Studio/releases) | [Architecture Documentation](docs/dev/ARCHITECTURE.md) | [Build Instructions](docs/dev/BUILD.md)
+[Latest Releases](https://github.com/ramsforge/AnyPS5-Studio/releases) | [Architecture Documentation](docs/dev/ARCHITECTURE.md) | [Build Instructions](docs/dev/BUILD.md)
 
 ---
 
@@ -32,36 +32,36 @@ Unlike traditional virtual-machine emulators, AnyPS5 operates via **static binar
 Immersive console-grade interface with dynamic background hero artwork, smooth navigation, DualSense wireless controller status, and detailed compatibility breakdowns.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/Ramzyayman/AnyPS5-Studio/assets/02_HomeScreen_AstrosPlayroom.png" alt="Home Screen Showcase" width="470" />
+  <img src="https://raw.githubusercontent.com/ramsforge/AnyPS5-Studio/assets/02_HomeScreen_AstrosPlayroom.png" alt="Home Screen Showcase" width="470" />
   &nbsp;
-  <img src="https://raw.githubusercontent.com/Ramzyayman/AnyPS5-Studio/assets/03_Technical_Specs_Drawer.png" alt="Technical Specs Drawer" width="470" />
+  <img src="https://raw.githubusercontent.com/ramsforge/AnyPS5-Studio/assets/03_Technical_Specs_Drawer.png" alt="Technical Specs Drawer" width="470" />
 </p>
 
 ### 2. Dual-Mode Relinker Studio
 Convert real PlayStation 5 binaries with a single click in **Simple Mode**, or fine-tune CPU instruction lowering, subsystem targets, and symbol optimization in **Advanced Mode**.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/Ramzyayman/AnyPS5-Studio/assets/04_RelinkerStudio_SimpleMode.png" alt="Relinker Studio Simple Mode" width="470" />
+  <img src="https://raw.githubusercontent.com/ramsforge/AnyPS5-Studio/assets/04_RelinkerStudio_SimpleMode.png" alt="Relinker Studio Simple Mode" width="470" />
   &nbsp;
-  <img src="https://raw.githubusercontent.com/Ramzyayman/AnyPS5-Studio/assets/05_RelinkerStudio_AdvancedMode.png" alt="Relinker Studio Advanced Mode" width="470" />
+  <img src="https://raw.githubusercontent.com/ramsforge/AnyPS5-Studio/assets/05_RelinkerStudio_AdvancedMode.png" alt="Relinker Studio Advanced Mode" width="470" />
 </p>
 
 ### 3. State-Driven Game Launcher & Real-Time Telemetry
 Monitors active game sessions with live elapsed playtime tracking, Vulkan pipeline counters, genuine CPU instruction extension checks, and high-performance discrete GPU prioritization.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/Ramzyayman/AnyPS5-Studio/assets/10_GameLauncher_ActiveSession.png" alt="State-Driven Game Launcher" width="470" />
+  <img src="https://raw.githubusercontent.com/ramsforge/AnyPS5-Studio/assets/10_GameLauncher_ActiveSession.png" alt="State-Driven Game Launcher" width="470" />
   &nbsp;
-  <img src="https://raw.githubusercontent.com/Ramzyayman/AnyPS5-Studio/assets/08_SystemTelemetry.png" alt="System Hardware Telemetry" width="470" />
+  <img src="https://raw.githubusercontent.com/ramsforge/AnyPS5-Studio/assets/08_SystemTelemetry.png" alt="System Hardware Telemetry" width="470" />
 </p>
 
 ### 4. Compatibility Auditor & Clean-Room System PRXs
 Inspect imported function NIDs, discover missing middleware stubs, and manage installed clean-room PlayStation 5 system libraries.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/Ramzyayman/AnyPS5-Studio/assets/06_NidInspector.png" alt="PlayStation 5 NID Inspector" width="470" />
+  <img src="https://raw.githubusercontent.com/ramsforge/AnyPS5-Studio/assets/06_NidInspector.png" alt="PlayStation 5 NID Inspector" width="470" />
   &nbsp;
-  <img src="https://raw.githubusercontent.com/Ramzyayman/AnyPS5-Studio/assets/07_PrxLibraries.png" alt="Clean-Room PRX Modules" width="470" />
+  <img src="https://raw.githubusercontent.com/ramsforge/AnyPS5-Studio/assets/07_PrxLibraries.png" alt="Clean-Room PRX Modules" width="470" />
 </p>
 
 ---
@@ -95,7 +95,7 @@ Inspect imported function NIDs, discover missing middleware stubs, and manage in
 ### Installation
 
 #### Windows
-1. Download `AnyPS5-Studio-Setup-1.3.1.exe` from the [Releases](https://github.com/Ramzyayman/AnyPS5-Studio/releases) page.
+1. Download `AnyPS5-Studio-Setup-1.3.1.exe` from the [Releases](https://github.com/ramsforge/AnyPS5-Studio/releases) page.
 2. Run the 1-click silent installer to install AnyPS5 Studio. The installer automatically provisions the static relinker engine (`relinker.exe`), clean-room PlayStation 5 system libraries (`libs/`), and graphics translation DLLs without administrative UAC prompts.
 
 #### Linux
@@ -135,7 +135,7 @@ Install FUSE 2 for your distribution:
   ```
 
 ##### 2. Download and Mark Executable
-1. Download the latest `AnyPS5-Studio-1.3.1.AppImage` from [GitHub Releases](https://github.com/Ramzyayman/AnyPS5-Studio/releases).
+1. Download the latest `AnyPS5-Studio-1.3.1.AppImage` from [GitHub Releases](https://github.com/ramsforge/AnyPS5-Studio/releases).
 2. Open a terminal in the folder containing the downloaded file (e.g. `cd ~/Downloads`).
 3. Make the AppImage executable:
    ```bash

@@ -468,8 +468,7 @@ export class GitHubAuthService {
     try {
       onProgress?.('downloading', 10);
 
-      // Repos to search: boykopovar/AnyPS5, Ramzyayman/AnyPS5-Studio
-      const candidateRepos = ['boykopovar/AnyPS5', 'Ramzyayman/AnyPS5-Studio'];
+      const candidateRepos = ['boykopovar/AnyPS5', 'ramsforge/AnyPS5-Studio'];
       let targetArtifact: { id: number; name: string; archive_download_url: string; repo: string } | null = null;
 
       for (const repo of candidateRepos) {

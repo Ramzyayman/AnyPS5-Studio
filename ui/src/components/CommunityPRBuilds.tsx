@@ -598,9 +598,9 @@ export const CommunityPRBuilds: React.FC<CommunityPRBuildsProps> = ({
             </button>
             <button
               type="button"
-              onClick={() => handleRepoChange('Ramzyayman/AnyPS5-Studio')}
+              onClick={() => handleRepoChange('ramsforge/AnyPS5-Studio')}
               className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all ${
-                selectedRepo === 'Ramzyayman/AnyPS5-Studio'
+                selectedRepo === 'ramsforge/AnyPS5-Studio'
                   ? 'bg-white text-black font-semibold shadow-sm'
                   : 'text-neutral-400 hover:text-white'
               }`}
@@ -761,13 +761,13 @@ export const CommunityPRBuilds: React.FC<CommunityPRBuildsProps> = ({
                 <div className="h-64 flex flex-col items-center justify-center space-y-2 text-center">
                   <GitPullRequest className="w-8 h-8 text-neutral-600 mb-1" />
                   <p className="text-sm font-semibold text-neutral-300">
-                    {selectedRepo === 'Ramzyayman/AnyPS5-Studio' && !searchQuery
+                    {selectedRepo === 'ramsforge/AnyPS5-Studio' && !searchQuery
                       ? 'No Open Pull Requests in Studio UI'
                       : 'No matching pull requests found'}
                   </p>
                   <p className="text-xs text-neutral-500 max-w-sm">
-                    {selectedRepo === 'Ramzyayman/AnyPS5-Studio' && !searchQuery
-                      ? 'There are currently no active pull requests in Ramzyayman/AnyPS5-Studio. Switch to Upstream Core to view game compatibility patches.'
+                    {selectedRepo === 'ramsforge/AnyPS5-Studio' && !searchQuery
+                      ? 'There are currently no active pull requests in ramsforge/AnyPS5-Studio. Switch to Upstream Core to view game compatibility patches.'
                       : 'Try adjusting your search query, or enter a specific PR number in the box above.'}
                   </p>
                 </div>
