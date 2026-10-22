@@ -77,7 +77,6 @@
       "artifactName": "AnyPS5-Studio-Setup-${version}.${ext}"
     },
     "nsis": {
-      "compression": "maximum",
       "oneClick": true,
       "perMachine": false,
       "allowElevation": false,
