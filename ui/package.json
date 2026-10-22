@@ -11,13 +11,15 @@
     "build:electron": "esbuild electron/main.ts --bundle --platform=node --target=node18 --outfile=dist-electron/main.cjs --external:electron --external:electron-updater && esbuild electron/preload.ts --bundle --platform=node --target=node18 --outfile=dist-electron/preload.cjs --external:electron",
     "build:all": "npm run build && npm run build:electron",
     "electron": "npm run build:all && electron .",
-    "dist": "npm run build:all && electron-builder",
+    "prepare:installer": "node scripts/prepare-installer.cjs",
+    "dist": "npm run build:all && npm run prepare:installer && electron-builder",
     "preview": "vite preview"
   },
   "build": {
     "appId": "com.anyps5.studio",
     "productName": "AnyPS5 Studio",
     "copyright": "Copyright © 2026 RamsMadeUI",
+    "compression": "maximum",
     "directories": {
       "output": "dist-installer"
     },
@@ -33,7 +35,7 @@
     ],
     "extraResources": [
       {
-        "from": "../build",
+        "from": "dist-resources/build",
         "to": "build",
         "filter": [
           "relinker",
@@ -41,11 +43,11 @@
         ]
       },
       {
-        "from": "../libs",
+        "from": "dist-resources/libs",
         "to": "libs"
       },
       {
-        "from": "../tools",
+        "from": "dist-resources/tools",
         "to": "tools"
       }
     ],
@@ -75,6 +77,7 @@
       "artifactName": "AnyPS5-Studio-Setup-${version}.${ext}"
     },
     "nsis": {
+      "compression": "maximum",
       "oneClick": true,
       "perMachine": false,
       "allowElevation": false,

@@ -2,6 +2,7 @@ node_modules
 dist
 dist-electron
 dist-installer
+dist-resources
 .DS_Store
 *.local
 
