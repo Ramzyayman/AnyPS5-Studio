@@ -10,7 +10,7 @@
 
 
 <p align="center">
-  <a href="https://github.com/ramsforge/AnyPS5-Studio/releases"><img src="https://img.shields.io/github/v/release/ramsforge/AnyPS5-Studio?include_prereleases&color=0070d1&label=Release" alt="Release" /></a>
+  <a href="https://github.com/ramsforge/AnyPS5-Studio/releases"><img src="https://img.shields.io/github/v/release/ramsforge/AnyPS5-Studio?color=0070d1&label=Release&logo=playstation" alt="Release" /></a>
   <a href="https://github.com/ramsforge/AnyPS5-Studio/actions"><img src="https://img.shields.io/badge/Platforms-Windows%20%7C%20Linux%20x64-34d399" alt="Platforms" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPL--2.0-blue.svg" alt="License" /></a>
   <a href="https://github.com/ramsforge/AnyPS5-Studio"><img src="https://img.shields.io/badge/Architecture-Static%20Binary%20Relinking-purple" alt="Architecture" /></a>
