@@ -13,7 +13,8 @@ import {
   Monitor,
   Shield,
   Layers,
-  ArrowRight
+  ArrowRight,
+  Radio
 } from 'lucide-react';
 import { audioService } from '../services/audioService';
 import { apiBridge } from '../services/apiBridge';
@@ -42,6 +43,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
   const [advanced, setAdvanced] = useState<boolean>(showAdvancedNav);
   const [appVersion, setAppVersion] = useState<string>('1.1.2-preview.2');
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus>({ status: 'idle' });
+  const [discordRpcEnabled, setDiscordRpcEnabled] = useState<boolean>(true);
   const [isSaved, setIsSaved] = useState<boolean>(false);
 
   useEffect(() => {
@@ -76,6 +78,9 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
         } else {
           setAdvanced(showAdvancedNav);
         }
+        if (settings.discordRpcEnabled !== undefined) {
+          setDiscordRpcEnabled(settings.discordRpcEnabled);
+        }
       }
     });
   }, [showAdvancedNav]);
@@ -98,6 +103,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
     setCpuFix('intel');
     setAdvanced(false);
     onToggleAdvancedNav(false);
+    setDiscordRpcEnabled(true);
     setIsSaved(false);
   };
 
@@ -127,12 +133,20 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
       hapticsEnabled,
       advanced,
       preferredGpu,
+      discordRpcEnabled,
     });
     onToggleAdvancedNav(advanced);
     setIsSaved(true);
     setTimeout(() => {
       setIsSaved(false);
     }, 2500);
+  };
+
+  const handleDiscordRpcToggle = async (checked: boolean) => {
+    audioService.playNavTick();
+    setDiscordRpcEnabled(checked);
+    setIsSaved(false);
+    await apiBridge.saveSettings({ discordRpcEnabled: checked });
   };
 
   return (
@@ -387,6 +401,34 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
                   <span className="font-medium text-white">DualSense Adaptive Triggers & Haptics</span>
                   <span className="text-[11px] text-white/50 mt-0.5 leading-normal">
                     Emulates PlayStation 5 DualSense force-feedback resistive triggers and high-definition haptic vibration.
+                  </span>
+                </div>
+              </label>
+            </div>
+          </div>
+
+          {/* Section: General & Integrations */}
+          <div className="p-6 rounded-2xl bg-[#0b0e14]/90 border border-white/10 shadow-xl backdrop-blur-md">
+            <div className="flex items-center space-x-2.5 pb-4 border-b border-white/10 mb-5">
+              <Radio className="w-4 h-4 text-[#0070d1]" />
+              <h2 className="text-sm font-semibold text-white tracking-wide">General & Integrations</h2>
+            </div>
+
+            <div className="space-y-4">
+              <label className="flex items-start space-x-3.5 text-xs text-white/80 cursor-pointer p-3 rounded-xl hover:bg-white/[0.03] transition-colors border border-transparent hover:border-white/5">
+                <input
+                  type="checkbox"
+                  checked={discordRpcEnabled}
+                  onChange={(e) => handleDiscordRpcToggle(e.target.checked)}
+                  className="rounded bg-white/10 border-white/20 text-[#0070d1] focus:ring-0 mt-0.5"
+                />
+                <div className="flex flex-col">
+                  <div className="flex items-center space-x-2">
+                    <span className="font-medium text-white">Discord Rich Presence</span>
+                    <span className="px-2 py-0.5 rounded-full bg-[#5865F2]/15 text-[#5865F2] text-[10px] font-mono border border-[#5865F2]/30">Live IPC</span>
+                  </div>
+                  <span className="text-[11px] text-white/50 mt-0.5 leading-normal">
+                    Broadcasts active PlayStation 5 title, live elapsed playtime, and title cover art directly to your Discord profile via local named pipe.
                   </span>
                 </div>
               </label>

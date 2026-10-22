@@ -268,6 +268,7 @@ class ApiBridge {
       hapticsEnabled: true,
       advanced: false,
       preferredGpu: 'auto',
+      discordRpcEnabled: true,
     };
   }
 

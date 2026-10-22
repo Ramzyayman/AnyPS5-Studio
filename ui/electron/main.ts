@@ -8,6 +8,7 @@ import { unwrapSelf } from './self_unwrapper';
 import { RuntimeManager } from './runtimeManager';
 import { GitHubAuthService } from './githubAuth';
 import { LocalBuilderService } from './localBuilder';
+import { DiscordRpcClient } from './discordRpc';
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -170,11 +171,26 @@ if (!gotTheLock) {
       console.warn('AutoUpdater initialization error:', updaterErr);
     }
 
+    try {
+      const userSettings = loadSettings();
+      if (userSettings.discordRpcEnabled !== false) {
+        const rpc = getDiscordRpcClient();
+        rpc.setIdle();
+        rpc.connect();
+      }
+    } catch {}
+
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
     });
   });
 }
+
+app.on('before-quit', () => {
+  if (discordRpcClientInstance) {
+    discordRpcClientInstance.destroy();
+  }
+});
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
@@ -732,6 +748,8 @@ interface AppSettings {
   hasCompletedSetup?: boolean;
   lastSeenVersion?: string;
   gamesDirectory?: string;
+  discordRpcEnabled?: boolean;
+  discordClientId?: string;
 }
 
 interface DetectedGpu {
@@ -1045,6 +1063,18 @@ function getRuntimeManager(): RuntimeManager {
     );
   }
   return runtimeManagerInstance;
+}
+
+let discordRpcClientInstance: DiscordRpcClient | null = null;
+function getDiscordRpcClient(): DiscordRpcClient {
+  if (!discordRpcClientInstance) {
+    const userSettings = loadSettings();
+    discordRpcClientInstance = new DiscordRpcClient({
+      clientId: userSettings.discordClientId || '1562955881182920855',
+      enabled: userSettings.discordRpcEnabled !== false,
+    });
+  }
+  return discordRpcClientInstance;
 }
 
 function getResolvedRelinkerPath(): string {
@@ -2628,6 +2658,9 @@ ipcMain.handle('anyps5:launch-game', async (_, game) => {
       windowsHide: false,
     });
     activeGameProcess = child;
+    try {
+      getDiscordRpcClient().setGame(game);
+    } catch {}
 
     sendLog(`[AnyPS5] Launching native ported executable: ${targetExe}`);
     sendLog(`[AnyPS5] Initialized child process PID: ${child.pid}`);
@@ -2728,6 +2761,9 @@ ipcMain.handle('anyps5:launch-game', async (_, game) => {
 
       if (activeGameProcess === child) {
         activeGameProcess = null;
+        try {
+          getDiscordRpcClient().setIdle();
+        } catch {}
       }
     });
 
@@ -2739,6 +2775,25 @@ ipcMain.handle('anyps5:launch-game', async (_, game) => {
 
 // IPC Handler: Stop Running Game
 ipcMain.handle('anyps5:stop-game', async () => {
+  try {
+    getDiscordRpcClient().setIdle();
+  } catch {}
+  if (activeGameProcess && !activeGameProcess.killed) {
+    try {
+      activeGameProcess.kill();
+    } catch (err) {
+      console.error('Failed to kill game process:', err);
+    }
+    activeGameProcess = null;
+    return true;
+  }
+  return false;
+});
+
+ipcMain.handle('anyps5:kill-game', async () => {
+  try {
+    getDiscordRpcClient().setIdle();
+  } catch {}
   if (activeGameProcess && !activeGameProcess.killed) {
     try {
       activeGameProcess.kill();
@@ -2889,11 +2944,19 @@ ipcMain.handle('anyps5:get-settings', async () => {
     hasCompletedSetup: userSettings.hasCompletedSetup,
     lastSeenVersion: userSettings.lastSeenVersion,
     gamesDirectory: userSettings.gamesDirectory,
+    discordRpcEnabled: userSettings.discordRpcEnabled !== undefined ? userSettings.discordRpcEnabled : true,
+    discordClientId: userSettings.discordClientId || '1562955881182920855',
   };
 });
 
 ipcMain.handle('anyps5:save-settings', async (_, newSettings) => {
   saveSettings(newSettings);
+  if (newSettings && typeof newSettings.discordRpcEnabled === 'boolean') {
+    getDiscordRpcClient().setEnabled(newSettings.discordRpcEnabled);
+  }
+  if (newSettings && typeof newSettings.discordClientId === 'string' && newSettings.discordClientId.trim()) {
+    getDiscordRpcClient().setClientId(newSettings.discordClientId.trim());
+  }
   return true;
 });
 

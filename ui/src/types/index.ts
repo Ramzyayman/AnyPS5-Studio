@@ -169,6 +169,8 @@ export interface AppSettings {
   hasCompletedSetup?: boolean;
   lastSeenVersion?: string;
   gamesDirectory?: string;
+  discordRpcEnabled: boolean;
+  discordClientId?: string;
 }
 
 export interface GitHubAuthStatus {
