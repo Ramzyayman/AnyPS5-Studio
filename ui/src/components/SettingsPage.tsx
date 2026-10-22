@@ -44,6 +44,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
   const [appVersion, setAppVersion] = useState<string>('1.1.2-preview.2');
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus>({ status: 'idle' });
   const [discordRpcEnabled, setDiscordRpcEnabled] = useState<boolean>(true);
+  const [discordConnected, setDiscordConnected] = useState<boolean>(false);
   const [isSaved, setIsSaved] = useState<boolean>(false);
 
   useEffect(() => {
@@ -51,7 +52,17 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
     const unsub = apiBridge.onUpdateStatus((status) => {
       setUpdateStatus(status);
     });
-    return () => unsub();
+    const checkDiscord = () => {
+      apiBridge.getDiscordStatus().then((st) => {
+        setDiscordConnected(st.connected);
+      }).catch(() => {});
+    };
+    checkDiscord();
+    const discordInterval = setInterval(checkDiscord, 3000);
+    return () => {
+      unsub();
+      clearInterval(discordInterval);
+    };
   }, []);
 
   useEffect(() => {
@@ -422,14 +433,30 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
                   onChange={(e) => handleDiscordRpcToggle(e.target.checked)}
                   className="rounded bg-white/10 border-white/20 text-[#0070d1] focus:ring-0 mt-0.5"
                 />
-                <div className="flex flex-col">
-                  <div className="flex items-center space-x-2">
+                <div className="flex flex-col flex-1">
+                  <div className="flex items-center justify-between">
                     <span className="font-medium text-white">Discord Rich Presence</span>
-                    <span className="px-2 py-0.5 rounded-full bg-[#5865F2]/15 text-[#5865F2] text-[10px] font-mono border border-[#5865F2]/30">Live IPC</span>
+                    {discordRpcEnabled && (
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono border flex items-center space-x-1.5 ${
+                        discordConnected
+                          ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                          : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                      }`}>
+                        <span className={`w-1.5 h-1.5 rounded-full ${discordConnected ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`}></span>
+                        <span>{discordConnected ? 'Broadcasting Live' : 'Discord Not Detected'}</span>
+                      </span>
+                    )}
                   </div>
-                  <span className="text-[11px] text-white/50 mt-0.5 leading-normal">
+                  <span className="text-[11px] text-white/50 mt-1 leading-normal">
                     Broadcasts active PlayStation 5 title, live elapsed playtime, and title cover art directly to your Discord profile via local named pipe.
                   </span>
+
+                  <div className="mt-2.5 p-2.5 rounded-lg bg-white/[0.02] border border-white/5 text-[11px] text-white/50 space-y-1">
+                    <p className="text-white/70 font-medium">Discord Profile Setup:</p>
+                    <p>
+                      Ensure &ldquo;Activity Privacy &gt; Display current activity as a status message&rdquo; is toggled ON in your Discord client, and your status is not set to Invisible.
+                    </p>
+                  </div>
                 </div>
               </label>
             </div>

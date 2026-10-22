@@ -2506,6 +2506,9 @@ let activeGameProcess: ChildProcess | null = null;
 
 // IPC Handler: Launch Ported Game
 ipcMain.handle('anyps5:launch-game', async (_, game) => {
+  try {
+    getDiscordRpcClient().setGame(game);
+  } catch {}
   const sendLog = (message: string, level = 'info') => {
     mainWindow?.webContents.send('anyps5:game-log', {
       timestamp: new Date().toLocaleTimeString(),
@@ -2544,6 +2547,9 @@ ipcMain.handle('anyps5:launch-game', async (_, game) => {
   const targetExe = candidateExes.find((p) => fs.existsSync(p));
 
   if (!targetExe) {
+    try {
+      getDiscordRpcClient().setIdle();
+    } catch {}
     const expectedName = safeGameExe || defaultExeName;
     return {
       error: `Ported executable "${expectedName}" not found in ${game.path}. Please open Relinker Studio and click Relink first!`,
@@ -2958,6 +2964,22 @@ ipcMain.handle('anyps5:save-settings', async (_, newSettings) => {
     getDiscordRpcClient().setClientId(newSettings.discordClientId.trim());
   }
   return true;
+});
+
+ipcMain.handle('anyps5:get-discord-status', async () => {
+  const client = getDiscordRpcClient();
+  return {
+    enabled: client.isEnabled(),
+    connected: client.isConnectedAndReady(),
+    currentActivity: client.getCurrentActivity(),
+  };
+});
+
+ipcMain.handle('anyps5:reconnect-discord', async () => {
+  const client = getDiscordRpcClient();
+  client.disconnect();
+  client.connect();
+  return client.isConnectedAndReady();
 });
 
 ipcMain.handle('anyps5:get-available-gpus', async () => {

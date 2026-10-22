@@ -21,6 +21,8 @@ contextBridge.exposeInMainWorld('anyps5', {
   quitAndInstallUpdate: () => ipcRenderer.invoke('anyps5:quit-and-install-update'),
   getAppVersion: () => ipcRenderer.invoke('anyps5:get-app-version'),
   openExternal: (url: string) => ipcRenderer.invoke('anyps5:open-external', url),
+  getDiscordStatus: () => ipcRenderer.invoke('anyps5:get-discord-status'),
+  reconnectDiscord: () => ipcRenderer.invoke('anyps5:reconnect-discord'),
   onUpdateStatus: (callback: (status: unknown) => void) => {
     const handler = (_: unknown, status: unknown) => callback(status);
     ipcRenderer.on('anyps5:update-status', handler);

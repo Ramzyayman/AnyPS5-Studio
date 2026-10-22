@@ -40,6 +40,7 @@ export class DiscordRpcClient {
   private reconnectTimer: NodeJS.Timeout | null = null;
   private currentActivity: DiscordActivity | null | undefined = undefined;
   private activeGame: { title: string; iconUrl?: string } | null = null;
+  private reconnectAttempts: number = 0;
 
   constructor(options?: DiscordRpcOptions) {
     this.clientId = options?.clientId || '1562955881182920855';
@@ -189,10 +190,19 @@ export class DiscordRpcClient {
     return Boolean(this.enabled && this.isReady && this.socket && !this.socket.destroyed);
   }
 
+  public isEnabled(): boolean {
+    return this.enabled;
+  }
+
+  public getCurrentActivity(): DiscordActivity | null | undefined {
+    return this.currentActivity;
+  }
+
   private getCandidatePaths(): string[] {
     if (process.platform === 'win32') {
       const paths: string[] = [];
       for (let i = 0; i < 10; i++) {
+        paths.push(`\\\\.\\pipe\\discord-ipc-${i}`);
         paths.push(`\\\\?\\pipe\\discord-ipc-${i}`);
       }
       return paths;
@@ -271,6 +281,10 @@ export class DiscordRpcClient {
         resolved = true;
         clearTimeout(timer);
         this.isConnecting = false;
+        try {
+          socket.removeAllListeners();
+        } catch {}
+        this.reconnectAttempts = 0;
         this.onSocketConnected(socket);
       }
     });
@@ -367,10 +381,12 @@ export class DiscordRpcClient {
 
   private scheduleReconnect(): void {
     if (this.isDestroyed || !this.enabled || this.reconnectTimer) return;
+    const delay = this.reconnectAttempts < 3 ? 3000 : (this.reconnectAttempts < 6 ? 8000 : 20000);
+    this.reconnectAttempts++;
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       this.connect();
-    }, 20000);
+    }, delay);
   }
 
   private sendActivity(activityData: DiscordActivity | null): void {
@@ -379,9 +395,11 @@ export class DiscordRpcClient {
     let activity: any = null;
     if (activityData) {
       activity = {
+        type: 0,
         details: activityData.details,
         state: activityData.state,
         assets: activityData.assets,
+        instance: false,
       };
 
       if (activityData.timestamps?.start) {

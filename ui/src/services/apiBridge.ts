@@ -56,6 +56,8 @@ declare global {
       quitAndInstallUpdate?: () => void;
       getAppVersion?: () => Promise<string>;
       openExternal?: (url: string) => Promise<boolean>;
+      getDiscordStatus?: () => Promise<{ enabled: boolean; connected: boolean; currentActivity?: any }>;
+      reconnectDiscord?: () => Promise<boolean>;
       onUpdateStatus?: (callback: (status: UpdateStatus) => void) => () => void;
       getCommunityPRs?: (repo?: string, forceRefresh?: boolean) => Promise<CommunityPR[]>;
       downloadPRBuild?: (args: { prNumber: number; artifactUrl?: string; headSha?: string; title?: string }) => Promise<{ success: boolean; path?: string; error?: string }>;
@@ -296,6 +298,20 @@ class ApiBridge {
       const current = existing ? JSON.parse(existing) : {};
       localStorage.setItem('anyps5_settings', JSON.stringify({ ...current, ...settings }));
     } catch {}
+  }
+
+  public async getDiscordStatus(): Promise<{ enabled: boolean; connected: boolean; currentActivity?: any }> {
+    if (window.anyps5?.getDiscordStatus) {
+      return await window.anyps5.getDiscordStatus();
+    }
+    return { enabled: true, connected: false };
+  }
+
+  public async reconnectDiscord(): Promise<boolean> {
+    if (window.anyps5?.reconnectDiscord) {
+      return await window.anyps5.reconnectDiscord();
+    }
+    return false;
   }
 
   public async getTelemetry(): Promise<SystemTelemetry> {
