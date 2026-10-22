@@ -60,6 +60,12 @@ export const RELEASE_HIGHLIGHTS_MAP: Record<string, ReleaseHighlight[]> = {
       title: 'Streamlined Diagnostics',
       description: 'Permanently retired the deprecated PRX mockup tab and optimized diagnostic navigation.'
     }
+  ],
+  '1.3.2': [
+    {
+      title: 'Installer Optimization',
+      description: 'Reduced installer download size by over 60% through improved compression and cleaned runtime files.'
+    }
   ]
 };
 
