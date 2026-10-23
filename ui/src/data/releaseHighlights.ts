@@ -82,6 +82,12 @@ export const RELEASE_HIGHLIGHTS_MAP: Record<string, ReleaseHighlight[]> = {
       title: 'New App Icon',
       description: 'Updated the launcher, taskbar, desktop shortcut, and installer to the new PlayStation badge logo.'
     }
+  ],
+  '1.4.2': [
+    {
+      title: 'Core Update',
+      description: 'Upgraded the built-in relinker and system libraries to the latest stable release (v0.1.3).'
+    }
   ]
 };
 
