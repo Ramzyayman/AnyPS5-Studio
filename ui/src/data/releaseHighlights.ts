@@ -94,6 +94,16 @@ export const RELEASE_HIGHLIGHTS_MAP: Record<string, ReleaseHighlight[]> = {
       title: 'Core Stability Rollback',
       description: 'Reverted the default bundled runtime to AnyPS5 v0.1.2 due to an upstream graphics driver issue in v0.1.3.'
     }
+  ],
+  '1.4.4': [
+    {
+      title: 'Runtime Cache Cleanup',
+      description: 'Cleans stale driver files automatically on runtime changes.'
+    },
+    {
+      title: 'Linux Compatibility',
+      description: 'Corrected library load paths and executable permissions.'
+    }
   ]
 };
 
