@@ -128,6 +128,16 @@ export const RELEASE_HIGHLIGHTS_MAP: Record<string, ReleaseHighlight[]> = {
       title: 'Linker Error Recovery',
       description: 'Added exit code 127 failure parsing with automated Relinker Studio rebuild hints.'
     }
+  ],
+  '1.4.7': [
+    {
+      title: 'Per-Title PlayGo Isolation',
+      description: 'Added isolated PlayGo unlisted chunk handling with built-in profiles for stripped game dumps.'
+    },
+    {
+      title: 'Chunk Loop Diagnostics',
+      description: 'Added runtime detection and in-modal remedies for missing chunk manifests and out-of-memory allocation loops.'
+    }
   ]
 };
 

@@ -27,7 +27,9 @@ import {
   BuildProgressStatus,
   BuildResult,
   DiscoveredGameCandidate,
-  NidAuditResult
+  NidAuditResult,
+  PlaygoMode,
+  PlaygoOverrideInfo
 } from '../types';
 import { INITIAL_GAMES } from './sampleData';
 
@@ -101,6 +103,8 @@ declare global {
       removeRuntime?: (runtimeId: string) => Promise<boolean>;
       setGameRuntime?: (titleId: string, runtimeId: string) => Promise<boolean>;
       getGameRuntime?: (titleId: string) => Promise<string | undefined>;
+      setPlaygoOverride?: (titleId: string, mode: PlaygoMode) => Promise<boolean>;
+      getPlaygoOverride?: (titleId: string) => Promise<PlaygoOverrideInfo>;
       getGitHubAuthStatus?: () => Promise<GitHubAuthStatus>;
       requestGitHubDeviceCode?: () => Promise<GitHubDeviceCodeResponse>;
       checkGitHubDeviceCode?: (deviceCode: string) => Promise<{ status: 'pending' | 'slow_down' | 'approved' | 'expired' | 'error'; accessToken?: string; interval?: number; error?: string }>;
@@ -702,6 +706,55 @@ class ApiBridge {
       return map[titleId];
     } catch {
       return undefined;
+    }
+  }
+
+  public async setPlaygoOverride(titleId: string, mode: PlaygoMode): Promise<boolean> {
+    if (window.anyps5?.setPlaygoOverride) {
+      return await window.anyps5.setPlaygoOverride(titleId, mode);
+    }
+    try {
+      const stored = localStorage.getItem('anyps5_settings');
+      const settings = stored ? JSON.parse(stored) : {};
+      const overrides = { ...(settings.playgoOverrides || {}) };
+      if (mode === 'installed' || mode === 'absent') {
+        overrides[titleId] = mode;
+      } else {
+        delete overrides[titleId];
+      }
+      settings.playgoOverrides = overrides;
+      localStorage.setItem('anyps5_settings', JSON.stringify(settings));
+    } catch {}
+    return true;
+  }
+
+  public async getPlaygoOverride(titleId: string): Promise<PlaygoOverrideInfo> {
+    if (window.anyps5?.getPlaygoOverride) {
+      return await window.anyps5.getPlaygoOverride(titleId);
+    }
+    const presets: Record<string, 'installed' | 'absent'> = {
+      'PPSA10112': 'installed',
+      'PPSA15388': 'installed',
+      'PPSA03001': 'absent',
+      'PPSA03490': 'absent',
+    };
+    try {
+      const stored = localStorage.getItem('anyps5_settings');
+      const settings = stored ? JSON.parse(stored) : {};
+      const custom = settings.playgoOverrides?.[titleId] || null;
+      const preset = presets[titleId] || null;
+      return {
+        effective: custom || preset || null,
+        custom,
+        preset,
+      };
+    } catch {
+      const preset = presets[titleId] || null;
+      return {
+        effective: preset,
+        custom: null,
+        preset,
+      };
     }
   }
 

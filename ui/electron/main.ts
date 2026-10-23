@@ -750,7 +750,15 @@ interface AppSettings {
   gamesDirectory?: string;
   discordRpcEnabled?: boolean;
   discordClientId?: string;
+  playgoOverrides?: Record<string, 'installed' | 'absent'>;
 }
+
+const KNOWN_PLAYGO_PROFILES: Record<string, 'installed' | 'absent'> = {
+  'PPSA10112': 'installed',
+  'PPSA15388': 'installed',
+  'PPSA03001': 'absent',
+  'PPSA03490': 'absent',
+};
 
 interface DetectedGpu {
   name: string;
@@ -2681,6 +2689,33 @@ ipcMain.handle('anyps5:launch-game', async (_, game) => {
       sendLog('[AnyPS5 Environment] Virtualized graphics/environment detected: enabled APS5_NO_WRITE_WATCH=1 for guest stability', 'info');
     }
 
+    const userPlaygo = (game.titleId && userSettings.playgoOverrides) ? userSettings.playgoOverrides[game.titleId] : undefined;
+    const presetPlaygo = game.titleId ? KNOWN_PLAYGO_PROFILES[game.titleId] : undefined;
+    const effectivePlaygo = userPlaygo || presetPlaygo;
+
+    if (effectivePlaygo) {
+      childEnv.APS5_PLAYGO_UNLISTED_CHUNKS = effectivePlaygo;
+      const origin = userPlaygo ? 'user configuration' : 'known title profile';
+      sendLog(`[AnyPS5 Environment] APS5_PLAYGO_UNLISTED_CHUNKS="${effectivePlaygo}" (${origin} for ${game.titleId || 'title'})`, 'info');
+    }
+
+    const hasPlaygoManifest = [
+      path.join(game.path, 'playgo-chunkdefs.xml'),
+      path.join(game.path, 'app0', 'playgo-chunkdefs.xml'),
+      path.join(game.path, 'sce_sys', 'playgo-chunk.dat'),
+      path.join(game.path, 'app0', 'sce_sys', 'playgo-chunk.dat'),
+      path.join(game.path, 'sce_sys', 'playgo-scenario.json'),
+      path.join(game.path, 'app0', 'sce_sys', 'playgo-scenario.json'),
+    ].some((p) => fs.existsSync(p));
+
+    if (!hasPlaygoManifest) {
+      if (!effectivePlaygo) {
+        sendLog('[AnyPS5 Warning] Title dump lacks PlayGo manifests (playgo-chunk.dat / playgo-scenario.json). If unlisted chunk errors occur, configure PlayGo mode in Launcher.', 'warn');
+      } else {
+        sendLog(`[AnyPS5 Diagnostics] Title dump lacks PlayGo manifests; using ${effectivePlaygo} unlisted chunks policy.`, 'info');
+      }
+    }
+
     // Direct Path Execution: Guest module directories must appear BEFORE resolvedRuntime.libsPath on Linux
     // so ld.so loads guest authentic libc.prx.guest.prx instead of AnyPS5 host libc.prx
     const guestModuleDirs = [
@@ -2844,6 +2879,14 @@ ipcMain.handle('anyps5:launch-game', async (_, game) => {
 
       if (capturedOutput.toLowerCase().includes('no vulkan 1.1') || capturedOutput.toLowerCase().includes('vulkan: no usable device')) {
         sendLog(`[AnyPS5 Diagnostics] Vulkan initialization error: No compatible Vulkan 1.1 physical device detected. In VMware, ensure 'Accelerate 3D graphics' is checked in Virtual Machine Settings -> Display. On Linux/CachyOS, install appropriate Vulkan ICD drivers (e.g. vulkan-radeon, vulkan-intel, or vulkan-swrast).`, 'error');
+      }
+
+      if (capturedOutput.includes('APS5_PLAYGO_UNLISTED_CHUNKS') || capturedOutput.includes('scePlayGo: sce_sys/playgo-chunk.dat and sce_sys/playgo-scenario.json are missing')) {
+        sendLog('[AnyPS5 Diagnostics] PlayGo Manifest Error: Title dump is missing PlayGo metadata (playgo-chunk.dat / playgo-scenario.json). Set APS5_PLAYGO_UNLISTED_CHUNKS to "installed" or "absent" for this title.', 'error');
+      }
+
+      if (capturedOutput.includes('Ran out of memory allocating') && (game.titleId === 'PPSA03490' || effectivePlaygo === 'installed')) {
+        sendLog('[AnyPS5 Diagnostics] PlayGo Memory Exhaustion: Title executed an infinite chunk ID search because unlisted chunks was set to "installed". Set PlayGo Unlisted Chunks to "absent" for this title.', 'error');
       }
 
       mainWindow?.webContents.send('anyps5:game-exit', {
@@ -3040,6 +3083,7 @@ ipcMain.handle('anyps5:get-settings', async () => {
     gamesDirectory: userSettings.gamesDirectory,
     discordRpcEnabled: userSettings.discordRpcEnabled !== undefined ? userSettings.discordRpcEnabled : true,
     discordClientId: userSettings.discordClientId || '1562955881182920855',
+    playgoOverrides: userSettings.playgoOverrides || {},
   };
 });
 
@@ -3486,6 +3530,34 @@ ipcMain.handle('anyps5:set-game-runtime', async (_, { titleId, runtimeId }: { ti
 ipcMain.handle('anyps5:get-game-runtime', async (_, titleId: string) => {
   const current = loadSettings();
   return current.gameRuntimes?.[titleId];
+});
+
+ipcMain.handle('anyps5:set-playgo-override', async (_, { titleId, mode }: { titleId: string; mode: 'installed' | 'absent' | 'default' }) => {
+  try {
+    const current = loadSettings();
+    const playgoOverrides = { ...(current.playgoOverrides || {}) };
+    if (mode === 'installed' || mode === 'absent') {
+      playgoOverrides[titleId] = mode;
+    } else {
+      delete playgoOverrides[titleId];
+    }
+    saveSettings({ ...current, playgoOverrides });
+    return true;
+  } catch (err) {
+    console.error('Failed to set playgo override:', err);
+    return false;
+  }
+});
+
+ipcMain.handle('anyps5:get-playgo-override', async (_, titleId: string) => {
+  const current = loadSettings();
+  const custom = current.playgoOverrides?.[titleId];
+  const preset = KNOWN_PLAYGO_PROFILES[titleId];
+  return {
+    effective: custom || preset || null,
+    custom: custom || null,
+    preset: preset || null,
+  };
 });
 
 // GitHub Device Flow & CI Artifacts IPC Handlers

@@ -19,7 +19,7 @@ import {
   Trash2,
   AlertTriangle
 } from 'lucide-react';
-import { GameItem, RuntimeProfile } from '../types';
+import { GameItem, RuntimeProfile, PlaygoOverrideInfo, PlaygoMode } from '../types';
 import { audioService } from '../services/audioService';
 import { apiBridge } from '../services/apiBridge';
 
@@ -55,6 +55,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
 
   const [availableRuntimes, setAvailableRuntimes] = useState<RuntimeProfile[]>([]);
   const [selectedGameRuntimeId, setSelectedGameRuntimeId] = useState<string>('inherit');
+  const [selectedGamePlaygoInfo, setSelectedGamePlaygoInfo] = useState<PlaygoOverrideInfo | null>(null);
 
   useEffect(() => {
     if (selectedGame) {
@@ -65,6 +66,10 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
       apiBridge.getGameRuntime(selectedGame.titleId).then((rId) => {
         setSelectedGameRuntimeId(rId || selectedGame.runtimeId || 'inherit');
       }).catch(() => {});
+
+      apiBridge.getPlaygoOverride(selectedGame.titleId).then((info) => {
+        setSelectedGamePlaygoInfo(info);
+      }).catch(() => {});
     }
   }, [selectedGame, showTechnicalDrawer]);
 
@@ -74,6 +79,15 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     if (selectedGame) {
       selectedGame.runtimeId = newRuntimeId === 'inherit' ? undefined : newRuntimeId;
       await apiBridge.setGameRuntime(selectedGame.titleId, newRuntimeId);
+    }
+  };
+
+  const handlePlaygoChange = async (mode: PlaygoMode) => {
+    audioService.playNavTick();
+    if (selectedGame) {
+      await apiBridge.setPlaygoOverride(selectedGame.titleId, mode);
+      const updated = await apiBridge.getPlaygoOverride(selectedGame.titleId);
+      setSelectedGamePlaygoInfo(updated);
     }
   };
 
@@ -505,6 +519,38 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                   </select>
                   <p className="text-[10px] text-neutral-400 leading-normal">
                     Direct Path Execution: Runs against this runtime's libs without admin prompts or symlinks.
+                  </p>
+                </div>
+
+                <div className="p-3 rounded-xl bg-white/5 border border-white/10 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] text-blue-400 uppercase tracking-wider font-semibold block">
+                      PlayGo Unlisted Chunks (Per-Game)
+                    </span>
+                    {selectedGamePlaygoInfo?.preset && !selectedGamePlaygoInfo?.custom && (
+                      <span className="text-[10px] text-neutral-400 font-mono">Preset: {selectedGamePlaygoInfo.preset}</span>
+                    )}
+                    {selectedGamePlaygoInfo?.custom && (
+                      <span className="text-[10px] text-emerald-400 font-mono">Custom: {selectedGamePlaygoInfo.custom}</span>
+                    )}
+                  </div>
+                  <select
+                    value={selectedGamePlaygoInfo?.custom || 'default'}
+                    onChange={(e) => handlePlaygoChange(e.target.value as PlaygoMode)}
+                    className="w-full px-2.5 py-2 bg-neutral-900 border border-white/15 rounded-lg text-xs text-white focus:outline-none focus:border-blue-400"
+                  >
+                    <option value="default" className="bg-[#080b11] text-white">
+                      Default {selectedGamePlaygoInfo?.preset ? `(${selectedGamePlaygoInfo.preset} preset)` : '(Throw if unmanifested)'}
+                    </option>
+                    <option value="installed" className="bg-[#080b11] text-white">
+                      Report Installed (LOCAL_FAST)
+                    </option>
+                    <option value="absent" className="bg-[#080b11] text-white">
+                      Report Absent (SCE_PLAYGO_ERROR_BAD_CHUNK_ID)
+                    </option>
+                  </select>
+                  <p className="text-[10px] text-neutral-400 leading-normal">
+                    Controls unmanifested chunk responses in libScePlayGo for stripped or partial package dumps.
                   </p>
                 </div>
 

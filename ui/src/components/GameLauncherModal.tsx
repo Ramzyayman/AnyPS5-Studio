@@ -19,7 +19,7 @@ import {
   Activity,
   GitPullRequest
 } from 'lucide-react';
-import { GameItem, SystemTelemetry } from '../types';
+import { GameItem, SystemTelemetry, PlaygoOverrideInfo, PlaygoMode } from '../types';
 import { audioService } from '../services/audioService';
 import { apiBridge } from '../services/apiBridge';
 
@@ -60,6 +60,35 @@ export const GameLauncherModal: React.FC<GameLauncherModalProps> = ({
   const [isCopied, setIsCopied] = useState<boolean>(false);
   const [gamepadConnected, setGamepadConnected] = useState<boolean>(false);
   const [telemetry, setTelemetry] = useState<SystemTelemetry | null>(null);
+  const [playgoInfo, setPlaygoInfo] = useState<PlaygoOverrideInfo | null>(null);
+  const [isUpdatingPlaygo, setIsUpdatingPlaygo] = useState<boolean>(false);
+  const [playgoNotice, setPlaygoNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (game.titleId) {
+      apiBridge.getPlaygoOverride(game.titleId).then((info) => {
+        setPlaygoInfo(info);
+      }).catch(() => {});
+    }
+  }, [game.titleId]);
+
+  const handleSetPlaygoMode = async (mode: PlaygoMode) => {
+    if (!game.titleId || isUpdatingPlaygo) return;
+    setIsUpdatingPlaygo(true);
+    audioService.playNavTick();
+    try {
+      await apiBridge.setPlaygoOverride(game.titleId, mode);
+      const updated = await apiBridge.getPlaygoOverride(game.titleId);
+      if (updated) {
+        setPlaygoInfo(updated);
+      }
+      setPlaygoNotice(`PlayGo unlisted chunks set to ${mode === 'default' ? 'Default' : `"${mode}"`}. Click "Play Again" to restart.`);
+    } catch (err: any) {
+      setPlaygoNotice(`Failed to update PlayGo setting: ${err?.message || err}`);
+    } finally {
+      setIsUpdatingPlaygo(false);
+    }
+  };
 
   const userRequestedStopRef = useRef<boolean>(false);
   const logContainerRef = useRef<HTMLDivElement>(null);
@@ -213,6 +242,7 @@ export const GameLauncherModal: React.FC<GameLauncherModalProps> = ({
     setExitCode(null);
     setExitCodeHex(null);
     setElapsedSeconds(0);
+    setPlaygoNotice(null);
     userRequestedStopRef.current = false;
 
     setLogs([
@@ -364,6 +394,24 @@ export const GameLauncherModal: React.FC<GameLauncherModalProps> = ({
           summary: `Undefined Symbol: ${symbol}`,
           remedy: `Linux dynamic linker encountered an undefined symbol "${symbol}". Re-compile the game in Relinker Studio to align with the active PRX runtime.`,
           isRelinkHint: true,
+        });
+      }
+
+      if (msg.includes('sce_sys/playgo-chunk.dat and sce_sys/playgo-scenario.json are missing') || msg.includes('APS5_PLAYGO_UNLISTED_CHUNKS=installed or =absent')) {
+        setDetectedAbortReason('Missing PlayGo Metadata');
+        setErrorMessage({
+          summary: 'PlayGo Metadata Missing',
+          remedy: 'The game dump lacks PlayGo chunk manifests (playgo-chunk.dat / playgo-scenario.json). Configure PlayGo Unlisted Chunks below: select "installed" for titles requiring full chunks, or "absent" for titles searching chunk bounds.',
+          isRelinkHint: false,
+        });
+      }
+
+      if (msg.includes('Ran out of memory allocating') && (game.titleId === 'PPSA03490' || playgoInfo?.effective === 'installed')) {
+        setDetectedAbortReason('PlayGo Allocation Overflow');
+        setErrorMessage({
+          summary: 'PlayGo Allocation Overflow',
+          remedy: 'The title searched for chunk boundaries indefinitely and exhausted memory because unlisted chunks was set to "installed". Change PlayGo mode to "absent" below to terminate the search walk.',
+          isRelinkHint: false,
         });
       }
 
@@ -601,6 +649,79 @@ export const GameLauncherModal: React.FC<GameLauncherModalProps> = ({
                       Find PR Fixes &rarr;
                     </button>
                   ) : null}
+                </div>
+              )}
+
+              {(detectedAbortReason?.includes('PlayGo') || errorMessage?.summary?.includes('PlayGo') || Boolean(playgoInfo?.custom)) && (launchState === 'crashed' || launchState === 'failed') && (
+                <div className="p-3.5 rounded-xl bg-white/[0.03] border border-white/10 space-y-2 animate-fade-in text-left">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
+                      <Layers className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                      <span className="text-xs font-semibold text-white">
+                        PlayGo Unlisted Chunks Configuration
+                      </span>
+                    </div>
+                    <span className="text-[11px] font-mono text-neutral-400">
+                      Active: <span className="text-sky-300 font-semibold">{playgoInfo?.effective || 'Unset (Error)'}</span>
+                      {playgoInfo?.preset && !playgoInfo?.custom && (
+                        <span className="text-neutral-500 ml-1">(Preset)</span>
+                      )}
+                      {playgoInfo?.custom && (
+                        <span className="text-emerald-400 ml-1">(Custom)</span>
+                      )}
+                    </span>
+                  </div>
+
+                  <p className="text-[11px] text-neutral-400 leading-relaxed">
+                    Select how unlisted chunk IDs are handled when chunk manifests are missing:
+                  </p>
+
+                  <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                    <button
+                      type="button"
+                      disabled={isUpdatingPlaygo}
+                      onClick={() => handleSetPlaygoMode('installed')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                        playgoInfo?.effective === 'installed'
+                          ? 'bg-blue-600 text-white font-semibold shadow-sm'
+                          : 'bg-white/5 hover:bg-white/10 text-neutral-300 border border-white/10'
+                      }`}
+                    >
+                      Report Installed
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={isUpdatingPlaygo}
+                      onClick={() => handleSetPlaygoMode('absent')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                        playgoInfo?.effective === 'absent'
+                          ? 'bg-blue-600 text-white font-semibold shadow-sm'
+                          : 'bg-white/5 hover:bg-white/10 text-neutral-300 border border-white/10'
+                      }`}
+                    >
+                      Report Absent
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={isUpdatingPlaygo}
+                      onClick={() => handleSetPlaygoMode('default')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                        !playgoInfo?.custom
+                          ? 'bg-white/15 text-white'
+                          : 'bg-white/5 hover:bg-white/10 text-neutral-400 border border-white/10'
+                      }`}
+                    >
+                      Reset to Default
+                    </button>
+                  </div>
+
+                  {playgoNotice && (
+                    <p className="text-[11px] text-emerald-400 leading-normal animate-fade-in font-medium">
+                      {playgoNotice}
+                    </p>
+                  )}
                 </div>
               )}
             </div>

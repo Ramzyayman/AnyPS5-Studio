@@ -90,6 +90,8 @@ contextBridge.exposeInMainWorld('anyps5', {
   removeRuntime: (runtimeId: string) => ipcRenderer.invoke('anyps5:runtimes-remove', runtimeId),
   setGameRuntime: (titleId: string, runtimeId: string) => ipcRenderer.invoke('anyps5:set-game-runtime', { titleId, runtimeId }),
   getGameRuntime: (titleId: string) => ipcRenderer.invoke('anyps5:get-game-runtime', titleId),
+  setPlaygoOverride: (titleId: string, mode: string) => ipcRenderer.invoke('anyps5:set-playgo-override', { titleId, mode }),
+  getPlaygoOverride: (titleId: string) => ipcRenderer.invoke('anyps5:get-playgo-override', titleId),
   getGitHubAuthStatus: () => ipcRenderer.invoke('anyps5:github-get-auth-status'),
   requestGitHubDeviceCode: () => ipcRenderer.invoke('anyps5:github-request-device-code'),
   checkGitHubDeviceCode: (deviceCode: string) => ipcRenderer.invoke('anyps5:github-check-device-code', deviceCode),

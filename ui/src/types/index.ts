@@ -153,6 +153,14 @@ export interface DetectedGpu {
   driverVersion?: string;
 }
 
+export type PlaygoMode = 'installed' | 'absent' | 'default';
+
+export interface PlaygoOverrideInfo {
+  effective: 'installed' | 'absent' | null;
+  custom: 'installed' | 'absent' | null;
+  preset: 'installed' | 'absent' | null;
+}
+
 export interface AppSettings {
   relinkerPath: string;
   prxPath: string;
@@ -171,6 +179,7 @@ export interface AppSettings {
   gamesDirectory?: string;
   discordRpcEnabled: boolean;
   discordClientId?: string;
+  playgoOverrides?: Record<string, 'installed' | 'absent'>;
 }
 
 export interface GitHubAuthStatus {
