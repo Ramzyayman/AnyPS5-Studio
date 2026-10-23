@@ -118,6 +118,16 @@ export const RELEASE_HIGHLIGHTS_MAP: Record<string, ReleaseHighlight[]> = {
       title: 'Linux Module Resolution',
       description: 'Fixed library load paths and executable permissions.'
     }
+  ],
+  '1.4.6': [
+    {
+      title: 'Dynamic Linker Diagnostics',
+      description: 'Real-time detection and system package remedies for Linux dynamic linker errors, missing host libraries, and undefined symbols.'
+    },
+    {
+      title: 'Linker Error Recovery',
+      description: 'Added exit code 127 failure parsing with automated Relinker Studio rebuild hints.'
+    }
   ]
 };
 
