@@ -1,6 +1,17 @@
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 import { RuntimeProfile, RuntimesManifest, ResolvedRuntime } from '../src/types';
+
+function computeFileSha256(filePath: string): string | null {
+  try {
+    if (!fs.existsSync(filePath)) return null;
+    const content = fs.readFileSync(filePath);
+    return crypto.createHash('sha256').update(content).digest('hex');
+  } catch {
+    return null;
+  }
+}
 
 export class RuntimeManager {
   private userDataDir: string;
@@ -213,7 +224,33 @@ export class RuntimeManager {
       const binName = this.getRelinkerBinName();
       const versionFile = path.join(this.bundledDir, 'version.txt');
       const currentVersion = fs.existsSync(versionFile) ? fs.readFileSync(versionFile, 'utf8').trim() : '';
-      const shouldUpdate = force || currentVersion !== 'v0.1.2';
+      const targetLibs = path.join(this.bundledDir, 'libs');
+
+      // Compute SHA-256 and metadata checksum of libSceAgcDriver.prx to detect driver mismatches
+      let agcMismatch = false;
+      if (defaultLibs && fs.existsSync(defaultLibs) && fs.existsSync(targetLibs)) {
+        const srcAgc = path.join(defaultLibs, 'libSceAgcDriver.prx');
+        const dstAgc = path.join(targetLibs, 'libSceAgcDriver.prx');
+        if (fs.existsSync(srcAgc) && fs.existsSync(dstAgc)) {
+          const srcHash = computeFileSha256(srcAgc);
+          const dstHash = computeFileSha256(dstAgc);
+          if (srcHash && dstHash && srcHash !== dstHash) {
+            agcMismatch = true;
+          } else {
+            try {
+              const srcStat = fs.statSync(srcAgc);
+              const dstStat = fs.statSync(dstAgc);
+              if (srcStat.size !== dstStat.size || Math.abs(srcStat.mtimeMs - dstStat.mtimeMs) > 1000) {
+                agcMismatch = true;
+              }
+            } catch {}
+          }
+        } else if (fs.existsSync(srcAgc) && !fs.existsSync(dstAgc)) {
+          agcMismatch = true;
+        }
+      }
+
+      const shouldUpdate = force || currentVersion !== 'v0.1.2' || agcMismatch;
 
       const targetRelinker = path.join(this.bundledDir, binName);
       if (defaultRelinker && fs.existsSync(defaultRelinker) && (shouldUpdate || !fs.existsSync(targetRelinker))) {
@@ -227,7 +264,15 @@ export class RuntimeManager {
         }
       }
 
-      const targetLibs = path.join(this.bundledDir, 'libs');
+      // If the checksums or version mismatch, completely purge the target libs folder before copying
+      if (shouldUpdate && fs.existsSync(targetLibs)) {
+        try {
+          fs.rmSync(targetLibs, { recursive: true, force: true });
+        } catch (rmErr) {
+          console.warn('Failed to purge stale bundled libs directory:', rmErr);
+        }
+      }
+
       if (!fs.existsSync(targetLibs)) {
         fs.mkdirSync(targetLibs, { recursive: true });
       }
@@ -241,6 +286,10 @@ export class RuntimeManager {
             const dst = path.join(targetLibs, file);
             if (fs.statSync(src).isFile()) {
               fs.copyFileSync(src, dst);
+              try {
+                const srcStat = fs.statSync(src);
+                fs.utimesSync(dst, srcStat.atime, srcStat.mtime);
+              } catch {}
               if (process.platform !== 'win32') {
                 try {
                   fs.chmodSync(dst, 0o755);

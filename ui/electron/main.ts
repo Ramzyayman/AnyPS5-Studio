@@ -1336,7 +1336,8 @@ function fixGameHierarchyInPlace(
   gameDir: string,
   sendLog: (msg: string, level?: string) => void,
   mode: 'launch' | 'relink' = 'launch',
-  customLibsPath?: string
+  customLibsPath?: string,
+  runtimeIdentifier?: string
 ) {
   const resolved = path.resolve(gameDir);
   if (!fs.existsSync(resolved)) {
@@ -1444,6 +1445,11 @@ function fixGameHierarchyInPlace(
     fs.mkdirSync(gameLibs, { recursive: true });
   }
 
+  const runtimeStampFile = path.join(gameLibs, '.runtime_deployed');
+  const prevStamp = fs.existsSync(runtimeStampFile) ? fs.readFileSync(runtimeStampFile, 'utf8').trim() : '';
+  const runtimeChanged = Boolean(runtimeIdentifier && prevStamp && prevStamp !== runtimeIdentifier);
+  const forceRedeploy = runtimeChanged || !prevStamp;
+
   const knownSystemLibs = new Set<string>();
   const sourceLibs = (customLibsPath && fs.existsSync(customLibsPath)) ? customLibsPath : getResolvedLibsPath();
   if (sourceLibs && fs.existsSync(sourceLibs)) {
@@ -1489,6 +1495,19 @@ function fixGameHierarchyInPlace(
       }
     }
 
+    if (runtimeChanged) {
+      sendLog(`[AnyPS5] Active runtime engine or version changed (${prevStamp} -> ${runtimeIdentifier}). Purging and re-deploying system PRX libraries...`, 'info');
+      try {
+        const sourceFileNames = new Set(sourceFiles.map(f => f.name.toLowerCase()));
+        const currentLibs = fs.readdirSync(gameLibs);
+        for (const cur of currentLibs) {
+          if (cur.toLowerCase().endsWith('.prx') && !sourceFileNames.has(cur.toLowerCase())) {
+            try { fs.unlinkSync(path.join(gameLibs, cur)); } catch {}
+          }
+        }
+      } catch {}
+    }
+
     let copiedLibsCount = 0;
     let copiedRootCount = 0;
 
@@ -1503,41 +1522,59 @@ function fixGameHierarchyInPlace(
         knownSystemLibs.add(stem);
       }
 
-      const dLibs = path.join(gameLibs, file);
-      if (!fs.existsSync(dLibs) || fs.statSync(dLibs).size !== stat.size) {
+      const shouldCopy = (dstPath: string): boolean => {
+        if (forceRedeploy || !fs.existsSync(dstPath)) return true;
         try {
-          fs.copyFileSync(s, dLibs);
+          const dstStat = fs.statSync(dstPath);
+          if (dstStat.size !== stat.size) return true;
+          if (Math.abs(dstStat.mtimeMs - stat.mtimeMs) > 1000) return true;
+          return false;
+        } catch {
+          return true;
+        }
+      };
+
+      const copyWithMtime = (src: string, dst: string): boolean => {
+        try {
+          fs.copyFileSync(src, dst);
+          try { fs.utimesSync(dst, stat.atime, stat.mtime); } catch {}
           if (process.platform !== 'win32') {
-            try { fs.chmodSync(dLibs, 0o755); } catch {}
+            try { fs.chmodSync(dst, 0o755); } catch {}
           }
+          return true;
+        } catch {
+          return false;
+        }
+      };
+
+      const dLibs = path.join(gameLibs, file);
+      if (shouldCopy(dLibs)) {
+        if (copyWithMtime(s, dLibs)) {
           copiedLibsCount++;
-        } catch {}
+        }
       }
 
       if (isDll || isPrx || isSo) {
         const dRoot = path.join(resolved, file);
-        if (!fs.existsSync(dRoot) || fs.statSync(dRoot).size !== stat.size) {
-          try {
-            fs.copyFileSync(s, dRoot);
-            if (process.platform !== 'win32') {
-              try { fs.chmodSync(dRoot, 0o755); } catch {}
-            }
+        if (shouldCopy(dRoot)) {
+          if (copyWithMtime(s, dRoot)) {
             copiedRootCount++;
-          } catch {}
+          }
         }
 
         if (isDll || isSo) {
           const dApp0 = path.join(app0Dir, file);
-          if (!fs.existsSync(dApp0) || fs.statSync(dApp0).size !== stat.size) {
-            try {
-              fs.copyFileSync(s, dApp0);
-              if (process.platform !== 'win32') {
-                try { fs.chmodSync(dApp0, 0o755); } catch {}
-              }
-            } catch {}
+          if (shouldCopy(dApp0)) {
+            copyWithMtime(s, dApp0);
           }
         }
       }
+    }
+
+    if (runtimeIdentifier) {
+      try {
+        fs.writeFileSync(runtimeStampFile, runtimeIdentifier, 'utf8');
+      } catch {}
     }
 
     if (copiedLibsCount > 0 || copiedRootCount > 0) {
@@ -2325,7 +2362,8 @@ ipcMain.handle('anyps5:run-relinker', async (_, { game, options }) => {
     sendLog(`[AnyPS5 Runtime] Selected Runtime Engine: "${resolvedRuntime.name}" (${resolvedRuntime.id})`, 'info');
 
     // Step 1: Fix folder hierarchy in-place in native location (mode: 'relink' isolates legacy stubs)
-    const { gameDir, inputElf, outputExe, moduleDirs } = fixGameHierarchyInPlace(game.path, sendLog, 'relink', resolvedRuntime.libsPath);
+    const runtimeSig = resolvedRuntime ? `${resolvedRuntime.id}:${resolvedRuntime.commitHash || resolvedRuntime.date || ''}` : '';
+    const { gameDir, inputElf, outputExe, moduleDirs } = fixGameHierarchyInPlace(game.path, sendLog, 'relink', resolvedRuntime.libsPath, runtimeSig);
     game.path = gameDir;
     sendStage(1, 'completed', 100);
 
@@ -2362,6 +2400,10 @@ ipcMain.handle('anyps5:run-relinker', async (_, { game, options }) => {
     if (options.cpuTranslation === 'intel') args.push('--to-intel');
     if (options.cpuTranslation === 'rosetta') args.push('--to-rosetta');
     if (isWindows && options.traceImports) args.push('--trace-imports');
+    if (isLinux) {
+      args.push('--rpath', '$ORIGIN/libs:$ORIGIN/app0/sce_module');
+      sendLog('[AnyPS5] Configured Linux native ELF rpath: $ORIGIN/libs:$ORIGIN/app0/sce_module', 'info');
+    }
 
     // Register all discovered guest module directories (e.g. games, Media/Plugins, etc.)
     for (const modDir of moduleDirs) {
@@ -2526,7 +2568,8 @@ ipcMain.handle('anyps5:launch-game', async (_, game) => {
   try {
     sendLog(`[AnyPS5] Launching native ported executable: ${game.path}/${game.executableName || getDefaultOutputExecutableName()}`);
     sendLog(`[AnyPS5] Checking runtime layout: libs/ system PRX and app0/ guest filesystem...`);
-    hierarchyResult = fixGameHierarchyInPlace(game.path, sendLog, 'launch', resolvedRuntime.libsPath);
+    const runtimeSig = resolvedRuntime ? `${resolvedRuntime.id}:${resolvedRuntime.commitHash || resolvedRuntime.date || ''}` : '';
+    hierarchyResult = fixGameHierarchyInPlace(game.path, sendLog, 'launch', resolvedRuntime.libsPath, runtimeSig);
   } catch (err: any) {
     console.error('Launch hierarchy check error:', err);
     sendLog(`[AnyPS5 Warning] Hierarchy check: ${err?.message || err}`, 'warn');
@@ -2638,15 +2681,55 @@ ipcMain.handle('anyps5:launch-game', async (_, game) => {
       sendLog('[AnyPS5 Environment] Virtualized graphics/environment detected: enabled APS5_NO_WRITE_WATCH=1 for guest stability', 'info');
     }
 
-    // Direct Path Execution: Prepend active runtime's libs directory, followed by application root, libs/, and app0/
-    const runtimeDirs = Array.from(new Set([
-      resolvedRuntime.libsPath,
-      game.path,
-      path.join(game.path, 'libs'),
-      path.join(game.path, 'app0'),
+    // Direct Path Execution: Guest module directories must appear BEFORE resolvedRuntime.libsPath on Linux
+    // so ld.so loads guest authentic libc.prx.guest.prx instead of AnyPS5 host libc.prx
+    const guestModuleDirs = [
       path.join(game.path, 'app0', 'sce_module'),
+      path.join(game.path, 'app0'),
+      path.join(game.path, 'libs'),
+      game.path,
       ...(hierarchyResult?.moduleDirs || []).map((d) => path.join(game.path, 'app0', d)),
+    ];
+    const runtimeDirs = Array.from(new Set([
+      ...guestModuleDirs,
+      resolvedRuntime.libsPath,
     ]));
+
+    if (process.platform !== 'win32') {
+      try {
+        if (fs.existsSync(targetExe)) {
+          try { fs.chmodSync(targetExe, 0o755); } catch {}
+        }
+        const ensureLinuxExecutablePermissions = (dir: string) => {
+          if (!fs.existsSync(dir)) return;
+          try {
+            const stat = fs.statSync(dir);
+            if (stat.isDirectory()) {
+              try { fs.chmodSync(dir, 0o755); } catch {}
+              const entries = fs.readdirSync(dir);
+              for (const entry of entries) {
+                ensureLinuxExecutablePermissions(path.join(dir, entry));
+              }
+            } else if (stat.isFile()) {
+              const lower = dir.toLowerCase();
+              if (lower.endsWith('.prx') || lower.endsWith('.elf') || lower.endsWith('.so') || !path.extname(dir)) {
+                try { fs.chmodSync(dir, 0o755); } catch {}
+              }
+            }
+          } catch {}
+        };
+
+        ensureLinuxExecutablePermissions(path.join(game.path, 'app0'));
+        ensureLinuxExecutablePermissions(path.join(game.path, 'libs'));
+        ensureLinuxExecutablePermissions(resolvedRuntime.libsPath);
+        for (const modDir of hierarchyResult?.moduleDirs || []) {
+          ensureLinuxExecutablePermissions(path.join(game.path, 'app0', modDir));
+        }
+      } catch (chmodErr) {
+        console.warn('Linux permission configuration warning:', chmodErr);
+      }
+    }
+
     if (process.platform === 'win32') {
       const existingPath = childEnv.Path || childEnv.PATH || '';
       const newPath = runtimeDirs.join(';') + (existingPath ? ';' + existingPath : '');
