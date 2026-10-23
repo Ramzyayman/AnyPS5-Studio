@@ -2832,6 +2832,8 @@ ipcMain.handle('anyps5:launch-game', async (_, game) => {
         sendLog(`[AnyPS5 Diagnostics] Crash detected: Illegal Instruction (SIGILL / 4). The host CPU or VM may lack required instruction extensions (AVX2, F16C, BMI2) or encountered an unhandled opcode.`, 'error');
       } else if (signal === 'SIGBUS' || code === 7 || code === 135) {
         sendLog(`[AnyPS5 Diagnostics] Crash detected: Bus Error (SIGBUS / 7). Check memory alignment and mapped host address space.`, 'error');
+      } else if (code === 127) {
+        sendLog(`[AnyPS5 Diagnostics] Crash detected: Linux Dynamic Linker Failure (0x7F / 127). Ensure all host runtime dependencies (Vulkan, ALSA, PulseAudio/PipeWire) are installed and rebuild the executable in Relinker Studio.`, 'error');
       }
 
       if (capturedOutput.toLowerCase().includes('not implemented')) {

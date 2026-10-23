@@ -176,6 +176,16 @@ export const GameLauncherModal: React.FC<GameLauncherModalProps> = ({
           remedy: 'A memory alignment fault or invalid host page access occurred.',
           isRelinkHint: false,
         });
+      } else if (code === 127 || resolvedHex === '0x7F') {
+        setDetectedAbortReason((prev) => prev || 'Dynamic Linker Error (0x7F / 127)');
+        setErrorMessage((prev) => {
+          if (prev && prev.remedy && prev.remedy.length > 0) return prev;
+          return {
+            summary: 'Dynamic Linker Error (0x7F / 127)',
+            remedy: 'A required shared library or symbol could not be loaded by Linux ld.so. Check the Technical Details log for the missing library or click Relink to rebuild app.elf against the active PRX runtime.',
+            isRelinkHint: true,
+          };
+        });
       } else {
         setDetectedAbortReason((prev) => prev || `Process Exit (${resolvedHex})`);
         setErrorMessage({
@@ -331,6 +341,30 @@ export const GameLauncherModal: React.FC<GameLauncherModalProps> = ({
             isRelinkHint: true,
           });
         }
+      }
+
+      // Detect Linux ld.so missing library errors
+      const linuxMissingLibMatch = msg.match(/error while loading shared libraries:\s*([^:]+):\s*cannot open shared object file/i);
+      if (linuxMissingLibMatch && linuxMissingLibMatch[1]) {
+        const missingLib = linuxMissingLibMatch[1].trim();
+        setDetectedAbortReason(`Missing Host Library: ${missingLib}`);
+        setErrorMessage({
+          summary: `Missing Host Library: ${missingLib}`,
+          remedy: `Linux dynamic linker could not locate "${missingLib}". Install the missing host package via your system package manager (e.g., pacman on Arch/CachyOS or apt on Ubuntu/Debian).`,
+          isRelinkHint: false,
+        });
+      }
+
+      // Detect Linux ld.so undefined symbol errors
+      const linuxUndefSymbolMatch = msg.match(/symbol lookup error:\s*([^:]+):\s*undefined symbol:\s*([^\r\n]+)/i);
+      if (linuxUndefSymbolMatch && linuxUndefSymbolMatch[2]) {
+        const symbol = linuxUndefSymbolMatch[2].trim();
+        setDetectedAbortReason(`Undefined Symbol: ${symbol}`);
+        setErrorMessage({
+          summary: `Undefined Symbol: ${symbol}`,
+          remedy: `Linux dynamic linker encountered an undefined symbol "${symbol}". Re-compile the game in Relinker Studio to align with the active PRX runtime.`,
+          isRelinkHint: true,
+        });
       }
 
       // Fallback process exit detection from log stream
