@@ -2557,6 +2557,9 @@ ipcMain.handle('anyps5:launch-game', async (_, game) => {
   }
 
   if (process.platform === 'linux' && targetExe.endsWith('.exe') && !fs.existsSync(path.join(game.path, 'app.elf'))) {
+    try {
+      getDiscordRpcClient().setIdle();
+    } catch {}
     return {
       error: `Ported Linux binary (app.elf) not found in ${game.path}. This title was ported for Windows (app.exe). Please open Relinker Studio and click Relink to compile the native Linux executable (app.elf).`,
     };

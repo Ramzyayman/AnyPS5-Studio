@@ -18,6 +18,13 @@ export interface DiscordActivity {
   };
 }
 
+export interface DiscordGameMetadata {
+  title?: string;
+  titleId?: string;
+  version?: string;
+  iconUrl?: string;
+}
+
 export interface DiscordRpcOptions {
   clientId?: string;
   enabled?: boolean;
@@ -39,7 +46,8 @@ export class DiscordRpcClient {
   private isDestroyed: boolean = false;
   private reconnectTimer: NodeJS.Timeout | null = null;
   private currentActivity: DiscordActivity | null | undefined = undefined;
-  private activeGame: { title: string; iconUrl?: string } | null = null;
+  private activeGame: DiscordGameMetadata | null = null;
+  private activeGameStartTime: number | null = null;
   private reconnectAttempts: number = 0;
 
   constructor(options?: DiscordRpcOptions) {
@@ -116,6 +124,9 @@ export class DiscordRpcClient {
   public setActivity(activityData: DiscordActivity | null): void {
     this.currentActivity = activityData;
     if (!this.enabled || !this.isReady || !this.socket || this.socket.destroyed) {
+      if (this.enabled && !this.socket && !this.isConnecting) {
+        this.connect();
+      }
       return;
     }
     this.sendActivity(activityData);
@@ -129,32 +140,48 @@ export class DiscordRpcClient {
     this.sendActivity(null);
   }
 
-  public setGame(game: { title?: string; iconUrl?: string }): void {
+  public setGame(game: DiscordGameMetadata): void {
     const title = (game.title || '').trim() || 'PlayStation 5 Title';
+    const titleId = (game.titleId || '').trim();
+    const state = titleId ? `Playing · ${titleId}` : 'Playing';
     const isHttp = typeof game.iconUrl === 'string' &&
       (game.iconUrl.startsWith('http://') || game.iconUrl.startsWith('https://'));
-    const largeImage = isHttp ? game.iconUrl! : 'anyps5_logo';
+    const largeImage = isHttp
+      ? game.iconUrl!
+      : (titleId ? titleId.toLowerCase() : 'anyps5_logo');
 
-    this.activeGame = { title, iconUrl: game.iconUrl };
+    if (!this.activeGameStartTime || this.activeGame?.titleId !== titleId || this.activeGame?.title !== title) {
+      this.activeGameStartTime = Date.now();
+    }
+
+    this.activeGame = {
+      title,
+      titleId,
+      version: game.version,
+      iconUrl: game.iconUrl,
+    };
 
     this.setActivity({
       details: title,
-      state: 'AnyPS5 Studio · Playing',
+      state,
       timestamps: {
-        start: Date.now(),
+        start: this.activeGameStartTime,
       },
       assets: {
         large_image: largeImage,
         large_text: title,
+        small_image: 'ps_badge',
+        small_text: 'PlayStation 5',
       },
     });
   }
 
   public setIdle(): void {
     this.activeGame = null;
+    this.activeGameStartTime = null;
     this.setActivity({
-      details: 'AnyPS5 Studio',
-      state: 'Browsing Games',
+      details: 'In Menus',
+      state: 'Browsing Library',
       assets: {
         large_image: 'anyps5_logo',
         large_text: 'AnyPS5 Studio',
@@ -166,6 +193,8 @@ export class DiscordRpcClient {
     this.isDestroyed = true;
     this.enabled = false;
     this.isConnecting = false;
+    this.activeGame = null;
+    this.activeGameStartTime = null;
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;

@@ -66,6 +66,16 @@ export const RELEASE_HIGHLIGHTS_MAP: Record<string, ReleaseHighlight[]> = {
       title: 'Installer Optimization',
       description: 'Reduced installer download size by over 60% through improved compression and cleaned runtime files.'
     }
+  ],
+  '1.4.0': [
+    {
+      title: 'Discord Rich Presence',
+      description: 'Show your active game, official cover art, and live playtime directly on your Discord profile.'
+    },
+    {
+      title: 'Privacy & Compliance',
+      description: 'Added official Terms of Service and a Privacy Policy confirming zero tracking and that all data stays strictly on your computer.'
+    }
   ]
 };
 
