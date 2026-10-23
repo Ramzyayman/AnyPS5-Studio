@@ -104,6 +104,20 @@ export const RELEASE_HIGHLIGHTS_MAP: Record<string, ReleaseHighlight[]> = {
       title: 'Linux Compatibility',
       description: 'Corrected library load paths and executable permissions.'
     }
+  ],
+  '1.4.5': [
+    {
+      title: 'Core Runtime Stability',
+      description: 'Pinned bundled execution engine and system PRXs to verified upstream v0.1.2 release.'
+    },
+    {
+      title: 'Runtime Cache Purging',
+      description: 'Automatically clears outdated driver files on runtime updates.'
+    },
+    {
+      title: 'Linux Module Resolution',
+      description: 'Fixed library load paths and executable permissions.'
+    }
   ]
 };
 

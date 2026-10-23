@@ -1,154 +1,192 @@
 import argparse
-import json
 import os
 import shutil
 import subprocess
 import sys
+import tarfile
+import urllib.request
+import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-def run_cmd(cmd, check=True):
-    res = subprocess.run(cmd, shell=True, capture_output=True, text=True, cwd=str(ROOT))
-    if check and res.returncode != 0:
-        print(f"Command failed: {cmd}\nStderr: {res.stderr}")
-        sys.exit(res.returncode)
-    return res
+UPSTREAM_VERSION = "v0.1.2"
+WINDOWS_AGC_DRIVER_SIZE = 12989911
 
-def deploy(target_platform):
+RELEASE_ASSETS = {
+    "windows": {
+        "relinker_url": f"https://github.com/boykopovar/AnyPS5/releases/download/{UPSTREAM_VERSION}/relinker-{UPSTREAM_VERSION}.exe",
+        "relinker_bin": "relinker.exe",
+        "prx_url": f"https://github.com/boykopovar/AnyPS5/releases/download/{UPSTREAM_VERSION}/prx-windows-{UPSTREAM_VERSION}.zip",
+        "archive_type": "zip",
+    },
+    "linux": {
+        "relinker_url": f"https://github.com/boykopovar/AnyPS5/releases/download/{UPSTREAM_VERSION}/relinker-{UPSTREAM_VERSION}",
+        "relinker_bin": "relinker",
+        "prx_url": f"https://github.com/boykopovar/AnyPS5/releases/download/{UPSTREAM_VERSION}/prx-linux-{UPSTREAM_VERSION}.tar.gz",
+        "archive_type": "tar.gz",
+    },
+}
+
+def download_file(url: str, dest_path: Path) -> bool:
+    print(f"Downloading {url} -> {dest_path}...")
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+
+    curl_cmd = f'curl -sSL -f --retry 3 --retry-delay 2 -o "{dest_path}" "{url}"'
+    res = subprocess.run(curl_cmd, shell=True, capture_output=True, text=True)
+    if res.returncode == 0 and dest_path.exists() and dest_path.stat().st_size > 0:
+        return True
+
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "AnyPS5-Studio-Deploy/1.4.5"})
+        with urllib.request.urlopen(req, timeout=120) as resp, open(dest_path, "wb") as out:
+            shutil.copyfileobj(resp, out)
+        return dest_path.exists() and dest_path.stat().st_size > 0
+    except Exception as e:
+        print(f"Download failed for {url}: {e}")
+        return False
+
+def deploy(target_platform: str) -> bool:
     is_linux = (target_platform == "linux")
-    artifact_name = "anyps5-upstream-core-linux-x64" if is_linux else "anyps5-upstream-core-windows-x64"
-    relinker_bin_name = "relinker" if is_linux else "relinker.exe"
+    cfg = RELEASE_ASSETS.get(target_platform)
+    if not cfg:
+        print(f"Unsupported target platform: {target_platform}")
+        return False
 
-    res_in_prog = run_cmd("gh run list --workflow build-upstream-core.yml --json databaseId,status", check=False)
-    if res_in_prog.returncode == 0:
-        try:
-            runs_data = json.loads(res_in_prog.stdout)
-            for item in runs_data:
-                if item.get("status") in ("in_progress", "queued"):
-                    in_prog_id = item.get("databaseId")
-                    if in_prog_id:
-                        print(f"Waiting for in-progress core build run #{in_prog_id} to finish...")
-                        run_cmd(f"gh run watch {in_prog_id} --interval 10", check=False)
-                        break
-        except Exception as prog_err:
-            print(f"Warning: Failed to inspect in-progress runs: {prog_err}")
-
-    print(f"Resolving latest '{artifact_name}' artifact from GitHub Actions...")
+    relinker_bin_name = cfg["relinker_bin"]
     temp_dir = ROOT / f"dist-upstream-download-{target_platform}"
     if temp_dir.exists():
-        shutil.rmtree(temp_dir)
+        shutil.rmtree(temp_dir, ignore_errors=True)
     temp_dir.mkdir(parents=True, exist_ok=True)
 
-    downloaded = False
-    candidate_run_id = None
+    print(f"Deploying official upstream core {UPSTREAM_VERSION} for {target_platform}...")
 
-    res_api = run_cmd("gh api repos/ramsforge/AnyPS5-Studio/actions/artifacts", check=False)
-    if res_api.returncode == 0:
-        try:
-            data = json.loads(res_api.stdout)
-            for art in data.get("artifacts", []):
-                if art.get("name") == artifact_name:
-                    candidate_run_id = art.get("workflow_run", {}).get("id")
-                    print(f"Discovered {artifact_name} in workflow run #{candidate_run_id} (created at {art.get('created_at')})")
-                    break
-        except Exception as json_err:
-            print(f"Warning: Failed to parse GitHub API artifact JSON: {json_err}")
+    # 1. Download official relinker binary
+    temp_relinker = temp_dir / relinker_bin_name
+    if not download_file(cfg["relinker_url"], temp_relinker):
+        print(f"ERROR: Failed to download official relinker binary from {cfg['relinker_url']}")
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        return False
 
-    if not candidate_run_id:
-        cmd_runs = 'gh run list --workflow build-upstream-core.yml --status success --limit 10 --json databaseId -q ".[].databaseId"'
-        res_runs = run_cmd(cmd_runs, check=False)
-        for r_id in res_runs.stdout.splitlines():
-            r_id = r_id.strip()
-            if r_id:
-                candidate_run_id = r_id
-                break
+    # 2. Download official PRX archive
+    archive_ext = ".zip" if cfg["archive_type"] == "zip" else ".tar.gz"
+    archive_path = temp_dir / f"prx-archive{archive_ext}"
+    if not download_file(cfg["prx_url"], archive_path):
+        print(f"ERROR: Failed to download official PRX archive from {cfg['prx_url']}")
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        return False
 
-    if candidate_run_id:
-        print(f"Downloading {artifact_name} from run #{candidate_run_id}...")
-        cmd = f'gh run download {candidate_run_id} --name {artifact_name} --dir "{temp_dir}" --repo ramsforge/AnyPS5-Studio'
-        res = run_cmd(cmd, check=False)
-        if res.returncode == 0:
-            downloaded = True
+    # 3. Extract PRX archive
+    extract_dir = temp_dir / "extracted"
+    extract_dir.mkdir(parents=True, exist_ok=True)
+    print(f"Extracting PRX archive ({archive_path.name})...")
+    try:
+        if cfg["archive_type"] == "zip":
+            with zipfile.ZipFile(archive_path, "r") as zf:
+                zf.extractall(extract_dir)
         else:
-            print(f"Warning: Run download for #{candidate_run_id} returned {res.returncode}: {res.stderr.strip()}")
-
-    if not downloaded:
-        print(f"Attempting general artifact download for {artifact_name}...")
-        cmd = f'gh run download --name {artifact_name} --dir "{temp_dir}" --repo ramsforge/AnyPS5-Studio'
-        res = run_cmd(cmd, check=False)
-        if res.returncode == 0:
-            downloaded = True
-
-    if not downloaded:
-        print(f"ERROR: Could not locate or download required CI artifact '{artifact_name}'.")
-        print("Please ensure that the 'Build Upstream Core Binaries' workflow has completed successfully for this platform.")
+            with tarfile.open(archive_path, "r:gz") as tf:
+                tf.extractall(extract_dir)
+    except Exception as extract_err:
+        print(f"ERROR: Failed to extract PRX archive: {extract_err}")
         shutil.rmtree(temp_dir, ignore_errors=True)
         return False
 
-    downloaded_libs = temp_dir / "libs"
-    downloaded_build = temp_dir / "build"
+    # 4. Discover all extracted PRX and runtime libraries
+    extracted_prxs = []
+    for root_path, _, files in os.walk(extract_dir):
+        for f in files:
+            p = Path(root_path) / f
+            lower = f.lower()
+            if lower.endswith(".prx") or lower.endswith(".dll") or lower.endswith(".so"):
+                extracted_prxs.append(p)
 
-    if not downloaded_libs.exists() and (temp_dir / artifact_name).exists():
-        sub = temp_dir / artifact_name
-        if (sub / "libs").exists():
-            downloaded_libs = sub / "libs"
-            downloaded_build = sub / "build"
+    # 5. Validate libSceAgcDriver.prx size on Windows
+    if not is_linux:
+        agc_driver = next((p for p in extracted_prxs if p.name.lower() == "libsceagcdriver.prx"), None)
+        if not agc_driver:
+            print("ERROR: libSceAgcDriver.prx not found in extracted Windows PRX archive!")
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            return False
 
-    if not downloaded_libs.exists():
-        print(f"Error: downloaded artifact structure unexpected in {temp_dir}")
-        shutil.rmtree(temp_dir, ignore_errors=True)
-        return False
+        actual_size = agc_driver.stat().st_size
+        if actual_size != WINDOWS_AGC_DRIVER_SIZE:
+            print(f"ERROR: libSceAgcDriver.prx size validation failed! Expected {WINDOWS_AGC_DRIVER_SIZE} bytes, got {actual_size} bytes.")
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            return False
 
-    src_relinker = downloaded_build / relinker_bin_name
+        print(f"Validated libSceAgcDriver.prx ({actual_size} bytes). Matches official AnyPS5 {UPSTREAM_VERSION}.")
+
+    # 6. Deploy relinker binary
     target_build = ROOT / "build"
     target_build.mkdir(parents=True, exist_ok=True)
-    if src_relinker.exists():
-        dst_bin = target_build / relinker_bin_name
-        shutil.copy2(src_relinker, dst_bin)
+    dst_relinker = target_build / relinker_bin_name
+    shutil.copy2(temp_relinker, dst_relinker)
+    if is_linux:
+        try:
+            os.chmod(dst_relinker, 0o755)
+        except OSError:
+            pass
+    print(f"Deployed {relinker_bin_name} to {dst_relinker}")
+
+    unpacked_build = ROOT / "ui" / "dist-installer" / ("linux-unpacked" if is_linux else "win-unpacked") / "resources" / "build"
+    if unpacked_build.exists():
+        unpacked_dst = unpacked_build / relinker_bin_name
+        shutil.copy2(temp_relinker, unpacked_dst)
         if is_linux:
             try:
-                os.chmod(dst_bin, 0o755)
+                os.chmod(unpacked_dst, 0o755)
             except OSError:
                 pass
-        print(f"Deployed {src_relinker.name} to {dst_bin}")
+        print(f"Deployed {relinker_bin_name} to {unpacked_dst}")
 
-        unpacked_build = ROOT / "ui" / "dist-installer" / ("linux-unpacked" if is_linux else "win-unpacked") / "resources" / "build"
-        if unpacked_build.exists():
-            shutil.copy2(src_relinker, unpacked_build / relinker_bin_name)
-            if is_linux:
-                try:
-                    os.chmod(unpacked_build / relinker_bin_name, 0o755)
-                except OSError:
-                    pass
-            print(f"Deployed {src_relinker.name} to {unpacked_build / relinker_bin_name}")
-
+    # 7. Deploy PRX libraries
     target_libs = ROOT / "libs"
     target_libs.mkdir(parents=True, exist_ok=True)
     unpacked_libs = ROOT / "ui" / "dist-installer" / ("linux-unpacked" if is_linux else "win-unpacked") / "resources" / "libs"
 
     prx_count = 0
     lib_count = 0
-    for item in downloaded_libs.iterdir():
-        if item.is_file():
-            dst = target_libs / item.name
-            shutil.copy2(item, dst)
+    for item in extracted_prxs:
+        dst = target_libs / item.name
+        shutil.copy2(item, dst)
+        if is_linux:
+            try:
+                os.chmod(dst, 0o755)
+            except OSError:
+                pass
+
+        if unpacked_libs.exists():
+            unpacked_dst_lib = unpacked_libs / item.name
+            shutil.copy2(item, unpacked_dst_lib)
             if is_linux:
                 try:
-                    os.chmod(dst, 0o755)
+                    os.chmod(unpacked_dst_lib, 0o755)
                 except OSError:
                     pass
-            if unpacked_libs.exists():
-                shutil.copy2(item, unpacked_libs / item.name)
-                if is_linux:
-                    try:
-                        os.chmod(unpacked_libs / item.name, 0o755)
-                    except OSError:
-                        pass
-            if item.suffix.lower() == '.prx':
-                prx_count += 1
-            elif item.suffix.lower() in ['.dll', '.so']:
-                lib_count += 1
+
+        if item.suffix.lower() == ".prx":
+            prx_count += 1
+        else:
+            lib_count += 1
+
+    # Apply any local PRX/DLL overrides from core/libs/overrides
+    override_candidates = [
+        ROOT / "core" / "libs" / "overrides",
+        ROOT / "ui" / "core" / "libs" / "overrides",
+    ]
+    for cand in override_candidates:
+        if cand.exists() and cand.is_dir():
+            for ov in cand.iterdir():
+                if ov.is_file():
+                    shutil.copy2(ov, target_libs / ov.name)
+                    if is_linux:
+                        try:
+                            os.chmod(target_libs / ov.name, 0o755)
+                        except OSError:
+                            pass
+                    print(f"Applied override: {ov.name}")
+            break
 
     print(f"Successfully deployed {prx_count} PRX libraries and {lib_count} runtime libraries to libs/ and unpacked resources.")
     if prx_count < 50:
@@ -156,11 +194,7 @@ def deploy(target_platform):
         shutil.rmtree(temp_dir, ignore_errors=True)
         return False
 
-    try:
-        shutil.rmtree(temp_dir, ignore_errors=True)
-    except Exception:
-        pass
-
+    shutil.rmtree(temp_dir, ignore_errors=True)
     return True
 
 if __name__ == "__main__":
