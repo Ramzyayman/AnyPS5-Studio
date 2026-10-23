@@ -597,10 +597,10 @@ class ApiBridge {
       runtimes: [
         {
           id: 'bundled',
-          name: 'Bundled Stable (v0.1.2)',
+          name: 'Bundled Stable (v0.1.3)',
           type: 'bundled',
-          commitHash: 'v0.1.2',
-          date: '2026-10-14T08:56:52Z',
+          commitHash: 'v0.1.3',
+          date: '2026-10-20T07:07:31Z',
           path: 'bundled',
           isRemovable: false,
         },
@@ -615,10 +615,10 @@ class ApiBridge {
     return [
       {
         id: 'bundled',
-        name: 'Bundled Stable (v0.1.2)',
+        name: 'Bundled Stable (v0.1.3)',
         type: 'bundled',
-        commitHash: 'v0.1.2',
-        date: '2026-10-14T08:56:52Z',
+        commitHash: 'v0.1.3',
+        date: '2026-10-20T07:07:31Z',
         relinkerPath: 'bundled/relinker.exe',
         libsPath: 'bundled/libs',
         isRemovable: false,
@@ -633,10 +633,10 @@ class ApiBridge {
     }
     return {
       id: runtimeId || 'bundled',
-      name: 'Bundled Stable (v0.1.2)',
+      name: 'Bundled Stable (v0.1.3)',
       type: 'bundled',
-      commitHash: 'v0.1.2',
-      date: '2026-10-14T08:56:52Z',
+      commitHash: 'v0.1.3',
+      date: '2026-10-20T07:07:31Z',
       relinkerPath: 'bundled/relinker.exe',
       libsPath: 'bundled/libs',
       isRemovable: false,

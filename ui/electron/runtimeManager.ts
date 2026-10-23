@@ -89,10 +89,10 @@ export class RuntimeManager {
           runtimes: [
             {
               id: 'bundled',
-              name: 'Bundled Stable (v0.1.2)',
+              name: 'Bundled Stable (v0.1.3)',
               type: 'bundled',
-              commitHash: 'v0.1.2',
-              date: '2026-10-14T08:56:52Z',
+              commitHash: 'v0.1.3',
+              date: '2026-10-20T07:07:31Z',
               path: 'bundled',
               isRemovable: false,
             },
@@ -151,23 +151,28 @@ export class RuntimeManager {
         manifest = this.getManifest();
         let changed = false;
 
-        // Ensure bundled runtime is present and set to v0.1.2 baseline
         const bundled = manifest.runtimes.find((r) => r.id === 'bundled');
+        const needsReseed = !bundled || bundled.commitHash !== 'v0.1.3';
         if (!bundled) {
           manifest.runtimes.unshift({
             id: 'bundled',
-            name: 'Bundled Stable (v0.1.2)',
+            name: 'Bundled Stable (v0.1.3)',
             type: 'bundled',
-            commitHash: 'v0.1.2',
-            date: '2026-10-14T08:56:52Z',
+            commitHash: 'v0.1.3',
+            date: '2026-10-20T07:07:31Z',
             path: 'bundled',
             isRemovable: false,
           });
           changed = true;
-        } else if (bundled.commitHash !== 'v0.1.2') {
-          bundled.commitHash = 'v0.1.2';
-          bundled.name = 'Bundled Stable (v0.1.2)';
+        } else if (bundled.commitHash !== 'v0.1.3') {
+          bundled.commitHash = 'v0.1.3';
+          bundled.name = 'Bundled Stable (v0.1.3)';
+          bundled.date = '2026-10-20T07:07:31Z';
           changed = true;
+        }
+
+        if (needsReseed) {
+          this.seedBundledRuntime(true);
         }
 
         // Ensure local build is registered if local workspace build exists
@@ -201,14 +206,17 @@ export class RuntimeManager {
     }
   }
 
-  private seedBundledRuntime() {
+  private seedBundledRuntime(force = false) {
     try {
       const defaultRelinker = this.defaultRelinkerGetter();
       const defaultLibs = this.defaultLibsGetter();
       const binName = this.getRelinkerBinName();
+      const versionFile = path.join(this.bundledDir, 'version.txt');
+      const currentVersion = fs.existsSync(versionFile) ? fs.readFileSync(versionFile, 'utf8').trim() : '';
+      const shouldUpdate = force || currentVersion !== 'v0.1.3';
 
       const targetRelinker = path.join(this.bundledDir, binName);
-      if (defaultRelinker && fs.existsSync(defaultRelinker) && !fs.existsSync(targetRelinker)) {
+      if (defaultRelinker && fs.existsSync(defaultRelinker) && (shouldUpdate || !fs.existsSync(targetRelinker))) {
         try {
           fs.copyFileSync(defaultRelinker, targetRelinker);
           if (process.platform !== 'win32') {
@@ -225,7 +233,7 @@ export class RuntimeManager {
       }
 
       const currentLibsCount = fs.existsSync(targetLibs) ? fs.readdirSync(targetLibs).length : 0;
-      if (defaultLibs && fs.existsSync(defaultLibs) && currentLibsCount === 0) {
+      if (defaultLibs && fs.existsSync(defaultLibs) && (shouldUpdate || currentLibsCount === 0)) {
         try {
           const files = fs.readdirSync(defaultLibs);
           for (const file of files) {
@@ -244,6 +252,10 @@ export class RuntimeManager {
           console.warn('Failed to seed bundled libs:', copyLibsErr);
         }
       }
+
+      try {
+        fs.writeFileSync(versionFile, 'v0.1.3', 'utf8');
+      } catch {}
     } catch (err) {
       console.warn('Seed bundled runtime warning:', err);
     }
@@ -267,10 +279,10 @@ export class RuntimeManager {
       runtimes: [
         {
           id: 'bundled',
-          name: 'Bundled Stable (v0.1.2)',
+          name: 'Bundled Stable (v0.1.3)',
           type: 'bundled',
-          commitHash: 'v0.1.2',
-          date: '2026-10-14T08:56:52Z',
+          commitHash: 'v0.1.3',
+          date: '2026-10-20T07:07:31Z',
           path: 'bundled',
           isRemovable: false,
         },
@@ -377,9 +389,9 @@ export class RuntimeManager {
     // Ultimate fallback to baseline getters
     return {
       id: 'bundled',
-      name: 'Bundled Stable (v0.1.2) [Fallback]',
+      name: 'Bundled Stable (v0.1.3) [Fallback]',
       type: 'bundled',
-      commitHash: 'v0.1.2',
+      commitHash: 'v0.1.3',
       date: new Date().toISOString(),
       relinkerPath: this.defaultRelinkerGetter(),
       libsPath: this.defaultLibsGetter(),
