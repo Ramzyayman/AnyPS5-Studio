@@ -76,6 +76,12 @@ export const RELEASE_HIGHLIGHTS_MAP: Record<string, ReleaseHighlight[]> = {
       title: 'Privacy & Compliance',
       description: 'Added official Terms of Service and a Privacy Policy confirming zero tracking and that all data stays strictly on your computer.'
     }
+  ],
+  '1.4.1': [
+    {
+      title: 'New App Icon',
+      description: 'Updated the launcher, taskbar, desktop shortcut, and installer to the new PlayStation badge logo.'
+    }
   ]
 };
 
