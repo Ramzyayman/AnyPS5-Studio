@@ -322,7 +322,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
                 <div className="flex items-center justify-between text-xs">
                   <span className="text-white/60">Active Profile</span>
                   <span className="font-semibold text-white">
-                    {activeRuntime?.name || 'Bundled Stable (v0.1.3)'}
+                    {activeRuntime?.name || 'Bundled Stable (v0.1.2)'}
                   </span>
                 </div>
                 <div className="flex items-center justify-between text-xs">

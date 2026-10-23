@@ -89,10 +89,10 @@ export class RuntimeManager {
           runtimes: [
             {
               id: 'bundled',
-              name: 'Bundled Stable (v0.1.3)',
+              name: 'Bundled Stable (v0.1.2)',
               type: 'bundled',
-              commitHash: 'v0.1.3',
-              date: '2026-10-20T07:07:31Z',
+              commitHash: 'v0.1.2',
+              date: '2026-10-14T08:56:52Z',
               path: 'bundled',
               isRemovable: false,
             },
@@ -152,22 +152,22 @@ export class RuntimeManager {
         let changed = false;
 
         const bundled = manifest.runtimes.find((r) => r.id === 'bundled');
-        const needsReseed = !bundled || bundled.commitHash !== 'v0.1.3';
+        const needsReseed = !bundled || bundled.commitHash !== 'v0.1.2';
         if (!bundled) {
           manifest.runtimes.unshift({
             id: 'bundled',
-            name: 'Bundled Stable (v0.1.3)',
+            name: 'Bundled Stable (v0.1.2)',
             type: 'bundled',
-            commitHash: 'v0.1.3',
-            date: '2026-10-20T07:07:31Z',
+            commitHash: 'v0.1.2',
+            date: '2026-10-14T08:56:52Z',
             path: 'bundled',
             isRemovable: false,
           });
           changed = true;
-        } else if (bundled.commitHash !== 'v0.1.3') {
-          bundled.commitHash = 'v0.1.3';
-          bundled.name = 'Bundled Stable (v0.1.3)';
-          bundled.date = '2026-10-20T07:07:31Z';
+        } else if (bundled.commitHash !== 'v0.1.2') {
+          bundled.commitHash = 'v0.1.2';
+          bundled.name = 'Bundled Stable (v0.1.2)';
+          bundled.date = '2026-10-14T08:56:52Z';
           changed = true;
         }
 
@@ -213,7 +213,7 @@ export class RuntimeManager {
       const binName = this.getRelinkerBinName();
       const versionFile = path.join(this.bundledDir, 'version.txt');
       const currentVersion = fs.existsSync(versionFile) ? fs.readFileSync(versionFile, 'utf8').trim() : '';
-      const shouldUpdate = force || currentVersion !== 'v0.1.3';
+      const shouldUpdate = force || currentVersion !== 'v0.1.2';
 
       const targetRelinker = path.join(this.bundledDir, binName);
       if (defaultRelinker && fs.existsSync(defaultRelinker) && (shouldUpdate || !fs.existsSync(targetRelinker))) {
@@ -254,7 +254,7 @@ export class RuntimeManager {
       }
 
       try {
-        fs.writeFileSync(versionFile, 'v0.1.3', 'utf8');
+        fs.writeFileSync(versionFile, 'v0.1.2', 'utf8');
       } catch {}
     } catch (err) {
       console.warn('Seed bundled runtime warning:', err);
@@ -279,10 +279,10 @@ export class RuntimeManager {
       runtimes: [
         {
           id: 'bundled',
-          name: 'Bundled Stable (v0.1.3)',
+          name: 'Bundled Stable (v0.1.2)',
           type: 'bundled',
-          commitHash: 'v0.1.3',
-          date: '2026-10-20T07:07:31Z',
+          commitHash: 'v0.1.2',
+          date: '2026-10-14T08:56:52Z',
           path: 'bundled',
           isRemovable: false,
         },
@@ -389,9 +389,9 @@ export class RuntimeManager {
     // Ultimate fallback to baseline getters
     return {
       id: 'bundled',
-      name: 'Bundled Stable (v0.1.3) [Fallback]',
+      name: 'Bundled Stable (v0.1.2) [Fallback]',
       type: 'bundled',
-      commitHash: 'v0.1.3',
+      commitHash: 'v0.1.2',
       date: new Date().toISOString(),
       relinkerPath: this.defaultRelinkerGetter(),
       libsPath: this.defaultLibsGetter(),

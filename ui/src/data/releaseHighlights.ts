@@ -88,6 +88,12 @@ export const RELEASE_HIGHLIGHTS_MAP: Record<string, ReleaseHighlight[]> = {
       title: 'Core Update',
       description: 'Upgraded the built-in relinker and system libraries to the latest stable release (v0.1.3).'
     }
+  ],
+  '1.4.3': [
+    {
+      title: 'Core Stability Rollback',
+      description: 'Reverted the default bundled runtime to AnyPS5 v0.1.2 due to an upstream graphics driver issue in v0.1.3.'
+    }
   ]
 };
 
